@@ -1,0 +1,28 @@
+## microservices
+fastapi[standard]
+fastapi-users[beanie]
+uvicorn
+pydantic-settings
+
+# AI and OpenAI integration
+openai
+
+# HTTPX fix for OpenAI
+httpx==0.27.2
+
+# Async and event loop tools
+asyncio==3.4.3
+tenacity==8.5.0
+websockets
+pyaudio
+python-socks
+pipwin
+
+# python helpers
+yfinance
+plotly
+python-dotenv
+
+# ui
+streamlit==1.39.0
+streamlit-chat==0.1.1
