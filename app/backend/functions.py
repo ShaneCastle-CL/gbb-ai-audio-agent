@@ -16,33 +16,60 @@ from typing import Any, Dict, Optional
 
 # Patients and their basic information
 patients_db: Dict[str, Dict[str, str]] = {
-    "John Doe": {"dob": "1985-06-15", "patient_id": "P12345", "phone": "555-1234"},
-    "Jane Smith": {"dob": "1990-09-30", "patient_id": "P67890", "phone": "555-5678"},
+    "Alice Brown": {"dob": "1987-04-12", "patient_id": "P54321", "phone": "555-4321"},
+    "Bob Johnson": {"dob": "1992-11-25", "patient_id": "P98765", "phone": "555-8765"},
+    "Charlie Davis": {"dob": "1980-01-15", "patient_id": "P11223", "phone": "555-1122"},
+    "Diana Evans": {"dob": "1995-07-08", "patient_id": "P33445", "phone": "555-3344"},
+    "Ethan Foster": {"dob": "1983-03-22", "patient_id": "P55667", "phone": "555-5566"},
+    "Fiona Green": {"dob": "1998-09-10", "patient_id": "P77889", "phone": "555-7788"},
+    "George Harris": {"dob": "1975-12-05", "patient_id": "P99001", "phone": "555-9900"},
+    "Hannah Irving": {"dob": "1989-06-30", "patient_id": "P22334", "phone": "555-2233"},
+    "Ian Jackson": {"dob": "1993-02-18", "patient_id": "P44556", "phone": "555-4455"},
+    "Julia King": {"dob": "1986-08-14", "patient_id": "P66778", "phone": "555-6677"},
 }
 
 # Patient medications and refill info
 prescriptions_db: Dict[str, Dict[str, Dict[str, str]]] = {
-    "John Doe": {"Lipitor": {"last_refill": "2024-03-01", "pharmacy": "City Pharmacy"}},
-    "Jane Smith": {"Synthroid": {"last_refill": "2024-02-20", "pharmacy": "Town Pharmacy"}},
+    "Alice Brown": {"Metformin": {"last_refill": "2024-03-01", "pharmacy": "City Pharmacy"}},
+    "Bob Johnson": {"Atorvastatin": {"last_refill": "2024-02-20", "pharmacy": "Town Pharmacy"}},
+    "Charlie Davis": {"Lisinopril": {"last_refill": "2024-01-15", "pharmacy": "Central Pharmacy"}},
+    "Diana Evans": {"Omeprazole": {"last_refill": "2024-03-05", "pharmacy": "East Pharmacy"}},
+    "Ethan Foster": {"Amlodipine": {"last_refill": "2024-02-28", "pharmacy": "West Pharmacy"}},
+    "Fiona Green": {"Levothyroxine": {"last_refill": "2024-03-10", "pharmacy": "North Pharmacy"}},
+    "George Harris": {"Simvastatin": {"last_refill": "2024-01-25", "pharmacy": "South Pharmacy"}},
+    "Hannah Irving": {"Losartan": {"last_refill": "2024-02-15", "pharmacy": "Downtown Pharmacy"}},
+    "Ian Jackson": {"Hydrochlorothiazide": {"last_refill": "2024-03-12", "pharmacy": "Uptown Pharmacy"}},
+    "Julia King": {"Gabapentin": {"last_refill": "2024-03-08", "pharmacy": "Suburban Pharmacy"}},
 }
 
 # Medication information
 medications_info_db: Dict[str, str] = {
-    "Lipitor": "Lipitor is used to lower cholesterol. Common side effects include muscle pain and digestive issues.",
-    "Synthroid": "Synthroid is used to treat hypothyroidism. Side effects may include weight loss, heat sensitivity, and insomnia.",
+    "Metformin": "Metformin is used to treat type 2 diabetes. Common side effects include nausea and diarrhea.",
+    "Atorvastatin": "Atorvastatin is used to lower cholesterol. Side effects may include muscle pain and digestive issues.",
+    "Lisinopril": "Lisinopril is used to treat high blood pressure. Side effects may include dizziness and dry cough.",
+    "Omeprazole": "Omeprazole is used to treat acid reflux. Side effects may include headache and abdominal pain.",
+    "Amlodipine": "Amlodipine is used to treat high blood pressure. Side effects may include swelling and fatigue.",
+    "Levothyroxine": "Levothyroxine is used to treat hypothyroidism. Side effects may include weight loss and heat sensitivity.",
+    "Simvastatin": "Simvastatin is used to lower cholesterol. Side effects may include muscle pain and liver issues.",
+    "Losartan": "Losartan is used to treat high blood pressure. Side effects may include dizziness and back pain.",
+    "Hydrochlorothiazide": "Hydrochlorothiazide is used to treat fluid retention. Side effects may include increased urination and dizziness.",
+    "Gabapentin": "Gabapentin is used to treat nerve pain. Side effects may include drowsiness and dizziness.",
 }
 
 _fake_user_database = [
-    {"first_name": "John", "last_name": "Doe", "phone_number": "1234567890"},
-    {"first_name": "Jane", "last_name": "Smith", "phone_number": "9876543210"},
     {"first_name": "Alice", "last_name": "Brown", "phone_number": "5551234567"},
+    {"first_name": "Bob", "last_name": "Johnson", "phone_number": "5559876543"},
+    {"first_name": "Charlie", "last_name": "Davis", "phone_number": "5551122334"},
+    {"first_name": "Diana", "last_name": "Evans", "phone_number": "5553344556"},
+    {"first_name": "Ethan", "last_name": "Foster", "phone_number": "5555566778"},
+    {"first_name": "Fiona", "last_name": "Green", "phone_number": "5557788990"},
+    {"first_name": "George", "last_name": "Harris", "phone_number": "5559900112"},
+    {"first_name": "Hannah", "last_name": "Irving", "phone_number": "5552233445"},
+    {"first_name": "Ian", "last_name": "Jackson", "phone_number": "5554455667"},
+    {"first_name": "Julia", "last_name": "King", "phone_number": "5556677889"},
 ]
 
-# ------------------------------------------
 # Functions
-# ------------------------------------------
-
-
 # ----------------------------------------
 # New: User Authentication Tool
 # ----------------------------------------

@@ -124,7 +124,10 @@ stt_aoai_3:
 	python app/backend/app2.py
 
 stt_aoai_4: 
-	python app/backend/app2.py
+	python app/backend/app_local.py
+
+stt_aoai_5: 
+	python app/backend/app_local_visual.py
 
 run_pylint:
 	@echo "Running linter"

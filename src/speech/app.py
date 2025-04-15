@@ -67,28 +67,24 @@ def handle_speech_recognition() -> str:
     all_text_live = ""
     last_final_text = None
 
+    # Adjusting the partial callback to avoid immediate TTS stop
     def on_partial(text: str) -> None:
-        """
-        Callback for partial recognition events. Updates partial text buffer
-        and stops TTS so the user can speak immediately.
-        """
         global all_text_live
         all_text_live = text
         logger.debug(f"Partial recognized: {text}")
-        # Interrupt ongoing speech synthesis
-        az_speach_synthesizer_client.stop_speaking()
+        # Commenting out immediate TTS stop to allow full input accumulation
+        # az_speech_synthesizer_client.stop_speaking()
 
     def on_final(text: str) -> None:
-        """
-        Callback for final recognition events. Adds the final text to the
-        final transcripts buffer and resets the partial buffer.
-        """
         global all_text_live, final_transcripts, last_final_text
         if text and text != last_final_text:
             final_transcripts.append(text)
             last_final_text = text
             all_text_live = ""
             logger.info(f"Finalized text: {text}")
+
+    az_speech_recognizer_client.set_partial_result_callback(on_partial)
+    az_speech_recognizer_client.set_final_result_callback(on_final)
 
     # Attach the callbacks to the recognizer
     az_speech_recognizer_client.set_partial_result_callback(on_partial)

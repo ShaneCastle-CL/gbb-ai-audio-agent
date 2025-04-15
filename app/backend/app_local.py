@@ -20,7 +20,7 @@ from utils.ml_logging import get_logger
 
 # === Conversation Settings ===
 STOP_WORDS = ["goodbye", "exit", "stop", "see you later", "bye"]
-SILENCE_THRESHOLD = 10
+SILENCE_THRESHOLD = 90
 
 # === Runtime Buffers ===
 all_text_live = ""
@@ -48,11 +48,11 @@ az_openai_client = AzureOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     api_key=os.getenv("AZURE_OPENAI_KEY"),
 )
-az_speech_recognizer_client = StreamingSpeechRecognizer(vad_silence_timeout_ms=3000)
+az_speech_recognizer_client = StreamingSpeechRecognizer(vad_silence_timeout_ms=6000)
 az_speech_synthesizer_client = SpeechSynthesizer()
 
 SPEECH_KEY = os.getenv("SPEECH_KEY")
-SPEECH_REGION = os.getenv("SPEECH_REGION")
+SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
 
 tts_sentence_end = [".", "!", "?", ";", "。", "！", "？", "；", "\n"]
 
@@ -177,7 +177,7 @@ async def main() -> None:
                         if function_to_call:
                             result = await function_to_call(parsed_args)
 
-                            logger.info(f"✅ Function `{tool_name}` executed. Result: {result}")
+                            logger.info(f"✅ Function {tool_name} executed. Result: {result}")
 
                             conversation_history.append({
                                 "tool_call_id": tool_id,

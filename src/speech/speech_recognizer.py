@@ -214,4 +214,3 @@ class StreamingSpeechRecognizer:
         Handler for session-stopped events (end of the session).
         """
         logger.info("Session stopped: %s", evt)
-    

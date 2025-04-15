@@ -1,56 +1,44 @@
 import os
 import azure.cognitiveservices.speech as speechsdk
-from azure.cognitiveservices.speech import SpeechConfig
 from azure.cognitiveservices.speech.audio import AudioOutputConfig
 from dotenv import load_dotenv
 from utils.ml_logging import get_logger
 
-# Set up logger
 logger = get_logger()
-
-# Load environment variables
 load_dotenv()
 
 class SpeechSynthesizer:
-    def __init__(self, key: str = None, region: str = None):
+    def __init__(self, key: str = None, region: str = None, language: str = "en-US", voice: str = "en-US-JennyMultilingualNeural"):
         self.key = key if key is not None else os.getenv("AZURE_SPEECH_KEY")
         self.region = region if region is not None else os.getenv("AZURE_SPEECH_REGION")
-        self.synthesizer = self.create_speech_synthesizer()
+        self.language = language
+        self.voice = voice  
+        self.synthesizer = self.create_speech_components()
 
-    def create_speech_synthesizer(self) -> speechsdk.SpeechSynthesizer:
-        speech_config = SpeechConfig(subscription=self.key, region=self.region)
+    def create_speech_components(self):
+        speech_config = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
+        speech_config.speech_recognition_language = self.language
 
-        # Important: optimize audio format to compressed PCM for faster delivery
         audio_config = AudioOutputConfig(use_default_speaker=True)
 
-        # Select compressed format (optional, default still works fine)
-        speech_config.set_speech_synthesis_output_format(
-            speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm
-        )
+        # Optionally, set a compressed audio format for faster synthesis.
+        speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm)
 
-        # Pick a low latency voice (Neural voice)
-        speech_config.speech_synthesis_voice_name = "en-US-JennyNeural"
+        print(f"Using voice: {self.voice}")
+        # Ensure the voice is passed as a string.
+        speech_config.speech_synthesis_voice_name = self.voice
 
-        return speechsdk.SpeechSynthesizer(
-            speech_config=speech_config, audio_config=audio_config
-        )
+        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+        return speech_synthesizer
 
     def start_speaking_text(self, text: str) -> None:
-        """
-        Start speaking text asynchronously without blocking.
-        (Low latency mode: streaming starts immediately)
-        """
         try:
             logger.info(f"[🔊] Starting streaming speech synthesis for text: {text[:30]}...")
-            # Stream output immediately, don't wait for full text
             self.synthesizer.start_speaking_text_async(text)
         except Exception as e:
-            logger.error(f"[❗] Error starting streaming speech: {e}")
+            logger.error(f"[❗] Error starting streaming speech synthesis: {e}")
 
     def stop_speaking(self) -> None:
-        """
-        Immediately stop any ongoing speech synthesis.
-        """
         try:
             logger.info("[🛑] Stopping speech synthesis...")
             self.synthesizer.stop_speaking_async()
