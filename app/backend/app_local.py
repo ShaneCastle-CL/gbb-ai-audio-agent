@@ -51,9 +51,6 @@ az_openai_client = AzureOpenAI(
 az_speech_recognizer_client = StreamingSpeechRecognizer(vad_silence_timeout_ms=6000)
 az_speech_synthesizer_client = SpeechSynthesizer()
 
-SPEECH_KEY = os.getenv("SPEECH_KEY")
-SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION")
-
 tts_sentence_end = [".", "!", "?", ";", "。", "！", "？", "；", "\n"]
 
 def check_for_stopwords(prompt: str) -> bool:
@@ -67,19 +64,19 @@ def handle_speech_recognition() -> str:
     all_text_live = ""
     last_final_text = None
 
-    def on_partial(text: str) -> None:
+    def on_partial(text: str):
         global all_text_live
+        logger.info(f"Partial: {text}")
         all_text_live = text
-        logger.debug(f"Partial recognized: {text}")
-        az_speech_synthesizer_client.stop_speaking()
 
-    def on_final(text: str) -> None:
-        global all_text_live, final_transcripts, last_final_text
-        if text and text != last_final_text:
-            final_transcripts.append(text)
-            last_final_text = text
-            all_text_live = ""
-            logger.info(f"Finalized text: {text}")
+    def on_final(text: str):
+        global all_text_live, last_final_text
+        if text == last_final_text:
+            return
+        last_final_text = text
+        logger.info(f"Final: {text}")
+        final_transcripts.append(text)
+        all_text_live = ""  # Clear the live buffer
 
     az_speech_recognizer_client.set_partial_result_callback(on_partial)
     az_speech_recognizer_client.set_final_result_callback(on_final)

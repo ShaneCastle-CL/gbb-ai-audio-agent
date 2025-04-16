@@ -1,266 +1,288 @@
-// app.js
+/*******************************************************
+ *  app.js
+ *  -----------------------------------------
+ *  1) Uses Azure Speech SDK in the browser for STT.
+ *  2) Sends recognized text to FastAPI via WebSocket.
+ *  3) Receives GPT text + TTS audio from FastAPI.
+ *  4) Plays TTS audio in the browser.
+ ******************************************************/
+
+// -- DOM Elements -------------------------------------
 const toggleButton = document.getElementById('toggleButton');
 const statusMessage = document.getElementById('statusMessage');
+const transcriptDiv = document.getElementById('transcript');
 const reportDiv = document.getElementById('report');
 
+// -- Azure Speech Credentials (Replace with your actual keys/region!) --
+const AZURE_SPEECH_KEY = 'F6zQV5w4v1of7O3a2aP2ewo0O9S20shpfNuyDRGuZvnddB5p6x20JQQJ99BCACYeBjFXJ3w3AAAYACOGyNZA';
+const AZURE_SPEECH_REGION = 'eastus'; // e.g. "eastus"
+
+// -- App State ----------------------------------------
 let isRecording = false;
-let websocket = null;
+let speechRecognizer = null; // Will hold Azure STT recognizer
+let websocket = null;        // Will hold the WebSocket to server
+
+// We'll create an AudioContext for playing TTS from server
 let audioContext = null;
-let mediaStream = null;
-let mediaProcessor = null;
 let audioQueueTime = 0;
+let assistantAudioSources = []; // Keep track of audio sources for TTS playback
 
-// Optional: client-side VAD parameters (currently not in active use)
-let speaking = false;
-const VAD_THRESHOLD = 0.01; // Adjust this threshold as needed
+// -- Event Listeners -----------------------------------
+toggleButton.addEventListener('click', onToggleListening);
 
-// Start continuous recording and stream audio buffers to the backend.
-async function startRecording() {
-  isRecording = true;
-  toggleButton.textContent = 'Stop Conversation';
-  statusMessage.textContent = 'Recording...';
-
-  // Initialize AudioContext if not already done.
-  if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-    audioQueueTime = audioContext.currentTime;
+// =====================================================
+// 1) Start or Stop the Conversation
+// =====================================================
+async function onToggleListening() {
+  if (!isRecording) {
+    await startRecognition();
+  } else {
+    stopRecognition();
   }
+}
 
-  // Open WebSocket connection to the backend's continuous audio endpoint.
-  const mainHost = window.location.host;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  websocket = new WebSocket(`${protocol}//${mainHost}/realtime`);
+// =====================================================
+// 2) Start Client-Side STT & Open WebSocket
+// =====================================================
+async function startRecognition() {
+  if (isRecording) return; // prevent double-start
+  isRecording = true;
 
-  websocket.onopen = () => {
-    console.log('WebSocket connection opened');
-    // Send an initial session update if desired.
-    const sessionUpdate = {
-      type: 'session.update',
-      session: {
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.7,          // Adjust if necessary
-          prefix_padding_ms: 300,  // Adjust if necessary
-          silence_duration_ms: 500 // Adjust as needed
-        }
-      }
-    };
-    websocket.send(JSON.stringify(sessionUpdate));
+  toggleButton.textContent = 'Stop Conversation';
+  statusMessage.textContent = 'Starting lol...';
+
+  // ----------------------------------------------------
+  // A) Initialize Azure Speech in the Browser
+  // ----------------------------------------------------
+  // This portion uses the Microsoft Cognitive Services Speech SDK
+  // that's loaded from the CDN. The global object is `window.SpeechSDK`.
+  const speechConfig = window.SpeechSDK.SpeechConfig.fromSubscription(
+    AZURE_SPEECH_KEY,
+    AZURE_SPEECH_REGION
+  );
+  speechConfig.speechRecognitionLanguage = 'en-US';
+
+  // Use the default microphone
+  const audioConfig = window.SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+  // Create the recognizer
+  speechRecognizer = new window.SpeechSDK.SpeechRecognizer(speechConfig, audioConfig);
+
+  // Partial results
+  speechRecognizer.recognizing = (s, e) => {
+    statusMessage.textContent = 'Recognizing: ' + e.result.text;
   };
 
-  websocket.onmessage = (event) => {
-    const message = JSON.parse(event.data);
-    console.log('Received message:', message);
-    handleWebSocketMessage(message);
-  };
+  // Final recognized results
+  speechRecognizer.recognized = (s, e) => {
+    if (!e.result.text) return;
+    const userText = e.result.text.trim();
+    appendTranscript('User', userText);
+    console.log('Final recognized:', userText);
 
-  websocket.onerror = (event) => {
-    console.error('WebSocket error:', event);
-  };
-
-  websocket.onclose = () => {
-    console.log('WebSocket connection closed');
-    if (isRecording) {
-      stopRecording();
+    // Send recognized text to backend
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+      websocket.send(JSON.stringify({ text: userText }));
     }
   };
 
-  // Start capturing audio from the microphone.
-  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const source = audioContext.createMediaStreamSource(mediaStream);
+  // Actually start continuous recognition
+  speechRecognizer.startContinuousRecognitionAsync(
+    () => {
+      console.log('Azure STT started.');
+      statusMessage.textContent = 'Recording...';
+    },
+    (err) => {
+      console.error('Azure STT error:', err);
+      statusMessage.textContent = 'Error starting Azure STT.';
+    }
+  );
 
-  // Create a ScriptProcessor for capturing audio data. Note that the buffer size (4096) may be tuned.
-  mediaProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-  source.connect(mediaProcessor);
-  mediaProcessor.connect(audioContext.destination);
-
-  mediaProcessor.onaudioprocess = (e) => {
-    const inputData = e.inputBuffer.getChannelData(0);
-    // Convert the Float32Array audio data to an Int16Array
-    const int16Data = float32ToInt16(inputData);
-    // Convert the Int16Array to a Base64 string
-    const base64Audio = int16ToBase64(int16Data);
-    // Build an audio message to send to the backend.
-    const audioCommand = {
-      type: 'input_audio_buffer.append',
-      audio: base64Audio
-    };
-    websocket.send(JSON.stringify(audioCommand));
-
-    // Optional: if you’d like to detect voice activity on the client side, uncomment and adjust:
-    // const isUserSpeaking = detectSpeech(inputData);
-    // if (isUserSpeaking && !speaking) {
-    //     speaking = true;
-    //     console.log('User started speaking');
-    //     // Optionally, stop any playback from the assistant.
-    // } else if (!isUserSpeaking && speaking) {
-    //     speaking = false;
-    //     console.log('User stopped speaking');
-    // }
-  };
+  // ----------------------------------------------------
+  // B) Open WebSocket to your FastAPI "/realtime" route
+  // ----------------------------------------------------
+  setupWebSocket();
 }
 
-function stopRecording() {
+// =====================================================
+// 3) Stop Client-Side STT & Close WebSocket
+// =====================================================
+function stopRecognition() {
   isRecording = false;
   toggleButton.textContent = 'Start Conversation';
   statusMessage.textContent = 'Stopped';
 
-  if (mediaProcessor) {
-    mediaProcessor.disconnect();
-    mediaProcessor.onaudioprocess = null;
+  // Stop STT
+  if (speechRecognizer) {
+    speechRecognizer.stopContinuousRecognitionAsync(
+      () => console.log('Azure STT stopped.'),
+      (err) => console.error('Error stopping STT:', err)
+    );
+    speechRecognizer = null;
   }
 
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(track => track.stop());
-    mediaStream = null;
-  }
-
-  if (websocket) {
+  // Close WS
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
     websocket.close();
-    websocket = null;
   }
+  websocket = null;
 }
 
-function onToggleListening() {
-  if (!isRecording) {
-    startRecording();
-  } else {
-    stopRecording();
+// =====================================================
+// 4) Setup WebSocket to FastAPI
+// =====================================================
+function setupWebSocket() {
+  if (websocket) {
+    // If there's an existing WebSocket, close it
+    try {
+      websocket.close();
+    } catch (e) {
+      console.error('Error closing existing WebSocket:', e);
+    }
   }
+
+  const mainHost = window.location.host; // e.g. localhost:8010
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${mainHost}/realtime`;
+
+  websocket = new WebSocket(wsUrl);
+
+  websocket.onopen = () => {
+    console.log('WebSocket connected to:', wsUrl);
+  };
+
+  websocket.onerror = (err) => {
+    console.error('WebSocket error:', err);
+  };
+
+  websocket.onclose = () => {
+    console.log('WebSocket closed');
+    // If user is still "recording", stop
+    if (isRecording) {
+      stopRecognition();
+    }
+  };
+
+  websocket.onmessage = (event) => {
+    // Our server sends JSON messages. Let's parse them:
+    handleServerMessage(event.data);
+  };
 }
 
-// No phone call functionality is included in this MVP
-// Remove or comment out the onCallButton function and its event listener if not used.
-// function onCallButton() { ... }
+// =====================================================
+// 5) Handle Inbound Messages from Server
+// =====================================================
+function handleServerMessage(rawData) {
+  let msg;
+  try {
+    msg = JSON.parse(rawData);
+  } catch (err) {
+    console.warn('Got non-JSON data from server:', rawData);
+    return;
+  }
 
-toggleButton.addEventListener('click', onToggleListening);
-// If call button exists in your HTML and is not needed, remove the following line:
-// callButton.addEventListener('click', onCallButton);
+  switch (msg.type) {
+    case 'status':
+      // e.g. greeting from server
+      appendTranscript('Assistant', msg.message);
+      break;
 
-// Handler for incoming WebSocket messages from the backend.
-function handleWebSocketMessage(message) {
-  switch (message.type) {
-    case 'response.audio.delta':
-      if (message.delta) {
-        playAudio(message.delta);
+    case 'assistant':
+      // GPT text
+      appendTranscript('Assistant', msg.content);
+      break;
+
+    case 'exit':
+      // Server instructs to stop
+      appendTranscript('Assistant', msg.message);
+      stopRecognition();
+      break;
+
+    case 'tts_base64':
+      // TTS audio data
+      if (msg.audio) {
+        playBase64Audio(msg.audio);
       }
       break;
-    case 'response.done':
-      console.log('Response done');
+
+    case 'tool_result':
+      // If the server returns a tool result or a "report"
+      displayReport(msg.result);
       break;
-    case 'extension.middle_tier_tool_response':
-      if (message.tool_name === 'generate_report') {
-        const report = JSON.parse(message.tool_result);
-        displayReport(report);
-      }
-      break;
-    case 'input_audio_buffer.speech_started':
-      // If user starts speaking during playback, stop the assistant's audio.
-      stopAssistantAudio();
-      break;
-    case 'error':
-      console.error('Error message from server:', JSON.stringify(message, null, 2));
-      break;
+
     default:
-      console.log('Unhandled message type:', message.type);
+      console.log('Unhandled message type:', msg.type, msg);
   }
 }
 
-let assistantAudioSources = [];
+// =====================================================
+// 6) Display Transcript & Reports in the DOM
+// =====================================================
+function appendTranscript(speaker, text) {
+  const newLine = document.createElement('div');
+  newLine.textContent = speaker + ': ' + text;
+  transcriptDiv.appendChild(newLine);
+}
 
-function playAudio(base64Audio) {
+function displayReport(report) {
+  if (typeof report === 'object') {
+    reportDiv.textContent = JSON.stringify(report, null, 2);
+  } else {
+    reportDiv.textContent = String(report);
+  }
+}
+
+// =====================================================
+// 7) Play TTS Audio from Base64
+// =====================================================
+function playBase64Audio(base64Audio) {
+  // Convert base64 => bytes
   const binary = atob(base64Audio);
   const len = binary.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  const int16Array = new Int16Array(bytes.buffer);
-  const float32Array = int16ToFloat32(int16Array);
 
+  // Create or reuse AudioContext
   if (!audioContext) {
-    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    audioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 24000, // depends on what your TTS returns
+    });
     audioQueueTime = audioContext.currentTime;
   }
 
-  const audioBuffer = audioContext.createBuffer(1, float32Array.length, 24000);
-  audioBuffer.copyToChannel(float32Array, 0);
+  // decodeAudioData can handle WAV or other audio formats if properly encoded
+  audioContext.decodeAudioData(bytes.buffer).then((audioBuffer) => {
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
 
-  const source = audioContext.createBufferSource();
-  source.buffer = audioBuffer;
-  source.connect(audioContext.destination);
+    // Queue up so multiple TTS chunks don't overlap
+    const currentTime = audioContext.currentTime;
+    const startTime = Math.max(audioQueueTime, currentTime + 0.05);
+    source.start(startTime);
 
-  const currentTime = audioContext.currentTime;
-  const startTime = Math.max(audioQueueTime, currentTime + 0.1);
-  source.start(startTime);
+    assistantAudioSources.push(source);
+    audioQueueTime = startTime + audioBuffer.duration;
 
-  assistantAudioSources.push(source);
-  audioQueueTime = startTime + audioBuffer.duration;
-
-  source.onended = () => {
-    assistantAudioSources = assistantAudioSources.filter(s => s !== source);
-  };
+    source.onended = () => {
+      assistantAudioSources = assistantAudioSources.filter((s) => s !== source);
+    };
+  }).catch((err) => {
+    console.error('Error decoding audio:', err);
+  });
 }
 
+// If you want a method to stop TTS playback mid-sentence:
 function stopAssistantAudio() {
-  assistantAudioSources.forEach(source => {
+  assistantAudioSources.forEach((source) => {
     try {
       source.stop();
-    } catch (e) {
-      console.error('Error stopping audio source:', e);
+    } catch (err) {
+      console.error('Error stopping audio source:', err);
     }
   });
   assistantAudioSources = [];
   audioQueueTime = audioContext ? audioContext.currentTime : 0;
-}
-
-function displayReport(report) {
-  reportDiv.textContent = JSON.stringify(report, null, 2);
-}
-
-function float32ToInt16(float32Array) {
-  const int16Array = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
-    int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  return int16Array;
-}
-
-function int16ToBase64(int16Array) {
-  const byteArray = new Uint8Array(int16Array.buffer);
-  let binary = '';
-  for (let i = 0; i < byteArray.byteLength; i++) {
-    binary += String.fromCharCode(byteArray[i]);
-  }
-  return btoa(binary);
-}
-
-function int16ToFloat32(int16Array) {
-  const float32Array = new Float32Array(int16Array.length);
-  for (let i = 0; i < int16Array.length; i++) {
-    const intVal = int16Array[i];
-    const floatVal = intVal < 0 ? intVal / 0x8000 : intVal / 0x7FFF;
-    float32Array[i] = floatVal;
-  }
-  return float32Array;
-}
-
-function detectSpeech(inputData) {
-  let sumSquares = 0;
-  for (let i = 0; i < inputData.length; i++) {
-    sumSquares += inputData[i] * inputData[i];
-  }
-  const rms = Math.sqrt(sumSquares / inputData.length);
-  return rms > VAD_THRESHOLD;
-}
-
-function updateVoiceOnServer(selectedVoice) {
-  fetch('/update-voice', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ voice: selectedVoice }),
-  });
 }

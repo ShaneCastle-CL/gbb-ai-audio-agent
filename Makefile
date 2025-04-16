@@ -129,6 +129,9 @@ stt_aoai_4:
 stt_aoai_5: 
 	python app/backend/app_local_visual.py
 
+stt_aoai_prod: 
+	python app/backend/server.py
+
 run_pylint:
 	@echo "Running linter"
 	find . -type f -name "*.py" ! -path "./tests/*" | xargs pylint -disable=logging-fstring-interpolation > utils/pylint_report/pylint_report.txt
