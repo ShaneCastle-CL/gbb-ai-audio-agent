@@ -39,7 +39,7 @@ If you're new to Azure AI Speech and Azure OenAI, specilaly on the realtime real
 
 This use case demonstrates how to deliver real-time, AI-powered healthcare conversations using Azure and OpenAI services. It transforms natural patient voice interactions into structured, actionable outcomes by orchestrating multiple services into one seamless agentic system.
 
-![alt text](utils\images\arch.png)
+![alt text](utils/images/arch.png)
 
 1. **Audio Ingestion via Web Service**: Stream audio through a browser-based into a WebSocket connection.  
 2. **Azure Speech-to-Text (STT)**: Converts live audio into transcribed text for LLM processing.  
