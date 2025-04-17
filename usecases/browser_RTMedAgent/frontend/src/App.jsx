@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AudioConfig, SpeechConfig, SpeechRecognizer } from 'microsoft-cognitiveservices-speech-sdk';
 
-const WS_URL = 'ws://localhost:8010/realtime';
-const AZURE_SPEECH_KEY = 'F6zQV5w4v1of7O3a2aP2ewo0O9S20shpfNuyDRGuZvnddB5p6x20JQQJ99BCACYeBjFXJ3w3AAAYACOGyNZA';
-const AZURE_REGION = 'eastus';
+const AZURE_SPEECH_KEY = import.meta.env.VITE_AZURE_SPEECH_KEY;
+const AZURE_REGION = import.meta.env.VITE_AZURE_REGION;
+const WS_URL = import.meta.env.VITE_WS_URL;
 
 export default function RealTimeVoiceApp() {
   const [transcript, setTranscript] = useState('');

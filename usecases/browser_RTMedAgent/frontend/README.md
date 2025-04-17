@@ -1,12 +1,43 @@
-# React + Vite
+## 🚀 Run the Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### Prerequisites
 
-Currently, two official plugins are available:
+Before running the frontend, ensure you have the following:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Node.js**: Version 18 or higher.
+- **Azure Speech Key & Region**: Required for speech services.
+- **WebSocket Backend Endpoint**: 
+    - Must accept `{ text }` as input.
+    - Should stream GPT responses and audio chunks.
 
-## Expanding the ESLint configuration
+### Steps to Run
 
-If you are developing a production application, we recommend using TypeScript and enable type-aware lint rules. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. **Install Dependencies**
+
+     Run the following command to install the required dependencies:
+
+     ```bash
+     npm install
+     ```
+
+2. **Configure Environment Variables**
+
+     Create a `.env` file in the project root directory with the following content:
+
+     ```env
+     VITE_AZURE_SPEECH_KEY=your_azure_speech_key
+     VITE_AZURE_REGION=your_region
+     VITE_WS_URL=ws://localhost:8010/realtime
+     ```
+
+     Replace `your_azure_speech_key`, `your_region`, and `ws://localhost:8010/realtime` with your actual values.
+
+3. **Start the Application**
+
+     Use the command below to start the development server:
+
+     ```bash
+     npm run dev
+     ```
+
+     Once the server is running, open [http://localhost:5173](http://localhost:5173) in your browser to access the frontend.
