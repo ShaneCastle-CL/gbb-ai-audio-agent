@@ -25,6 +25,7 @@ pipwin
 backoff
 sounddevice
 numpy
+dateparser
 
 # python helpers
 yfinance

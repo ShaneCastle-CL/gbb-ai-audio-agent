@@ -33,9 +33,9 @@ If you're new to Azure AI Speech and Azure OenAI, specilaly on the realtime real
 
 + 🧪 **Building Your Voice-to-Voice Agent with Azure AI Speech and AOAI**: [🧾 Notebook - Building a Voice-to-Voice Agent with Azure AI Speech](labs/01-build-your-audio-agent.ipynb) Follow this step-by-step guide to create a voice-to-voice agent using Azure AI Speech services and Azure OpenAI. Learn how to configure speech recognition, integrate external tools, and generate human-like responses for real-time interactions.
 
-### **🏥 [Use Cases](usecases/README.md)**
+### **🏥 Use Cases**
 
-#### **📝 Voice-to-Voice Experience with RTMedAgent (Web-Powered AI Assistant)**  
+#### **📝 [Voice-to-Voice Experience with RTMedAgent (Web-Powered AI Assistant)](usecases/browser_RTMedAgent/README.md)**
 
 This use case demonstrates how to deliver real-time, AI-powered healthcare conversations using Azure and OpenAI services. It transforms natural patient voice interactions into structured, actionable outcomes by orchestrating multiple services into one seamless agentic system.
 

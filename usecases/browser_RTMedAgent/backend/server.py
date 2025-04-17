@@ -12,8 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # GPT, TTS, tools
 from openai import AzureOpenAI
 from src.speech.text_to_speech import SpeechSynthesizer
-from app.backend.tools import available_tools
-from app.backend.functions import (
+from usecases.browser_RTMedAgent.backend.tools import available_tools
+from usecases.browser_RTMedAgent.backend.functions import (
     schedule_appointment,
     refill_prescription,
     lookup_medication_info,
@@ -21,7 +21,7 @@ from app.backend.functions import (
     escalate_emergency,
     authenticate_user
 )
-from app.backend.prompt_manager import PromptManager
+from usecases.browser_RTMedAgent.backend.prompt_manager import PromptManager
 from utils.ml_logging import get_logger
 
 app = FastAPI()
@@ -33,9 +33,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.mount("/static", StaticFiles(directory="app/frontend"), name="static")
-
 STOP_WORDS = ["goodbye", "exit", "see you later", "bye"]
 logger = get_logger()
 prompt_manager = PromptManager()
@@ -57,14 +54,6 @@ function_mapping = {
     "escalate_emergency": escalate_emergency,
     "authenticate_user": authenticate_user,
 }
-
-@app.get("/", response_class=HTMLResponse)
-async def get_index():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    frontend_dir = os.path.join(current_dir, "..", "frontend")
-    index_path = os.path.join(frontend_dir, "index.html")
-    with open(index_path, encoding="utf-8") as f:
-        return HTMLResponse(content=f.read(), status_code=200)
 
 def check_for_stopwords(prompt: str) -> bool:
     return any(stop_word in prompt.lower() for stop_word in STOP_WORDS)

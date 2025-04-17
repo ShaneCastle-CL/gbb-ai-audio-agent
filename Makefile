@@ -1,5 +1,5 @@
 PYTHON_INTERPRETER = python
-CONDA_ENV ?= pa-ai-env
+CONDA_ENV ?= audioagent
 export PYTHONPATH=$(PWD):$PYTHONPATH;
 
 # Target for setting up pre-commit and pre-push hooks
@@ -75,62 +75,12 @@ remove_conda_env:
 	conda env remove --name $(CONDA_ENV)
 
 # Target to run the Streamlit app locally
-run_streamlit:
-	streamlit run app/frontend/streamlit/Home.py
 
-streamlite_conf:
-	streamlit config show
+stt_aoai_tts_server: 
+	python usecases/browser_RTMedAgent/backend/server.py
 
-run_frontend_app:
-	$(PYTHON_INTERPRETER) app/frontend/streamlit/Home.py
-
-run_backend_paprocessing_api:
-	$(PYTHON_INTERPRETER) app/backend/paprocessing/app.py
-
-run_agentic_rag_evals:
-	$(PYTHON_INTERPRETER) src/pipeline/agenticRag/evals.py
-
-run_clinicalExtractor_evals:
-	$(PYTHON_INTERPRETER) src/pipeline/clinicalExtractor/evals.py
-
-run_test_app:
-	$(PYTHON_INTERPRETER) src/app/test_app_2.py
-
-run_test_pc_voiceagent:
-	$(PYTHON_INTERPRETER) voiceagents/testagent/pcvoiceagent.py
-
-run_fast_api:
-	uvicorn src.api.fastapi:app --host 0.0.0.0 --port 8010 --reload
-
-run_test_pc_voiceagent_v2:
-	$(PYTHON_INTERPRETER) voiceagents/testagent/pcvoiceagent_v2.py
-
-run_chainlit_agents:
-	chainlit run voiceagents/testagent/chainlitapp.py
-
-run_chainlit_agents:
-	chainlit run voiceagents/testagent/chainlitapp.py
-
-run_uv: 
-	python src/openai_test/push_to_talk.py
-
-stt_aoai: 
-	python src/openai_test/stt_aoai.py
-
-stt_aoai_2: 
-	python src/quickstart.py
-
-stt_aoai_3: 
-	python app/backend/app2.py
-
-stt_aoai_4: 
-	python app/backend/app_local.py
-
-stt_aoai_5: 
-	python app/backend/app_local_visual.py
-
-stt_aoai_prod: 
-	python app/backend/server.py
+stt_aoai_tts_browser: 
+	cd usecases/browser_RTMedAgent/frontend && npm install && npm run dev
 
 run_pylint:
 	@echo "Running linter"
