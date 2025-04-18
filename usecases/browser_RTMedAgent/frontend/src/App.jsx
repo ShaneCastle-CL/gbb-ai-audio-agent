@@ -52,13 +52,14 @@ export default function RealTimeVoiceApp() {
 
     socket.onmessage = async (event) => {
       if (typeof event.data === 'string') {
-        if (event.data.includes('processing_started')) {
-          appendLog('Backend started processing GPT response.');
-        } else if (event.data.includes('interrupt')) {
-          appendLog('Backend reported interrupt.');
-        } else {
-          setTranscript(prev => prev + '\n' + event.data);
-          appendLog('Received GPT chunk.');
+        try {
+          const parsed = JSON.parse(event.data);
+          if (parsed.type === "assistant" || parsed.type === "status" || parsed.type === "exit") {
+            setTranscript(prev => prev + '\n' + event.data); 
+            appendLog("Ignored unknown message type");
+          }
+        } catch (err) {
+          appendLog("Received non-JSON message: " + event.data);
         }
       } else {
         const audioCtx = new AudioContext();
@@ -91,7 +92,6 @@ export default function RealTimeVoiceApp() {
       window.speechSynthesis.cancel();
     }
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ cancel: true }));
       socketRef.current.send(JSON.stringify({ text }));
       appendLog('Sent transcript to backend.');
     }
