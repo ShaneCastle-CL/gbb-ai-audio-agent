@@ -31,7 +31,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----------------------------- Globals & Clients -----------------------------
 STOP_WORDS = ["goodbye", "exit", "see you later", "bye"]
 logger = get_logger()
 prompt_manager = PromptManager()
@@ -63,11 +62,30 @@ class ConversationManager:
 def check_for_stopwords(prompt: str) -> bool:
     return any(stop_word in prompt.lower() for stop_word in STOP_WORDS)
 
+def check_for_interrupt(prompt: str) -> bool:
+    return any(interrupt in prompt.lower() for interrupt in ["interrupt"])
+
 async def send_tts_audio(text: str, websocket: WebSocket):
     try:
         az_speech_synthesizer_client.start_speaking_text(text)
     except Exception as e:
         logger.error(f"Error synthesizing TTS: {e}")
+
+async def receive_and_filter(websocket: WebSocket) -> Optional[str]:
+    """
+    Receive one WebSocket frame, stop TTS & return None if it's an interrupt.
+    Otherwise return raw text.
+    """
+    raw = await websocket.receive_text()
+    try:
+        msg = json.loads(raw)
+        if msg.get("type") == "interrupt":
+            logger.info("🛑 Interrupt received, stopping TTS")
+            az_speech_synthesizer_client.stop_speaking()
+            return None
+    except json.JSONDecodeError:
+        pass
+    return raw
 
 # ----------------------------- WebSocket Flow -----------------------------
 @app.websocket("/realtime")
@@ -88,38 +106,63 @@ async def authentication_conversation(websocket: WebSocket, cm: ConversationMana
 
     while True:
         try:
+            # <-- receive one frame raw
             prompt_raw = await websocket.receive_text()
         except WebSocketDisconnect:
-            return None
+            return
 
+        # <-- interrupt filter
+        try:
+            msg = json.loads(prompt_raw)
+            if msg.get("type") == "interrupt":
+                logger.info("🛑 Interrupt received; stopping TTS and skipping GPT")
+                az_speech_synthesizer_client.stop_speaking()
+                continue
+        except json.JSONDecodeError:
+            pass
+
+        # <-- now parse true user text
         try:
             prompt = json.loads(prompt_raw).get("text", prompt_raw)
-        except Exception:
+        except json.JSONDecodeError:
             prompt = prompt_raw.strip()
 
         if not prompt:
             continue
         if check_for_stopwords(prompt):
-            goodbye = "Thank you for calling. Goodbye."
-            await websocket.send_text(json.dumps({"type": "exit", "message": goodbye}))
-            await send_tts_audio(goodbye, websocket)
+            bye = "Thank you for calling. Goodbye."
+            await websocket.send_text(json.dumps({"type": "exit", "message": bye}))
+            await send_tts_audio(bye, websocket)
             return None
 
         result = await process_gpt_response(cm, prompt, websocket)
         if result and result.get("authenticated"):
             return result
 
+
 # ----------------------------- Main Flow -----------------------------
 async def main_conversation(websocket: WebSocket, cm: ConversationManager):
     while True:
         try:
+            # <-- receive one frame raw
             prompt_raw = await websocket.receive_text()
         except WebSocketDisconnect:
             return
 
+        # <-- interrupt filter
+        try:
+            msg = json.loads(prompt_raw)
+            if msg.get("type") == "interrupt":
+                logger.info("🛑 Interrupt received; stopping TTS and skipping GPT")
+                az_speech_synthesizer_client.stop_speaking()
+                continue
+        except json.JSONDecodeError:
+            pass
+
+        # <-- now parse true user text
         try:
             prompt = json.loads(prompt_raw).get("text", prompt_raw)
-        except Exception:
+        except json.JSONDecodeError:
             prompt = prompt_raw.strip()
 
         if not prompt:
