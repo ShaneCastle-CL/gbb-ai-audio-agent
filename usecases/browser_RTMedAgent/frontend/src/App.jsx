@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   AudioConfig,
   SpeechConfig,
@@ -33,25 +33,53 @@ export default function RealTimeVoiceApp() {
     setLog(prev => prev + `\n${new Date().toLocaleTimeString()} - ${message}`);
   };
 
+  // render paragraphs and lists from a block of text
+  const renderContent = (text) => {
+    const lines = text.split('\n');
+    const elements = [];
+    let listItems = [];
+
+    lines.forEach((line, i) => {
+      if (line.trim().startsWith('- ')) {
+        listItems.push(line.trim().substring(2));
+      } else {
+        if (listItems.length) {
+          elements.push(
+            <ul key={`ul-${i}`} style={{ margin: '8px 0 8px 20px' }}>
+              {listItems.map((item, j) => <li key={j}>{item}</li>)}
+            </ul>
+          );
+          listItems = [];
+        }
+        elements.push(
+          <p key={`p-${i}`} style={{ margin: '4px 0' }}>
+            {line}
+          </p>
+        );
+      }
+    });
+
+    if (listItems.length) {
+      elements.push(
+        <ul key="ul-final" style={{ margin: '8px 0 8px 20px' }}>
+          {listItems.map((item, j) => <li key={j}>{item}</li>)}
+        </ul>
+      );
+    }
+
+    return elements;
+  };
+
   const startRecognition = async () => {
-    // Initialize speech recognizer
     const speechConfig = SpeechConfig.fromSubscription(AZURE_SPEECH_KEY, AZURE_REGION);
     speechConfig.speechRecognitionLanguage = 'en-US';
     const audioConfig = AudioConfig.fromDefaultMicrophoneInput();
     const recognizer = new SpeechRecognizer(speechConfig, audioConfig);
     recognizerRef.current = recognizer;
 
-    // —— VAD / Segmentation tuning ——
-    recognizer.properties.setProperty(
-      PropertyId.Speech_SegmentationSilenceTimeoutMs,
-      '800'      // end utterance after 0.8 s of silence
-    );
-    recognizer.properties.setProperty(
-      PropertyId.Speech_SegmentationStrategy,
-      'Semantic'
-    );
+    recognizer.properties.setProperty(PropertyId.Speech_SegmentationSilenceTimeoutMs, '800');
+    recognizer.properties.setProperty(PropertyId.Speech_SegmentationStrategy, 'Semantic');
 
-    // interim‐results: user started speaking → interrupt in-flight TTS
     let lastInterrupt = 0;
     recognizer.recognizing = (_, e) => {
       const text = e.result.text.trim();
@@ -65,7 +93,6 @@ export default function RealTimeVoiceApp() {
       }
     };
 
-    // final (end‑of‑utterance) results
     recognizer.recognized = (s, e) => {
       if (e.result.reason !== 0) {
         const text = e.result.text.trim();
@@ -81,7 +108,6 @@ export default function RealTimeVoiceApp() {
     setRecording(true);
     appendLog('Recognition started');
 
-    // Open WebSocket once recognition begins
     const socket = new WebSocket(WS_URL);
     socket.binaryType = 'arraybuffer';
     socketRef.current = socket;
@@ -100,7 +126,6 @@ export default function RealTimeVoiceApp() {
           appendLog('Ignored non-JSON');
         }
       } else {
-        // binary = audio buffer
         const audioCtx = new AudioContext();
         const buf = await event.data.arrayBuffer();
         const audioBuffer = await audioCtx.decodeAudioData(buf);
@@ -114,11 +139,8 @@ export default function RealTimeVoiceApp() {
   };
 
   const stopRecognition = () => {
-    if (recognizerRef.current) {
-      recognizerRef.current.stopContinuousRecognitionAsync();
-    }
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      // send the same interrupt to cut off TTS
+    recognizerRef.current?.stopContinuousRecognitionAsync();
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: 'interrupt' }));
       socketRef.current.close();
     }
@@ -128,15 +150,31 @@ export default function RealTimeVoiceApp() {
 
   const sendToBackend = (text) => {
     window.speechSynthesis?.cancel();
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ text }));
     }
   };
 
-  // format transcript lines
-  const messages = transcript
-    .split('\n')
-    .filter(line => line.startsWith('User:') || line.startsWith('Assistant:'));
+  // group multi-line assistant messages and list items
+  const messages = useMemo(() => {
+    const lines = transcript.split('\n');
+    const result = [];
+    let current = null;
+
+    lines.forEach(line => {
+      if (line.startsWith('User:')) {
+        current && result.push(current);
+        current = { speaker: 'User', text: line.replace(/^User:\s*/, '') };
+      } else if (line.startsWith('Assistant:')) {
+        current && result.push(current);
+        current = { speaker: 'Assistant', text: line.replace(/^Assistant:\s*/, '') };
+      } else if (current) {
+        current.text += '\n' + line;
+      }
+    });
+    current && result.push(current);
+    return result;
+  }, [transcript]);
 
   return (
     <div style={{
@@ -176,8 +214,7 @@ export default function RealTimeVoiceApp() {
           style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', paddingBottom: 16 }}
         >
           {messages.map((msg, idx) => {
-            const isUser = msg.startsWith('User:');
-            const text   = msg.replace(isUser ? 'User: ' : 'Assistant: ', '').trim();
+            const isUser = msg.speaker === 'User';
             return (
               <div
                 key={idx}
@@ -196,7 +233,7 @@ export default function RealTimeVoiceApp() {
                   lineHeight: 1.5,
                   boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
                 }}>
-                  {text}
+                  {renderContent(msg.text)}
                   <span style={{
                     display: 'block',
                     fontSize: '0.8rem',
