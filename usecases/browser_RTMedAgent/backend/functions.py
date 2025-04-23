@@ -1,7 +1,11 @@
-from typing import Any, Dict, Optional, TypedDict
+# Complete tools module including new pharmacy functions
+
+from typing import Any, Dict, Optional, TypedDict, List
 import json
 from utils.ml_logging import get_logger
-logger  = get_logger()
+from datetime import date as _date, timedelta as _timedelta
+
+logger = get_logger()
 
 # ------------------------------------------
 # Simulated Internal Data ("Databases")
@@ -49,43 +53,67 @@ medications_info_db: Dict[str, str] = {
     "Gabapentin": "Gabapentin is used to treat nerve pain. Side effects may include drowsiness and dizziness.",
 }
 
-# ---------------------------------------------------------------------------
-# TypedDict argument models  (one‑to‑one with tools.py schemas)
-# ---------------------------------------------------------------------------
-class AuthenticateArgs(TypedDict):
-    first_name: str
-    last_name: str
-    phone_number: str
+side_effects_db: Dict[str, Dict[str, List[str]]] = {
+    "Amoxicillin": {
+        "initial": ["nausea", "diarrhea", "rash"],
+        "long_term": ["yeast infections", "antibiotic resistance"]
+    },
+    "Lisinopril": {
+        "initial": ["dizziness", "dry cough"],
+        "long_term": ["kidney function changes", "high potassium levels"]
+    },
+    "Metformin": {
+        "initial": ["stomach upset", "metallic taste"],
+        "long_term": ["vitamin B12 deficiency", "lactic acidosis (rare)"]
+    },
+    "Atorvastatin": {
+        "initial": ["headache", "abdominal pain"],
+        "long_term": ["muscle pain", "liver enzyme elevations"]
+    },
+    "Omeprazole": {
+        "initial": ["headache", "constipation"],
+        "long_term": ["bone density loss", "risk of C. difficile infection"]
+    },
+    "Amlodipine": {
+        "initial": ["swelling of ankles", "flushing"],
+        "long_term": ["gum overgrowth", "low blood pressure"]
+    },
+    "Levothyroxine": {
+        "initial": ["increased appetite", "sweating"],
+        "long_term": ["bone loss (if over‑treated)", "arrhythmias"]
+    },
+    "Simvastatin": {
+        "initial": ["constipation", "stomach cramps"],
+        "long_term": ["muscle weakness", "rare rhabdomyolysis"]
+    },
+    "Losartan": {
+        "initial": ["dizziness", "fatigue"],
+        "long_term": ["elevated potassium", "kidney function decline"]
+    },
+    "Hydrochlorothiazide": {
+        "initial": ["increased urination", "dizziness"],
+        "long_term": ["low sodium/potassium", "gout flare‑ups"]
+    },
+    "Gabapentin": {
+        "initial": ["drowsiness", "dizziness"],
+        "long_term": ["weight gain", "peripheral edema"]
+    },
+    # add more as needed
+}
 
-class ScheduleAppointmentArgs(TypedDict, total=False):
-    patient_name: str
-    dob: str
-    appointment_type: str
-    preferred_date: str
-    preferred_time: str
+interactions_db: Dict[frozenset, str] = {
+    frozenset(["Amoxicillin", "Warfarin"]): "May increase risk of bleeding.",
+    frozenset(["Lisinopril", "Ibuprofen"]): "Ibuprofen can reduce Lisinopril’s blood pressure effect.",
+    frozenset(["Metformin", "Cimetidine"]): "Cimetidine can decrease Metformin clearance, increasing risk of side effects.",
+    frozenset(["Atorvastatin", "Erythromycin"]): "Erythromycin may raise Atorvastatin levels and risk of muscle toxicity.",
+    frozenset(["Omeprazole", "Clopidogrel"]): "Omeprazole can reduce Clopidogrel activation, lowering its efficacy.",
+    frozenset(["Amlodipine", "Simvastatin"]): "Amlodipine may increase Simvastatin concentration slightly; monitor for muscle pain.",
+    frozenset(["Levothyroxine", "Calcium Supplements"]): "Calcium can interfere with Levothyroxine absorption; separate dosing by 4 hours.",
+    frozenset(["Losartan", "Potassium Supplements"]): "Risk of hyperkalemia when combined.",
+    frozenset(["Hydrochlorothiazide", "Lithium"]): "HCTZ can increase Lithium levels, risk of toxicity.",
+    frozenset(["Gabapentin", "Opioids"]): "Additive CNS depression; monitor for sedation.",
+}
 
-class RefillPrescriptionArgs(TypedDict, total=False):
-    patient_name: str
-    medication_name: str
-    pharmacy: str
-
-class LookupMedicationArgs(TypedDict):
-    medication_name: str
-
-class PAArgs(TypedDict):
-    patient_info: Dict[str, Any]
-    physician_info: Dict[str, Any]
-    clinical_info: Dict[str, Any]
-    treatment_plan: Dict[str, Any]
-    policy_text: str
-
-class EscalateEmergencyArgs(TypedDict):
-    reason: str
-
-# ---------------------------------------------------------------------------
-# TypedDict argument models  (one‑to‑one with tools.py schemas)
-# ---------------------------------------------------------------------------
-from datetime import date as _date, timedelta as _timedelta
 
 class AuthenticateArgs(TypedDict):
     first_name: str
@@ -116,6 +144,22 @@ class PAArgs(TypedDict):
 
 class EscalateEmergencyArgs(TypedDict):
     reason: str
+
+class FillNewPrescriptionArgs(TypedDict):
+    patient_name: str
+    medication_name: str
+    dosage: str
+    pharmacy: str
+
+class SideEffectsArgs(TypedDict):
+    medication_name: str
+
+class GetCurrentPrescriptionsArgs(TypedDict):
+    patient_name: str
+
+class CheckDrugInteractionsArgs(TypedDict):
+    new_medication: str
+    current_medications: List[str]
 
 # ---------------------------------------------------------------------------
 # Utility
@@ -164,55 +208,114 @@ async def authenticate_user(args: AuthenticateArgs) -> Dict[str, Any]:
             "patient_id": None
         }
 
-# ---------------------------------------------------------------------------
 async def schedule_appointment(args: ScheduleAppointmentArgs) -> str:
-    name = args["patient_name"]
-    dob = args["dob"]
-    appt = args["appointment_type"]
-    date = args.get("preferred_date") or str(_date.today() + _timedelta(days=3))
-    time = args.get("preferred_time", "14:00")
-
+    name = args.get("patient_name", "")
+    dob  = args.get("dob", "")
+    if not name or not dob:
+        return _json(False, "Missing patient name or date of birth.")
     rec = patients_db.get(name)
     if not rec or rec["dob"] != dob:
         return _json(False, "Patient not found or DOB mismatch.")
 
-    return _json(True, f"Appointment booked for {name} on {date} at {time}.",
-                 date=date, time=time, appointment_type=appt)
+    appt = args.get("appointment_type") or ""
+    if not appt:
+        return _json(False, "Missing appointment type.")
+    date_str = args.get("preferred_date") or str(_date.today() + _timedelta(days=3))
+    time_str = args.get("preferred_time") or "14:00"
 
-# ---------------------------------------------------------------------------
+    return _json(True, f"Appointment booked for {name} on {date_str} at {time_str}.",
+                 date=date_str, time=time_str, appointment_type=appt)
+
+
 async def refill_prescription(args: RefillPrescriptionArgs) -> str:
-    name = args["patient_name"]
-    med = args["medication_name"]
-    pharm = args.get("pharmacy")
+    name = args.get("patient_name", "")
+    med  = args.get("medication_name", "")
+    if not name or not med:
+        return _json(False, "Missing patient name or medication name.")
 
-    rx = prescriptions_db.get(name, {})
-    if med not in rx:
+    user_rx = prescriptions_db.get(name, {})
+    if med not in user_rx:
         return _json(False, f"No active prescription for {med} under {name}.")
 
-    pharmacy = pharm or rx[med]["pharmacy"]
-    return _json(True, f"Refill placed for {med} to {pharmacy}.",
-                 pharmacy=pharmacy, medication=med)
+    pharm = args.get("pharmacy") or user_rx[med]["pharmacy"]
+    return _json(True, f"Refill placed for {med} to {pharm}.",
+                 pharmacy=pharm, medication=med)
 
-# ---------------------------------------------------------------------------
+
 async def lookup_medication_info(args: LookupMedicationArgs) -> str:
     med = args["medication_name"].strip().title()
+    if not med:
+        return _json(False, "Medication name is required.")
     info = medications_info_db.get(med)
     if not info:
-        return _json(False, f"Medication {med} not found.")
+        return _json(False, f"No information found for {med}.")
     return _json(True, f"Information on {med}.", summary=info)
 
-# ---------------------------------------------------------------------------
+
 async def evaluate_prior_authorization(args: PAArgs) -> str:
-    patient = args["patient_info"].get("patient_name", "Unknown")
-    med = args["treatment_plan"].get("requested_medication", "unknown medication")
+    plan = args["treatment_plan"].get("requested_medication", "")
+    if not plan:
+        return _json(False, "Requested medication is missing in treatment plan.")
+    return _json(True, f"Prior authorization for {plan} auto‑approved.")
 
-    if med == "unknown medication":
-        return _json(False, "Requested medication missing.")
 
-    return _json(True, f"Prior authorization for {med} auto‑approved.")
-
-# ---------------------------------------------------------------------------
 async def escalate_emergency(args: EscalateEmergencyArgs) -> str:
     reason = args["reason"].strip()
+    if not reason:
+        return _json(False, "Reason for escalation is required.")
     return _json(True, "Emergency escalation triggered.", reason=reason)
+
+
+async def fill_new_prescription(args: FillNewPrescriptionArgs) -> str:
+    name = args.get("patient_name", "")
+    med  = args.get("medication_name", "").title()
+    dose = args.get("dosage", "")
+    pharm = args.get("pharmacy", "")
+    if not (name and med and dose and pharm):
+        return _json(False, "Missing patient_name, medication_name, dosage, or pharmacy.")
+
+    prescriptions_db.setdefault(name, {})[med] = {
+        "last_refill": str(_date.today()),
+        "pharmacy": pharm,
+        "dosage": dose
+    }
+    return _json(True, f"New prescription for {med} ({dose}) added for {name} at {pharm}.",
+                 medication=med, dosage=dose, pharmacy=pharm)
+
+
+async def lookup_side_effects(args: SideEffectsArgs) -> str:
+    med = args["medication_name"].strip().title()
+    if not med:
+        return _json(False, "Medication name is required.")
+    info = side_effects_db.get(med)
+    if not info:
+        return _json(False, f"No side‑effect data found for {med}.")
+    return _json(True, f"Side effects for {med}.",
+                 initial=info["initial"], long_term=info["long_term"])
+
+
+async def get_current_prescriptions(args: GetCurrentPrescriptionsArgs) -> str:
+    name = args.get("patient_name", "")
+    if not name:
+        return _json(False, "Patient name is required.")
+    rx = prescriptions_db.get(name, {})
+    if not rx:
+        return _json(False, f"No active prescriptions found for {name}.")
+    meds = [{"medication": m, **details} for m, details in rx.items()]
+    return _json(True, f"Active prescriptions for {name}.", prescriptions=meds)
+
+
+async def check_drug_interactions(args: CheckDrugInteractionsArgs) -> str:
+    new_med = args.get("new_medication", "").title()
+    current = args.get("current_medications", [])
+    if not new_med or not current:
+        return _json(False, "Both new_medication and current_medications are required.")
+    found: Dict[str, str] = {}
+    for existing in current:
+        pair = frozenset([new_med, existing])
+        if pair in interactions_db:
+            found[existing] = interactions_db[pair]
+    if not found:
+        return _json(True, f"No known interactions between {new_med} and your current medications.")
+    return _json(True, f"Potential interactions for {new_med}:", interactions=found)
 

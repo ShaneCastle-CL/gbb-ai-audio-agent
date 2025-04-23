@@ -10,9 +10,13 @@ Tools:
 - evaluate_prior_authorization
 - escalate_emergency
 - authenticate_user
+- fill_new_prescription
+- lookup_side_effects
+- get_current_prescriptions
+- check_drug_interactions
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, TypedDict, List
 
 schedule_appointment_schema: Dict[str, Any] = {
     "name": "schedule_appointment",
@@ -115,4 +119,78 @@ available_tools = [
     {"type": "function", "function": evaluate_prior_authorization_schema},
     {"type": "function", "function": escalate_emergency_schema},
     {"type": "function", "function": authentication_schema}
+]
+
+
+fill_new_prescription_schema: Dict[str, Any] = {
+    "name": "fill_new_prescription",
+    "description": "Add a new prescription for the patient in the system.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "patient_name": {"type": "string", "description": "Full name of the patient."},
+            "medication_name": {"type": "string", "description": "Name of the new medication to add."},
+            "dosage": {"type": "string", "description": "Dosage information (e.g., '500 mg twice daily')."},
+            "pharmacy": {"type": "string", "description": "Pharmacy where medication will be filled."}
+        },
+        "required": ["patient_name", "medication_name", "dosage", "pharmacy"],
+        "additionalProperties": False
+    }
+}
+
+lookup_side_effects_schema: Dict[str, Any] = {
+    "name": "lookup_side_effects",
+    "description": "Retrieve initial and long-term side effects for a given medication.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "medication_name": {"type": "string", "description": "Name of medication to query."}
+        },
+        "required": ["medication_name"],
+        "additionalProperties": False
+    }
+}
+
+get_current_prescriptions_schema: Dict[str, Any] = {
+    "name": "get_current_prescriptions",
+    "description": "Fetch all active prescriptions for the patient.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "patient_name": {"type": "string", "description": "Full name of the patient."}
+        },
+        "required": ["patient_name"],
+        "additionalProperties": False
+    }
+}
+
+check_drug_interactions_schema: Dict[str, Any] = {
+    "name": "check_drug_interactions",
+    "description": "Check for known interactions between a new medication and the patient's current medications.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "new_medication": {"type": "string", "description": "Name of the new medication."},
+            "current_medications": {"type": "array", "items": {"type": "string"}, "description": "List of patient's current medication names."}
+        },
+        "required": ["new_medication", "current_medications"],
+        "additionalProperties": False
+    }
+}
+
+# -------------------------------------------------------
+# Assemble all tools wrapped as GPT-4o-compatible entries
+# -------------------------------------------------------
+
+available_tools: List[Dict[str, Any]] = [
+    {"type": "function", "function": schedule_appointment_schema},
+    {"type": "function", "function": refill_prescription_schema},
+    {"type": "function", "function": lookup_medication_info_schema},
+    {"type": "function", "function": evaluate_prior_authorization_schema},
+    {"type": "function", "function": escalate_emergency_schema},
+    {"type": "function", "function": authentication_schema},
+    {"type": "function", "function": fill_new_prescription_schema},
+    {"type": "function", "function": lookup_side_effects_schema},
+    {"type": "function", "function": get_current_prescriptions_schema},
+    {"type": "function", "function": check_drug_interactions_schema},
 ]
