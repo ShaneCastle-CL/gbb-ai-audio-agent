@@ -22,7 +22,46 @@ usecases/
 ## 🚀 Getting Started
 
 ### 1. 🔧 Start the Backend
+### 🛰️ Using Azure Communication Services (ACS) for Calling
 
+If you want to enable outbound calling via Azure Communication Services (ACS):
+
+1. **Create a Dev Tunnel for Local Backend Access**
+
+    ACS requires your backend to be accessible from the public internet. Use [Azure Dev Tunnel](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/overview) to expose your local backend on port `8010`:
+
+    ```bash
+    devtunnel create --allow-anonymous
+    devtunnel port create -p 8010
+    devtunnel host    
+    ```
+
+    This will provide a public URL (e.g., `https://<random>-<port>.use.devtunnels.ms`). Use this URL for your ACS webhook configuration.
+    Set this as your `BASE_URL` value on your python .env
+
+2. **Update Environment Variables**
+
+    - Copy `.env.sample` to `.env` in the `frontend` directory:
+
+      ```bash
+      cp .env.sample .env
+      ```
+
+    - Edit `.env` and update the following variables as needed:
+
+      ```env
+      VITE_AZURE_SPEECH_KEY=your_speech_key
+      VITE_AZURE_REGION=your_region
+      VITE_WS_URL=wss://<your-devtunnel>.devtunnels.ms/realtime
+      ```
+
+    Replace `<your-devtunnel>` with the public Dev Tunnel URL from step 1.
+
+3. **Configure ACS Webhook**
+
+    In your Azure Communication Services resource, set the webhook/callback URL to your Dev Tunnel endpoint (e.g., `https://<your-devtunnel>.devtunnels.ms/api/acs-callback`).
+
+---
 Navigate to the `backend` folder and start the WebSocket server:
 
 ```bash
