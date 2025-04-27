@@ -9,7 +9,7 @@ import {
 const AZURE_SPEECH_KEY = import.meta.env.VITE_AZURE_SPEECH_KEY;
 const AZURE_REGION    = import.meta.env.VITE_AZURE_REGION;
 const WS_URL          = import.meta.env.VITE_WS_URL;
-
+const API_BASE_URL    = import.meta.env.VITE_API_BASE_URL;
 export default function RealTimeVoiceApp() {
   const [transcript, setTranscript] = useState('');
   const [log, setLog]             = useState('');
@@ -17,7 +17,32 @@ export default function RealTimeVoiceApp() {
   const socketRef   = useRef(null);
   const recognizerRef = useRef(null);
   const containerRef  = useRef(null);
+  const [targetPhoneNumber, setTargetPhoneNumber] = useState(''); // State for phone number input
 
+  const startACSCall = async () => {
+    // Basic validation for the phone number input
+    if (!targetPhoneNumber || !/^\+\d+$/.test(targetPhoneNumber)) {
+      alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
+      return;
+    }
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/call`, {
+        method: 'POST',
+        body: JSON.stringify({ target_number: targetPhoneNumber }), // Use 'target_number' and the state variable
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const result = await response.json();
+      if (response.ok) {
+        appendLog(`Call initiated successfully: ${result.message}`);
+      } else {
+        appendLog(`Error initiating call: ${result.detail || response.statusText}`);
+      }
+    } catch (error) {
+      appendLog(`Network or fetch error initiating call: ${error}. Please check if the backend server is running at ${API_BASE_URL} and CORS is enabled.`);
+      console.error("Error initiating call:", error);
+    }
+  };
+    
   useEffect(() => {
     return () => stopRecognition();
   }, []);
@@ -233,7 +258,34 @@ export default function RealTimeVoiceApp() {
           {recording ? '⏹ End Conversation' : '▶ Start Conversation'}
         </button>
       </div>
-
+      {/* Control for ACS Outbound Call */}
+      <div style={{ textAlign: 'center', marginBottom: '2.5rem', padding: '1rem', background: '#2C3E50', borderRadius: '8px' }}>
+         <h2 style={{marginTop: 0, marginBottom: '1rem', color: '#ECF0F1'}}>📞 Initiate Phone Call (ACS)</h2>
+         <input
+            type="tel"
+            placeholder="+15551234567"
+            value={targetPhoneNumber}
+            onChange={(e) => setTargetPhoneNumber(e.target.value)}
+            style={{ padding: '10px', marginRight: '10px', borderRadius: '5px', border: '1px solid #566573', background: '#34495E', color: '#ECF0F1' }}
+         />
+        <button
+            onClick={startACSCall}
+            style={{ /* ... style similar to the other button ... */
+                padding: '10px 20px',
+                fontSize: '1rem',
+                borderRadius: '5px',
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: '#3498DB',
+                color: '#fff',
+                fontWeight: 'bold',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                transition: 'all 0.3s ease-in-out'
+            }}
+        >
+            Call Number
+        </button>
+      </div>
       {/* Logs */}
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
         <h2 style={{ color: '#fff', marginBottom: 8 }}>System Logs</h2>

@@ -101,3 +101,68 @@ class SpeechSynthesizer:
             logger.error(f"Error synthesizing speech: {e}")
             return b""
 
+    def synthesize_speech_pcm16k_mono(self, text: str) -> bytes:
+        """
+        Synthesizes text to speech and returns audio as 16kHz 16-bit mono PCM bytes.
+        """
+        try:
+            speech_config = speechsdk.SpeechConfig(
+                subscription=self.key,
+                region=self.region
+            )
+            speech_config.speech_synthesis_language = self.language
+            speech_config.speech_synthesis_voice_name = self.voice
+            speech_config.set_speech_synthesis_output_format(
+                speechsdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
+            )
+
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config,
+                audio_config=None
+            )
+
+            result = synthesizer.speak_text_async(text).get()
+
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                audio_data_stream = speechsdk.AudioDataStream(result)
+                pcm_bytes = audio_data_stream.read_data(audio_buffer=result.audio_data)
+                return bytes(pcm_bytes)
+            else:
+                logger.error(f"Speech synthesis failed: {result.reason}")
+                return b""
+        except Exception as e:
+            logger.error(f"Error synthesizing speech to PCM16_K_MONO: {e}")
+            return b""
+    def synthesize_speech_pcm24k_mono(self, text: str) -> bytes:
+        """
+        Synthesizes text to speech and returns audio as 24kHz 24-bit mono PCM bytes.
+        """
+        try:
+            speech_config = speechsdk.SpeechConfig(
+                subscription=self.key,
+                region=self.region
+            )
+            speech_config.speech_synthesis_language = self.language
+            speech_config.speech_synthesis_voice_name = self.voice
+            speech_config.set_speech_synthesis_output_format(
+                speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm
+            )
+
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config,
+                audio_config=None
+            )
+
+            result = synthesizer.speak_text_async(text).get()
+
+            if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                audio_data_stream = speechsdk.AudioDataStream(result)
+                # Read the PCM audio data into a buffer
+                pcm_bytes = audio_data_stream.read_data(audio_buffer=result.audio_data)
+                return bytes(pcm_bytes)
+            else:
+                logger.error(f"Speech synthesis failed: {result.reason}")
+                return b""
+        except Exception as e:
+            logger.error(f"Error synthesizing speech to PCM24_K_MONO: {e}")
+            return b""
