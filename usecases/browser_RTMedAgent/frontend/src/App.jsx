@@ -20,7 +20,6 @@ export default function RealTimeVoiceApp() {
 
   const socketRef = useRef(null);
   const recognizerRef = useRef(null);
-  const containerRef  = useRef(null);
   const [targetPhoneNumber, setTargetPhoneNumber] = useState(''); // State for phone number input
 
   const startACSCall = async () => {
