@@ -176,3 +176,5 @@ cython_debug/
 node_modules/
 .chainlit/
 records/
+
+.DS_Store

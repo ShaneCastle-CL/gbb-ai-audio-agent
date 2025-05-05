@@ -4,12 +4,14 @@ import asyncio
 import uuid
 from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse 
+
 from openai import AzureOpenAI
-from base64 import b64decode
-import contextlib
+from base64 import b64decode, b64encode
+from contextlib import asynccontextmanager
 import numpy as np
 from src.speech.text_to_speech import SpeechSynthesizer
 from usecases.browser_RTMedAgent.backend.tools import available_tools
@@ -29,6 +31,8 @@ from usecases.browser_RTMedAgent.backend.acs import AcsCaller # Import AcsCaller
 from pydantic import BaseModel # For request body validation
 from src.speech.speech_to_text import SpeechCoreTranslator
 from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
+from azure.communication.callautomation import TextSource, SsmlSource
+from azure.core.exceptions import HttpResponseError
 from typing import Dict
 
 # --- Constants ---
@@ -40,7 +44,45 @@ ACS_WEBSOCKET_PATH = "/realtime-acs"
 ACS_CALL_PATH = "/api/call"
 
 # ----------------------------- App & Middleware -----------------------------
-app = FastAPI()
+
+# --- Lifespan Management for Startup/Shutdown ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup Logic ---
+    logger.info("Application startup...")
+
+    # Initialize SpeechCoreTranslator
+    try:
+        app.state.stt_client = SpeechCoreTranslator()
+        logger.info("SpeechCoreTranslator initialized successfully.")
+    except Exception as e:
+        logger.error(f"Failed to initialize SpeechCoreTranslator: {e}", exc_info=True)
+        app.state.stt_client = None # Store None if failed
+
+    # Initialize AcsCaller
+    app.state.acs_caller = initialize_acs_caller_instance() # Call the modified function
+
+    # Initialize potentially unused TTS client (consider removing if confirmed unused)
+    try:
+        app.state.tts_client = SpeechSynthesizer()
+        logger.info("SpeechSynthesizer initialized.")
+    except Exception as e:
+        logger.error(f"Failed to initialize SpeechSynthesizer: {e}", exc_info=True)
+        app.state.tts_client = None
+
+    logger.info("Startup complete.")
+    yield # Application runs here
+    # --- Shutdown Logic ---
+    logger.info("Application shutting down...")
+    if hasattr(app.state, 'acs_caller') and app.state.acs_caller:
+        try:
+            await app.state.acs_caller.close() # Ensure close is async in AcsCaller
+        except Exception as e:
+            logger.error(f"Error closing AcsCaller: {e}", exc_info=True)
+    # Add other cleanup if needed
+    logger.info("Shutdown complete.")
+
+app = FastAPI(lifespan=lifespan) # Apply lifespan manager
 allowed_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -61,17 +103,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --- Global Clients (Initialized in lifespan) ---
 
-STOP_WORDS = ["goodbye", "exit", "see you later", "bye"]
-logger = get_logger()
-prompt_manager = PromptManager()
 az_openai_client = AzureOpenAI(
     api_version="2025-02-01-preview",
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     api_key=os.getenv("AZURE_OPENAI_KEY"),
 )
-az_speech_synthesizer_client = SpeechSynthesizer()
 
+# --- Mappings & Managers ---
+STOP_WORDS = ["goodbye", "exit", "see you later", "bye"]
+logger = get_logger()
+prompt_manager = PromptManager()
 function_mapping = {
     "schedule_appointment": schedule_appointment,
     "refill_prescription": refill_prescription,
@@ -81,49 +124,73 @@ function_mapping = {
     "authenticate_user": authenticate_user,
 }
 
-# --- Instantiate SpeechCoreTranslator ---
+# --- Instantiate SpeechCoreTranslator (STT) ---
 try:
-    speech_core = SpeechCoreTranslator()
+    stt_client = SpeechCoreTranslator()
 except Exception as e:
     logger.error(f"Failed to initialize SpeechCoreTranslator: {e}")
+
+# --- Instantiate SpeechSynthesizer (TTS) ---
+try:
+    tts_client = SpeechSynthesizer()
+except Exception as e:
+    logger.error(f"Failed to initialize SpeechSynthesizer: {e}")
 # -----------------------------------------
 
-# --- ACS Caller Instance ---
-acs_caller = None
-if ACS_CONNECTION_STRING and ACS_SOURCE_PHONE_NUMBER:
-    acs_callback_url = f"{BASE_URL.strip('/')}{ACS_CALLBACK_PATH}" # Ensure no double slashes
+# --- Helper Functions for Initialization ---
+def construct_websocket_url(base_url: str, path: str) -> Optional[str]:
+    """Constructs a WebSocket URL from a base URL and path."""
+    if not base_url: # Added check for empty base_url
+        logger.error("BASE_URL is empty or not provided.")
+        return None
+    if "<your" in base_url: # Added check for placeholder
+        logger.warning("BASE_URL contains placeholder. Please update environment variable.")
+        return None
 
-    # Construct WebSocket URL safely
-    if BASE_URL.startswith("https://"):
-        acs_websocket_url = f"{BASE_URL.replace('https://', 'wss://', 1).strip('/')}{ACS_WEBSOCKET_PATH}"
-    elif BASE_URL.startswith("http://"):
-         # Note: ACS typically requires wss. Using ws might only work in specific network configurations.
+    base_url_clean = base_url.strip('/')
+    path_clean = path.strip('/')
+
+    if base_url.startswith("https://"):
+        return f"wss://{base_url_clean}/{path_clean}"
+    elif base_url.startswith("http://"):
         logger.warning("BASE_URL starts with http://. ACS Media Streaming usually requires wss://.")
-        acs_websocket_url = f"{BASE_URL.replace('http://', 'ws://', 1).strip('/')}{ACS_WEBSOCKET_PATH}"
+        return f"ws://{base_url_clean}/{path_clean}"
     else:
-        logger.error(f"Cannot determine WebSocket protocol (wss/ws) from BASE_URL: {BASE_URL}")
-        acs_websocket_url = None # Indicate failure
+        logger.error(f"Cannot determine WebSocket protocol (wss/ws) from BASE_URL: {base_url}")
+        return None
 
-    if acs_websocket_url:
-        logger.info(f"ACS Callback URL: {acs_callback_url}")
-        logger.info(f"ACS WebSocket URL: {acs_websocket_url}")
-        try:
-            acs_caller = AcsCaller(
-                source_number=ACS_SOURCE_PHONE_NUMBER,
-                acs_connection_string=ACS_CONNECTION_STRING,
-                acs_callback_path=acs_callback_url,
-                acs_media_streaming_websocket_path=acs_websocket_url,
-                # tts_translator=speech_core, # Pass the SpeechCoreTranslator instance if needed later
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize AcsCaller: {e}", exc_info=True)
-            acs_caller = None # Ensure acs_caller is None if initialization fails
-    else:
-         logger.error("Could not construct valid ACS WebSocket URL. ACS calling disabled.")
-else:
-    logger.warning("ACS environment variables (ACS_CONNECTION_STRING, ACS_SOURCE_PHONE_NUMBER) not fully configured. ACS calling disabled.")
+
+def initialize_acs_caller_instance() -> Optional[AcsCaller]:
+    """Initializes and returns the ACS Caller instance if configured, otherwise None."""
+    if not all([ACS_CONNECTION_STRING, ACS_SOURCE_PHONE_NUMBER, BASE_URL]):
+        logger.warning("ACS environment variables not fully configured. ACS calling disabled.")
+        return None
+
+    acs_callback_url = f"{BASE_URL.strip('/')}{ACS_CALLBACK_PATH}"
+    acs_websocket_url = construct_websocket_url(BASE_URL, ACS_WEBSOCKET_PATH)
+
+    if not acs_websocket_url:
+        logger.error("Could not construct valid ACS WebSocket URL. ACS calling disabled.")
+        return None
+
+    logger.info(f"Attempting to initialize AcsCaller...")
+    logger.info(f"ACS Callback URL: {acs_callback_url}")
+    logger.info(f"ACS WebSocket URL: {acs_websocket_url}")
+
+    try:
+        caller_instance = AcsCaller(
+            source_number=ACS_SOURCE_PHONE_NUMBER,
+            acs_connection_string=ACS_CONNECTION_STRING,
+            acs_callback_path=acs_callback_url,
+            acs_media_streaming_websocket_path=acs_websocket_url,
+        )
+        logger.info("AcsCaller initialized successfully.")
+        return caller_instance
+    except Exception as e:
+        logger.error(f"Failed to initialize AcsCaller: {e}", exc_info=True)
+        return None
+
 # --- End ACS Caller Instance ---
-
 
 # ----------------------------- Conversation Manager -----------------------------
 class ConversationManager:
@@ -142,7 +209,7 @@ def check_for_interrupt(prompt: str) -> bool:
 
 async def send_tts_audio(text: str, websocket: WebSocket):
     try:
-        az_speech_synthesizer_client.start_speaking_text(text)
+        tts_client.start_speaking_text(text)
     except Exception as e:
         logger.error(f"Error synthesizing TTS: {e}")
 
@@ -156,7 +223,7 @@ async def receive_and_filter(websocket: WebSocket) -> Optional[str]:
         msg = json.loads(raw)
         if msg.get("type") == "interrupt":
             logger.info("🛑 Interrupt received, stopping TTS")
-            az_speech_synthesizer_client.stop_speaking()
+            tts_client.stop_speaking()
             return None
     except json.JSONDecodeError:
         pass
@@ -191,7 +258,7 @@ async def authentication_conversation(websocket: WebSocket, cm: ConversationMana
             msg = json.loads(prompt_raw)
             if msg.get("type") == "interrupt":
                 logger.info("🛑 Interrupt received; stopping TTS and skipping GPT")
-                az_speech_synthesizer_client.stop_speaking()
+                tts_client.stop_speaking()
                 continue
         except json.JSONDecodeError:
             pass
@@ -214,201 +281,240 @@ async def authentication_conversation(websocket: WebSocket, cm: ConversationMana
         if result and result.get("authenticated"):
             return result
 
+
 # --- API Endpoint to Initiate Call ---
 class CallRequest(BaseModel):
     target_number: str # Define expected request body
-
+    
 @app.post(ACS_CALL_PATH)
-def initiate_outbound_call(call_request: CallRequest):
-    """Initiates an outbound call using ACS."""
-    if not acs_caller:
-        logger.error("ACS Caller not initialized, cannot initiate call.")
-
-    target_phone_number = call_request.target_number
-    if not target_phone_number:
-        logger.error("Target phone number is required.")
-
+async def initiate_acs_phone_call(call_request: CallRequest, request: Request): # Inject request to access app.state
+    acs_caller_instance = request.app.state.acs_caller
+    if not acs_caller_instance:
+        raise HTTPException(status_code=503, detail="ACS Caller not initialized or configured.")
     try:
-        logger.info(f"Initiating call to {target_phone_number} from {ACS_SOURCE_PHONE_NUMBER}")
-        call_id = acs_caller.initiate_call(call_request.target_number)
-        # Store that mapping for later
-        call_user_raw_ids[call_id] = call_request.target_number
-        return {"message": "Call initiated", "callConnectionId": call_id}
+        # Use the instance from app.state
+        result = await acs_caller_instance.initiate_call(call_request.target_number)
+        # Check if the call was successfully connected
+        if result.get("status") == "created":
+            # Notify the frontend about the call connection
+            call_connection_id = result.get("call_connection_id")
+            if call_connection_id:
+                logger.info(f"Call initiated successfully via API. Call ID: {call_connection_id}")
+                return JSONResponse(content={"message": "Call initiated", "callId": call_connection_id}, status_code=200)
+            else:
+                logger.error("Call initiation succeeded but no callConnectionId returned.")
+                raise HTTPException(status_code=500, detail="Call initiated but failed to get Call ID.")
+            # Log the failure reason if available
+
+        else:
+            logger.warning(f"Call initiation failed: {result.get('detail', 'Unknown error')}")
+            return JSONResponse(content={"status": "failed"}, status_code=400)
+
+
+    except HttpResponseError as e:
+        logger.error(f"ACS HTTP Error initiating call: {e}", exc_info=True)
+        raise HTTPException(status_code=e.status_code or 500, detail=f"ACS Error: {e.message}")
+    except RuntimeError as e:
+        logger.error(f"Runtime error during call initiation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to initiate call: {e}", exc_info=True)
-# --- End API Endpoint ---
+        raise HTTPException(status_code=500, detail=f"Failed to initiate call: {str(e)}")
+
+
+from azure.core.messaging import CloudEvent
 
 # --- ACS Callback Handler ---
 @app.post(ACS_CALLBACK_PATH)
-async def handle_callbacks(request: Request): # Remove context_id, keep request
-    """Handles incoming ACS event callbacks."""
-    if not acs_caller:
-         logger.error("ACS Caller not initialized, cannot handle callback.")
-         return {"error": "ACS Caller not initialized"}
+async def handle_acs_callbacks(request: Request):
+    acs_caller_instance = request.app.state.acs_caller
+    if not acs_caller_instance:
+        logger.error("ACS Caller not initialized, cannot handle callback.")
+        return JSONResponse(status_code=503, content={"error": "ACS Caller not initialized"})
     try:
-        await acs_caller.outbound_call_handler(request)
-        return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Error processing ACS callback: {e}", exc_info=True)
-        return {"error": str(e)}
-# --- End ACS Callback Handler ---
+        cloudevent = await request.json() 
 
-# High level flow to emulate:
-#     ACS_WS-->>Backend: PCM audio chunks
-#     Backend-->>STT: push_stream.write(bytes)
-#     STT-->>Backend: recognizing (partials)
-#     Backend-->>UI: partial transcript
-#     STT-->>Backend: recognized (final)
-#     Backend->>Backend: append to convo buffer
-#     Backend-->>LLM: stream chat(buffer)
-#     LLM-->>Backend: token chunks
-#     Backend-->>ACS_Play: play_media(TextSource chunk)
-#     ACS_Play-->>Caller: TTS audio
-#     Caller-->>ACS_WS: continues speaking…
+        for event_dict in cloudevent:
+            try:
+                event = CloudEvent.from_dict(event_dict)
+                if event.data is None or 'callConnectionId' not in event.data:
+                    logger.warning(f"Received event without data or callConnectionId: {event_dict}")
+                    continue
+
+                call_connection_id = event.data['callConnectionId']
+                logger.info(f"Processing event type: {event.type} for call connection id: {call_connection_id}")
+
+                # Existing event handling logic (logging)
+                if event.type == "Microsoft.Communication.CallConnected":
+                    logger.info(f"Call connected event received for call connection id: {call_connection_id}")
+                    # asyncio.create_task(manager.broadcast({
+                    #     "channel":"acs",
+                    #     "type":"logs",
+                    #     "text": "Call connected",
+                    # }))
+                elif event.type == "Microsoft.Communication.ParticipantsUpdated":
+                    logger.info(f"Participants updated event received for call connection id: {call_connection_id}")
+                    # asyncio.create_task(manager.broadcast({
+                    #     "channel":"acs",
+                    #     "type":"logs",
+                    #     "text": "Participants Updated",
+                    # }))
+                elif event.type == "Microsoft.Communication.CallDisconnected":
+                    logger.info(f"Call disconnect event received for call connection id: {call_connection_id}")
+                    # asyncio.create_task(manager.broadcast({
+                    #     "channel":"acs",
+                    #     "type":"logs",
+                    #     "text": "Call Disconnected",
+                    # }))
+                    # await acs_caller.disconnect_call(call_connection_id)
+    
+                else:
+                    logger.info(f"Unhandled event type: {event.type} for call connection id: {call_connection_id}")
+
+            except Exception as e:
+                logger.error(f"Error processing event: {event_dict}. Error: {e}", exc_info=True)
+            # Decide if you want to continue processing other events or stop
+
+        # Notify the frontend about the callback event
+        return JSONResponse(content={"status": "callback received"}, status_code=200)
+    except Exception as e:
+        logger.error(f"Error processing ACS callback event: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": f"Failed to process callback: {str(e)}"})
 
 
 # Map from callConnectionId → human caller’s raw ACS identifier
 call_user_raw_ids: Dict[str, str] = {}
+# Audio metadata storage for persisting configurations
+
 @app.websocket(ACS_WEBSOCKET_PATH)
 async def acs_websocket_endpoint(websocket: WebSocket):
-    await websocket.accept() # Accept client connection
-    
-    loop = asyncio.get_event_loop() # Get the asyncio event loop
-    message_queue = asyncio.Queue() # Create a message queue to store the results of speech recognition
-    call_connection_id = websocket.headers.get("x-ms-call-connection-id", "UnknownCall")
-    recognizer = None # Initialize recognizer to None
-    push_stream = None # Initialize push_stream to None
+    """Handles the bidirectional audio stream for an ACS call."""
+    # Access initialized instances from app state
+    speech_core_instance = websocket.app.state.speech_core
+    acs_caller_instance = websocket.app.state.acs_caller
 
-    # --- Instantiate Conversation Manager ---
-    cm = ConversationManager(auth=True) # Create a new conversation manager instance
-    cm.cid = call_connection_id # Set the conversation ID to the call connection ID
-    user_identifier = call_user_raw_ids.get(call_connection_id)
-    if not user_identifier:
-        logger.warning(f"No caller rawId for call {call_connection_id} yet; audio will be ignored until we see CallConnected.")
+    if not speech_core_instance:
+        logger.error("SpeechCoreTranslator not available. Cannot process ACS audio.")
+        # Close connection gracefully if possible (though accept wasn't called yet)
+        # await websocket.close(code=1011) # Cannot close before accept
+        return
+    if not acs_caller_instance:
+         logger.error("ACS Caller not available. Cannot process ACS audio.")
+         # await websocket.close(code=1011)
+         return
+
+    await websocket.accept()
+    call_connection_id = websocket.headers.get("x-ms-call-connection-id", "UnknownCall")
+    logger.info(f"▶ ACS media WebSocket accepted for call {call_connection_id}")
+
+    loop = asyncio.get_event_loop()
+    message_queue = asyncio.Queue()
+    recognizer = None
+    push_stream = None
+    cm = ConversationManager(auth=False) # ACS calls usually start unauthenticated
+    cm.cid = call_connection_id
+    user_identifier = call_user_raw_ids.get(call_connection_id) # Get initial mapping if available
 
     try:
         # --- Setup Audio Stream and Recognizer ---
-        fmt = AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1)
+        fmt = AudioStreamFormat(samples_per_second=16000, bits_per_sample=16, channels=1) # Corrected sample rate
         push_stream = PushAudioInputStream(stream_format=fmt)
-
-        # Use the new method to create and configure the recognizer
-        recognizer = speech_core.create_realtime_recognizer(
+        # Use the instance from app.state
+        recognizer = speech_core_instance.create_realtime_recognizer(
             push_stream=push_stream,
             loop=loop,
             message_queue=message_queue,
-            language="en-US" # Or dynamically set if needed
+            language="en-US"
         )
-        # -----------------------------------------
-
-        logger.info(f"▶ ACS media WebSocket accepted for call {call_connection_id}")
         recognizer.start_continuous_recognition_async()
         logger.info(f"🎙️ Continuous recognition started for call {call_connection_id}")
 
+        # --- Play greeting only if not already played for this call ---
+        # Note: Assumes 'greeted_call_ids' set is initialized in app.state during startup
+        # and cleaned up (e.g., on CallDisconnected event).
+        greeted_call_ids = websocket.app.state.greeted_call_ids
+
+        if call_connection_id != "UnknownCall" and call_connection_id not in greeted_call_ids:
+            initial_greeting = "Hello, thank you for calling. How can I help you today?"
+            logger.info(f"Playing initial greeting for call {call_connection_id}")
+            # Don't await here, let it play while listening starts
+            # Use the instance from app.state
+            asyncio.create_task(acs_caller_instance.play_response(call_connection_id, initial_greeting))
+            cm.hist.append({"role": "assistant", "content": initial_greeting})
+            greeted_call_ids.add(call_connection_id) # Mark as greeted
+        else:
+             logger.info(f"Skipping initial greeting for already greeted call {call_connection_id}")
+
+
         # --- Main Loop ---
         while True:
-            # Check for recognized text from the queue (non-blocking)
+            # --- Check for recognized speech ---
             try:
-                recognized_text = message_queue.get_nowait()
-                if recognized_text: # Process only if text is not None/empty
-                    logger.info(f"Processing recognized text: {recognized_text}")
-
-                    # --- Stopword Check ---
-                    if check_for_stopwords(recognized_text):
-                        goodbye = "Thank you for calling. Goodbye."
-                        logger.info(f"Stopword detected. Playing goodbye message for call {call_connection_id}.")
-                        if acs_caller:
-                            await acs_caller.play_media(goodbye, call_connection_id)
-                        # Optionally send a signal via websocket if needed for other systems
-                        # await websocket.send_text(json.dumps({"type": "exit", "message": goodbye}))
-                        break # Exit the loop after goodbye
-
-                    # --- Process with GPT ---
-                    await process_gpt_response(cm, recognized_text, websocket, is_acs=True, call_id=call_connection_id)
-                    # ----------------------
-                    
+                recognized_text = await asyncio.wait_for(message_queue.get(), timeout=0.1)
+                if recognized_text:
+                    logger.info(f"STT Final Result for call {call_connection_id}: {recognized_text}")
+                    # await manager.broadcast({"type": "finalTranscript", "text": recognized_text, "callId": call_connection_id})
+                    if check_for_stopwords(recognized_text): break
+                    # Use instance for GPT processing
+                    await process_gpt_response(cm, recognized_text, websocket, is_acs=True, call_id=call_connection_id, acs_caller_override=acs_caller_instance)
                 message_queue.task_done()
-            except asyncio.QueueEmpty:
-                pass # No new text recognized yet
+            except asyncio.TimeoutError: pass
+            except Exception as q_err: logger.error(f"Error getting from message queue for call {call_connection_id}: {q_err}", exc_info=True)
 
-            # Receive message from WebSocket (with timeout to allow checking the queue)
+
+            # --- Receive and process incoming WebSocket data from ACS ---
             try:
-                raw_data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+                raw_data = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
                 data = json.loads(raw_data)
             except asyncio.TimeoutError:
-                continue # No message received, loop back to check queue/receive again
-            except WebSocketDisconnect as e:
-                logger.info(f"⚡️ ACS media WebSocket disconnected during message receive for call {call_connection_id}. Code: {e.code}, Reason: {e.reason}")
-                break
-            except json.JSONDecodeError:
-                logger.warning(f"Received non-JSON message: {raw_data}")
+                if websocket.client_state != WebSocketState.CONNECTED: break
                 continue
+            except WebSocketDisconnect: break
+            except json.JSONDecodeError: continue
             except Exception as e:
-                 logger.error(f"Error receiving or parsing message: {e}")
-                 break # Or handle more gracefully
+                logger.error(f"Error receiving from ACS WebSocket {call_connection_id}: {e}", exc_info=True)
+                break
+
 
             # --- Handle Different Message Kinds ---
-            if data.get("kind") == "AudioMetadata":
-                metadata = data.get("audioMetadata")
-                if metadata:
-                    logger.info(f"Received audio metadata: {metadata}")
-
-            elif data.get("kind") == "AudioData":
+            kind = data.get("kind")
+            if kind == "AudioData":
                 raw_id = data.get("audioData", {}).get("participantRawID")
-
-                if user_identifier and raw_id != user_identifier:
-                    logger.debug(f"Ignoring audio from agent (rawId={raw_id})")
-                    continue
+                if not user_identifier and call_connection_id in call_user_raw_ids: user_identifier = call_user_raw_ids[call_connection_id]
+                if user_identifier and raw_id != user_identifier: continue
 
                 try:
-                    # Pseudocode after recognizing user speech
-                    await websocket.send_text(json.dumps({
-                        "Kind": "StopAudio",
-                        "AudioData": None,
-                        "StopAudio": {}
-                    }))
- 
+                    # Use instance for barge-in
+                    asyncio.create_task(acs_caller_instance.play_response(call_connection_id, ""))
                     b64 = data.get("audioData", {}).get("data")
-                    pcm = b64decode(b64)
-                    push_stream.write(pcm)
-                except Exception as e:
-                    logger.error(f"Error processing audio data chunk: {e}")
-                    # Consider if this error is fatal
+                    if b64: push_stream.write(b64decode(b64))
+                except Exception as e: logger.error(f"Error processing audio data chunk for call {call_connection_id}: {e}", exc_info=True)
 
-            elif data.get("kind") == "CallConnected":
-                 logger.info(f"Received CallConnected event: {data}")
-            # Add handling for other kinds if necessary
+            elif kind == "CallConnected":
+                connected_participant_id = data.get("callConnected", {}).get("participant", {}).get("rawID")
+                if connected_participant_id and call_connection_id not in call_user_raw_ids:
+                    call_user_raw_ids[call_connection_id] = connected_participant_id
+                    user_identifier = connected_participant_id
 
-    except WebSocketDisconnect as e:
-        logger.info(f"⚡️ ACS media WebSocket disconnected during main loop for call {call_connection_id}. Code: {e.code}, Reason: {e.reason}")
+
+    except WebSocketDisconnect:
+        logger.info(f"ACS WebSocket {call_connection_id} disconnected.")
     except Exception as e:
-        logger.exception(f"⚠️ Unexpected error during WebSocket handling for call {call_connection_id}: {e}")
+        logger.error(f"Unhandled error in ACS WebSocket handler for call {call_connection_id}: {e}", exc_info=True)
     finally:
-        logger.info(f"🧹 Cleaning up WebSocket handler for call {call_connection_id}.")
-
-        # Stop the recognizer if it was initialized
+        logger.info(f"🧹 Cleaning up ACS WebSocket handler for call {call_connection_id}.")
         if recognizer:
-            logger.info("Stopping continuous recognition...")
-            try:
-                # Use .get() to wait for the async operation to complete
-                recognizer.stop_continuous_recognition_async().get()
-                logger.info("✔️ Speech recognizer stopped")
-            except Exception as stop_ex:
-                logger.error(f"Error stopping recognizer: {stop_ex}")
+            try: await asyncio.wait_for(recognizer.stop_continuous_recognition_async(), timeout=5.0)
+            except asyncio.TimeoutError: logger.warning(f"Timeout stopping recognizer for call {call_connection_id}")
+            except Exception as e: logger.error(f"Error stopping recognizer for call {call_connection_id}: {e}", exc_info=True)
+        if push_stream: push_stream.close()
+        if websocket.client_state == WebSocketState.CONNECTED: await websocket.close()
+        if call_connection_id in call_user_raw_ids:
+            try: del call_user_raw_ids[call_connection_id]
+            except KeyError: pass
 
 
-        # Close the push stream if it was initialized
-        if push_stream:
-            push_stream.close()
-            logger.info("✔️ Push audio stream closed")
-
-        # Close websocket if not already closed
-        if websocket.client_state != WebSocketState.DISCONNECTED:
-            with contextlib.suppress(Exception): # Suppress errors during close
-                await websocket.close()
-        logger.info(f"✔️ Media stream handler exited for call {call_connection_id}.")
-
-
-# ----------------------------- Main Flow -----------------------------
+# ----------------------------- Main Flow (Browser) -----------------------------
 async def main_conversation(websocket: WebSocket, cm: ConversationManager):
     while True:
         try:
@@ -422,7 +528,7 @@ async def main_conversation(websocket: WebSocket, cm: ConversationManager):
             msg = json.loads(prompt_raw)
             if msg.get("type") == "interrupt":
                 logger.info("🛑 Interrupt received; stopping TTS and skipping GPT")
-                az_speech_synthesizer_client.stop_speaking()
+                tts_client.stop_speaking()
                 continue
         except json.JSONDecodeError:
             pass
@@ -442,6 +548,27 @@ async def main_conversation(websocket: WebSocket, cm: ConversationManager):
             return
 
         await process_gpt_response(cm, prompt, websocket)
+
+
+async def send_pcm_frames(ws: WebSocket, pcm_bytes: bytes, sample_rate: int):
+    packet_size = 640 if sample_rate == 16000 else 960
+    for i in range(0, len(pcm_bytes), packet_size):
+        frame = pcm_bytes[i : i + packet_size]
+        # pad last frame
+        if len(frame) < packet_size:
+            frame += b"\x00" * (packet_size - len(frame))
+        b64 = b64encode(frame).decode("ascii")
+
+        payload = {
+          "kind": "AudioData",
+          "audioData": {"data": b64},
+          "stopAudio": None
+        }
+        await ws.send_text(json.dumps(payload))
+
+        # **This 20 ms delay makes it “real-time” instead of instant-playback**
+        # await asyncio.sleep(0.02)
+
 async def send_data(websocket, buffer):
     if websocket.client_state == WebSocketState.CONNECTED:
         data = {
@@ -458,24 +585,38 @@ async def send_data(websocket, buffer):
         await websocket.send_json(data)
 
 async def stop_audio(websocket):
-    if websocket.client_state == WebSocketState.CONNECTED:
-        data = {
+    """
+    Tells the ACS Media Streaming service to stop accepting incoming audio from client.
+    (This does not close the WebSocket; it just pauses the stream.)
+    """
+    if websocket.client_state.name == "CONNECTED":
+        stop_payload = {
             "Kind": "StopAudio",
             "AudioData": None,
             "StopAudio": {}
         }
-        # Serialize the server streaming data
-        serialized_data = json.dumps(data)
-        print(f"Out Streaming Data ---> {serialized_data}")
-        # Send the chunk over the WebSocket
-        await websocket.send_json(data)
+        await websocket.send_json(stop_payload)
+        logger.info("🛑 Sent StopAudio command to ACS WebSocket.")
+
+async def resume_audio(websocket):
+    """
+    Tells the ACS Media Streaming service to resume accepting incoming audio from client.
+    (This resumes the stream without needing to reconnect.)
+    """
+    if websocket.client_state.name == "CONNECTED":
+        start_payload = {
+            "Kind": "StartAudio",
+            "AudioData": None,
+            "StartAudio": {}
+        }
+        await websocket.send_json(start_payload)
+        logger.info("🎙️ Sent StartAudio command to ACS WebSocket.")
 # ----------------------------- GPT Processing -----------------------------
 async def process_gpt_response(
     cm: ConversationManager,
     user_prompt: str,
     websocket: WebSocket,
     is_acs: bool = False,
-    call_id: Optional[str] = None, # Added call_id parameter
 ):
     """
     Process GPT response and send output to websocket.
@@ -526,25 +667,31 @@ async def process_gpt_response(
         final_text = "".join(collected_messages).strip()
         if final_text:
             if is_acs:
-                # Synthesize speech and encode as base64 for ACS AudioData
-                if acs_caller and call_id:
-                    try:
-                        # Use the passed call_id
-                        await acs_caller.play_response(call_connection_id=call_id, response_text=final_text)
-                        logger.info(f"Injected TTS into call {call_id}")
-                    except Exception as e:
-                        logger.error(f"Failed to play TTS via ACS for call {call_id}: {e}", exc_info=True)
-                elif not acs_caller:
-                    logger.error(f"ACS caller not initialized, cannot play TTS for call {call_id}")
-                else: # call_id is None
-                    logger.error(f"No call_id provided, cannot play TTS via ACS for prompt: '{user_prompt[:50]}...'")
+                try:
+                    #---------- Play the complete message via ACS TTS ----------
+                    ## Current Issue: Consistent 8500 error when playing TTS
+                    ## This is likely due to the media operation being busy.
+                    # asyncio.create_task(acs_caller.play_response(call_connection_id=call_id, response_text=final_text))
+                    # call_conn = acs_caller.call_automation_client.get_call_connection(cm.cid)
 
-            else:
-                await websocket.send_text(json.dumps({"type": "assistant", "content": final_text}))
-                await send_tts_audio(final_text, websocket)
-            # Append assistant response regardless of successful TTS playback
+                    # source = TextSource(
+                    #     text=final_text,
+                    #     voice_name="en-US-JennyNeural",
+                    #     source_locale="en-US"
+                    # )
+
+                    # await play_tts_safely(websocket, call_conn, source, cm.cid)
+                    # ========================
+                    pcm = tts_client.synthesize_to_base64_frames(text=final_text, sample_rate=16000)
+                    await send_pcm_frames(websocket, pcm, sample_rate=16000) # Send PCM frames to ACS WebSocket
+                except Exception as e:
+                    logger.error(f"Failed to play final TTS via ACS for call {call_id}: {e}", exc_info=True)
+            else: # Browser - final text already streamed
+                 pass
+
+            # Append final assistant response to history
             cm.hist.append({"role": "assistant", "content": final_text})
-            logger.info(f"🧠 Assistant said: {final_text}")
+            logger.info(f"🧠 Assistant final response generated: {final_text}")
 
         if tool_call_started and tool_call_id and tool_name and function_call_arguments:
             cm.hist.append({
@@ -565,8 +712,15 @@ async def process_gpt_response(
             return tool_result if tool_name == "authenticate_user" else None
 
     except asyncio.CancelledError:
-        logger.info(f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'")
-        raise
+        logger.info("GPT processing task cancelled.")
+    except Exception as e:
+        logger.error(f"Error processing GPT response: {e}", exc_info=True)
+        # Send error message to client if possible
+        if websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.send_text(json.dumps({"type": "error", "message": f"Error processing request: {e}"}))
+            except Exception as send_err:
+                 logger.error(f"Failed to send error to client: {send_err}")
 
     return None
 
@@ -616,16 +770,9 @@ async def process_tool_followup(cm: ConversationManager, websocket: WebSocket, i
     if final_text:
         if is_acs:
              # Ensure acs_caller and call_id are available for followup TTS
-            if acs_caller and call_id:
-                try:
-                    await acs_caller.play_response(call_connection_id=call_id, response_text=final_text)
-                    logger.info(f"Injected tool followup TTS into call {call_id}")
-                except Exception as e:
-                    logger.error(f"Failed to play tool followup TTS via ACS for call {call_id}: {e}", exc_info=True)
-            elif not acs_caller:
-                 logger.error(f"ACS caller not initialized, cannot play tool followup TTS for call {call_id}")
-            else: # call_id is None
-                 logger.error(f"No call_id provided, cannot play tool followup TTS via ACS.")
+            pcm = tts_client.synthesize_to_base64_frames(text=final_text, sample_rate=16000)
+            await send_pcm_frames(websocket, pcm, sample_rate=16000) # Send PCM frames to ACS WebSocket
+
         else: # Not ACS
             await websocket.send_text(json.dumps({"type": "assistant", "content": final_text}))
             await send_tts_audio(final_text, websocket)
