@@ -6,7 +6,7 @@ from fastapi import WebSocket
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageToolCall
 
-from utils.conversation_manager import ConversationManager
+from conversation_manager import ConversationManager
 from utils.prompt_manager import PromptManager
 from utils.tool_manager import ToolManager
 from utils.connection_manager import ConnectionManager

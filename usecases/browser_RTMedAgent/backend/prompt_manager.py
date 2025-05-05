@@ -43,28 +43,31 @@ class PromptManager:
         except Exception as e:
             raise ValueError(f"Error rendering template '{template_name}': {e}")
 
-    def create_prompt_system_voice_agent(
+    def create_prompt_system_main(
         self,
+        patient_phone_number: str = "5552971078",
+        patient_name: str = "Alice Brown",
+        patient_dob: str = "1987-04-12",
+        patient_id: str = "P54321",
     ) -> str:
         """
-        Create a user prompt for evaluating policy search results.
+        Create a system prompt for evaluating policy search results.
 
         Args:
-            query (str): The user's query regarding prior authorization (e.g. "What is
-                         the prior authorization policy for Epidiolex for LGS?")
-            search_results (List[Dict[str, Any]]): A list of retrieved policies, each containing:
-                - 'id': Unique identifier
-                - 'path': URL or file path
-                - 'content': Extracted policy text
-                - 'caption': Summary or short description
+            query (str): The user's query regarding prior authorization.
+            search_results (List[Dict[str, Any]]): Retrieved policies.
+            patient_phone_number (str): Patient’s phone number.
+            patient_name (str): Patient’s full name.
+            patient_dob (str): Patient’s date of birth.
+            patient_id (str): Patient’s identifier.
 
         Returns:
-            str: The rendered prompt (evaluator_user_prompt.jinja) instructing how to
-                 evaluate these policies against the query, deduplicate, and form
-                 a final JSON-like response.
+            str: Rendered prompt string.
         """
         return self.get_prompt(
-            "app/backend/prompts/voice_agent_system.jinja",
-            query=query,
-            SearchResults=search_results,
+            "voice_agent_system.jinja",
+            patient_phone_number=patient_phone_number,
+            patient_name=patient_name,
+            patient_dob=patient_dob,
+            patient_id=patient_id,
         )

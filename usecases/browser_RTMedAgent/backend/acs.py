@@ -96,6 +96,7 @@ class AcsCaller:
         except Exception as e:
             logger.error(f"An unexpected error occurred during initiate_call: {e}", exc_info=True)
             raise # Re-raise the exception
+
     async def disconnect_call(self, call_connection_id: str):
         """
         Disconnects the call associated with the given call connection ID.
@@ -108,7 +109,7 @@ class AcsCaller:
             call_connection = self.call_automation_client.get_call_connection(call_connection_id)
             if call_connection:
                 logger.info(f"Attempting to hang up call with connection ID: {call_connection_id}")
-                await call_connection.hang_up(is_for_everyone=True) # Hang up for all participants
+                await call_connection.hang_up() # Hang up for all participants
                 logger.info(f"Hang up request sent for call connection ID: {call_connection_id}")
             else:
                 logger.warning(f"Could not find call connection object for ID: {call_connection_id}. Cannot hang up.")

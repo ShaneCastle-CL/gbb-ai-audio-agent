@@ -104,11 +104,6 @@ class SpeechCoreTranslator:
         def recognizing_cb(evt: speechsdk.SpeechRecognitionEventArgs):
             if evt.result.reason == speechsdk.ResultReason.RecognizingSpeech:
                 logger.info(f"PARTIAL → {evt.result.text}")
-                # Optional: Send partial results if needed (requires websocket access or another queue)
-                # asyncio.run_coroutine_threadsafe(
-                #     websocket.send_text(json.dumps({"type": "partial_transcript", "text": evt.result.text})),
-                #     loop
-                # )
 
         def recognized_cb(evt: speechsdk.SpeechRecognitionEventArgs):
             if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
