@@ -41,18 +41,23 @@ If you want to enable outbound calling via Azure Communication Services (ACS):
 
 2. **Update Environment Variables**
 
-    - Copy `.env.sample` to `.env` in the `frontend` directory:
+    - Copy `.env.sample` to `.env` in the `root` directory:
 
       ```bash
       cp .env.sample .env
       ```
 
     - Edit `.env` and update the following variables as needed:
-
       ```env
-      VITE_AZURE_SPEECH_KEY=your_speech_key
-      VITE_AZURE_REGION=your_region
-      VITE_WS_URL=wss://<your-devtunnel>.devtunnels.ms/realtime
+      AZURE_OPENAI_API_KEY=your_openai_api_key
+      AZURE_OPENAI_ENDPOINT=your_openai_endpoint
+      AZURE_OPENAI_DEPLOYMENT=your_openai_deployment_name
+      AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION=2024-10-01-preview
+      AZURE_SPEECH_KEY=your_speech_service_key
+      AZURE_SPEECH_REGION=your_speech_service_region
+      BASE_URL=https://<your-devtunnel>.devtunnels.ms
+      ACS_CONNECTION_STRING=your_acs_connection_string
+      ACS_SOURCE_PHONE_NUMBER=+1234567890
       ```
 
     Replace `<your-devtunnel>` with the public Dev Tunnel URL from step 1.
@@ -88,11 +93,11 @@ npm run dev
 
 If supported, create a `.env` file in the `frontend` directory with the following variables:
 
-```env
-VITE_AZURE_SPEECH_KEY=your_speech_key
-VITE_AZURE_REGION=your_region
-VITE_WS_URL=ws://localhost:8010/realtime
-```
+  ```env
+  VITE_AZURE_SPEECH_KEY=your_speech_key
+  VITE_AZURE_REGION=your_region
+  VITE_BACKEND_BASE_URL=https://<your-devtunnel>.devtunnels.ms
+  ```
 
 If `.env` is not supported, manually update these constants in `App.jsx`.
 

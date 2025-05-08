@@ -8,8 +8,9 @@ import {
 
 const AZURE_SPEECH_KEY = import.meta.env.VITE_AZURE_SPEECH_KEY;
 const AZURE_REGION    = import.meta.env.VITE_AZURE_REGION;
-const WS_URL          = import.meta.env.VITE_WS_URL;
-const API_BASE_URL    = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL;
+const WS_URL = API_BASE_URL.replace(/^https?/, 'wss');
+
 export default function RealTimeVoiceApp() {
 
   /* ------------------------------------------------------------------ *
