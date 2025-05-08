@@ -11,6 +11,7 @@ const AZURE_REGION    = import.meta.env.VITE_AZURE_REGION;
 const WS_URL          = import.meta.env.VITE_WS_URL;
 const API_BASE_URL    = import.meta.env.VITE_API_BASE_URL;
 export default function RealTimeVoiceApp() {
+
   /* ------------------------------------------------------------------ *
    *  STATE & REFS
    * ------------------------------------------------------------------ */
@@ -23,26 +24,59 @@ export default function RealTimeVoiceApp() {
   const [targetPhoneNumber, setTargetPhoneNumber] = useState(''); // State for phone number input
 
   const startACSCall = async () => {
-    // Basic validation for the phone number input
+    // Validate the phone number input
     if (!targetPhoneNumber || !/^\+\d+$/.test(targetPhoneNumber)) {
       alert('Please enter a valid phone number in E.164 format (e.g., +15551234567)');
       return;
     }
+
     try {
+      // Initiate the call via the backend API
       const response = await fetch(`${API_BASE_URL}/api/call`, {
         method: 'POST',
-        body: JSON.stringify({ target_number: targetPhoneNumber }), // Use 'target_number' and the state variable
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_number: targetPhoneNumber }),
       });
+
       const result = await response.json();
-      if (response.ok) {
-        appendLog(`Call initiated successfully: ${result.message}`);
-      } else {
+
+      if (!response.ok) {
         appendLog(`Error initiating call: ${result.detail || response.statusText}`);
+        return;
       }
+
+      appendLog(`Call initiated successfully: ${result.message}`);
+
+      // Establish a WebSocket connection for relaying messages
+      const relaySocket = new WebSocket(`${WS_URL}/relay`);
+
+      relaySocket.onopen = () => appendLog('Relay WebSocket connected');
+      relaySocket.onclose = () => appendLog('Relay WebSocket disconnected');
+      relaySocket.onerror = (error) => appendLog(`Relay WebSocket error: ${error.message}`);
+
+      relaySocket.onmessage = (event) => {
+        try {
+          const parsedMessage = JSON.parse(event.data);
+          const { sender, message } = parsedMessage;
+
+          if (sender !== 'User' && sender !== 'Assistant') {
+            appendLog(`[Relay WS] Received message from ${sender}: ${message}`);
+            return;
+          }
+
+          setMessages((prevMessages) => [
+            ...prevMessages,
+            { speaker: sender, text: message },
+          ]);
+          appendLog(`Relay message: ${message}`);
+        } catch (error) {
+          appendLog('Error parsing relay WebSocket message');
+          console.error('Relay WebSocket message error:', error);
+        }
+      };
     } catch (error) {
-      appendLog(`Network or fetch error initiating call: ${error}. Please check if the backend server is running at ${API_BASE_URL} and CORS is enabled.`);
-      console.error("Error initiating call:", error);
+      appendLog(`Network or fetch error initiating call: ${error.message}`);
+      console.error('Error initiating call:', error);
     }
   };
     
@@ -126,7 +160,7 @@ export default function RealTimeVoiceApp() {
     appendLog('🎤 Recognition started');
 
     /* === WebSocket === */
-    const socket = new WebSocket(WS_URL);
+    const socket = new WebSocket(`${WS_URL}/realtime`);
     socket.binaryType = 'arraybuffer';
     socketRef.current = socket;
 
