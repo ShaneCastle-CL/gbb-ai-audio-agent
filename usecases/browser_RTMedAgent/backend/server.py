@@ -68,7 +68,6 @@ function_mapping: Dict[str, Callable[..., Any]] = {
     "check_drug_interactions": check_drug_interactions,
 }
 
-
 class ConversationManager:
     """
     Manages conversation history and context for the voice agent.
