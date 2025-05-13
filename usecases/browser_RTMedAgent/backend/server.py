@@ -141,7 +141,6 @@ app.add_middleware(
 )
 
 # --- Global Clients (Initialized in lifespan) ---
-
 # --- Mappings & Managers ---
 STOP_WORDS: List[str] = ["goodbye", "exit", "see you later", "bye"]
 TTS_END: List[str] = [".", "!", "?", ";", "。", "！", "？", "；", "\n"]
@@ -288,8 +287,6 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
         return None
 
 # --- End ACS Caller Instance ---
-
-
 class ConversationManager:
     """
     Manages conversation history and context for the voice agent.
@@ -376,10 +373,10 @@ def _add_space(text: str) -> str:
     if text and text[-1] not in [" ", "\n"]:
         return text + " "
     return text
+  
 # --------------------------------------------------------------------------- #
 #  WebSocket entry points
 # --------------------------------------------------------------------------- #
-
 # Standalone WebSocket endpoint
 @app.websocket("/relay")
 async def relay_websocket(websocket: WebSocket):

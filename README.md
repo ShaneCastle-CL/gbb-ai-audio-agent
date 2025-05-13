@@ -27,7 +27,7 @@ Healthcare call centers are the frontline of patient interaction, yet they grapp
 
 ## **🚀 How to Get Started**
 
-If you're new to Azure AI Speech and Azure OenAI, specilaly on the realtime realm of thissg pellas efolfow the labs. Experienced AI engineers can jump straight to the use case sections, which showcase how to create how **** and **X-ray Knowledge Stores** for real-world applications.
+If you're new to Azure AI Speech and Azure OpenAI, specilaly on the realtime realm of thissg pellas efolfow the labs. Experienced AI engineers can jump straight to the use case sections, which showcase how to create how **** and **X-ray Knowledge Stores** for real-world applications.
 
 ### **🧪 [RTMedAgent Labs](labs/README.md)**
 
