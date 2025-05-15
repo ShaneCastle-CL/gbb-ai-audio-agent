@@ -23,6 +23,7 @@ const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
  * ------------------------------------------------------------------ */
 const phoneFrame = `${import.meta.env.BASE_URL}phoneimage.png`;
 
+
 if (typeof document !== "undefined") {
   const styleTag =
     document.getElementById("callFX") ?? document.createElement("style");
@@ -119,6 +120,8 @@ const styles = {
  * ------------------------------------------------------------------ */
 const ChatMessage = ({ msg }) => {
   const isUser = msg.speaker === "User";
+  const isTool = msg.isTool === true;
+
   return (
     <div
       style={{
@@ -129,7 +132,7 @@ const ChatMessage = ({ msg }) => {
     >
       <div
         style={{
-          background: isUser ? "#0078D4" : "#394B59",
+          background: isTool ? "rgba(26, 101, 112, 0.2)" : isUser ? "#0078D4" : "#394B59",
           color: "#fff",
           padding: "12px 16px",
           borderRadius: 20,
@@ -155,7 +158,7 @@ const ChatMessage = ({ msg }) => {
             textAlign: isUser ? "right" : "left",
           }}
         >
-          {isUser ? "👤 User" : "🤖 Assistant"}
+          {isTool ? "🛠️ Assistant Called Tool" : isUser ? "👤 User" : "🤖 Assistant"}
         </span>
       </div>
     </div>
@@ -246,55 +249,124 @@ export default function RealTimeVoiceApp() {
 
 
   /* ---------- mind‑map functions ---------- */
-  const resetMindMap = () => { setNodes([rootUser, rootAssistant]); setEdges([]); lastUserId.current=null; lastAssistantId.current=null;setActiveSpeaker(null);};
-
-  const addMindMapNode = ({ speaker, text, functionCall }) => {
-    const newId = nextId();
-    const isUser = speaker === "User";
-
-    /* count existing speaker nodes for vertical placement */
-    const yPos = nodes.filter(n=>n.data?.speaker===speaker).length * 80 + 60;
-    const messageNode = {
-      id:newId,
-      data:{ label:text.slice(0,40)||"(…)", speaker },
-      position:{ x:isUser?-220:220, y:yPos },
-      style:{ background:"#334155", color:"#fff", fontSize:10, padding:6 },
-    };
-
-    /* build new edges */
-    const newEdges = [];
-
-    if(isUser){
-      const parent = lastAssistantId.current ?? "user-root";
-      newEdges.push({ id:`e-u-${newId}`, source:parent, target:newId, animated:true });
-      lastUserId.current = newId;
-    } else {
-      /* assistant node points back to last user msg if any, else to assistant root */
-      const parent = lastUserId.current ?? "assistant-root";
-      newEdges.push({ id:`e-a-${newId}`, source:parent, target:newId,
-                      animated:true, style:{stroke:"#4338CA"} });
-      lastAssistantId.current = newId;
-    }
-
-    /* optional tool node */
-    if(functionCall){
-      const fnId = `${newId}-fn`;
-      const fnNode = {
-        id:fnId,
-        data:{ label:`🛠️ ${functionCall}` },
-        position:{ x:isUser?-360:360, y:yPos+40 },
-        style:{ background:"#F59E0B", color:"#000", fontSize:10, padding:6 }
-      };
-      newEdges.push({ id:`e-fn-${fnId}`, source:newId, target:fnId,
-                      style:{ strokeDasharray:"4 2" } });
-      setNodes(n=>[...n, messageNode, fnNode]);
-    } else {
-      setNodes(n=>[...n, messageNode]);
-    }
-    setEdges(e=>[...e, ...newEdges]);
+  const resetMindMap = () => {
+    setNodes([ rootUser, rootAssistant ]);
+  
+    setEdges([
+      {
+        id: 'e-user-to-assistant',
+        source: 'user-root',
+        target: 'assistant-root',
+        animated: false,
+        style: { stroke: '#94A3B8' },
+      },
+      {
+        id: 'e-assistant-to-user',
+        source: 'assistant-root',
+        target: 'user-root',
+        animated: false,
+        style: { stroke: '#94A3B8' },
+      },
+    ]);
+  
+    lastUserId.current      = 'user-root';
+    lastAssistantId.current = 'assistant-root';
+    setActiveSpeaker(null);
   };
 
+  const addMindMapNode = ({ speaker, text, functionCall, parentId, toolStatus }) => {
+    const isTool = !!functionCall;
+  
+    if (!isTool) {
+      // ——— update one of the TWO root nodes ———
+      const rootId = speaker === 'User' ? 'user-root' : 'assistant-root';
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === rootId
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  label: text.length > 40 ? text.slice(0, 37) + '…' : text,
+                },
+                style: {
+                  padding:     8,
+                  fontSize:    12,
+                  width:       200,
+                  height:      60,
+                  borderRadius: 8,
+                  border: speaker === "User"
+                    ? "2px solid #FCD34D"
+                    : "2px solid transparent",
+                  border: speaker === "Assistant"
+                  ? "2px solid #FCD34D"
+                  : "2px solid transparent",
+                },
+              }
+            : n
+        )
+      );
+  
+      // ——— animate the correct chat‐edge ———
+      const edgeId = speaker === 'User'
+        ? 'e-user-to-assistant'
+        : 'e-assistant-to-user';
+  
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? { ...e, animated: true, style: { ...e.style, stroke: speaker === 'User' ? '#22C55E' : '#4338CA' } }
+            : { ...e, animated: false }
+        )
+      );
+  
+      // ——— update lastSpeaker ref ———
+      if (speaker === 'User') lastUserId.current = rootId;
+      else lastAssistantId.current = rootId;
+  
+      return rootId;
+    }
+  
+    // ——— otherwise: it’s a Tool call, so add a brand-new node ———
+    const newId = nextId();
+    const toolCount = nodes.filter(n => n.data.speaker === 'Tool').length;
+    const toolNode = {
+      id: newId,
+      data: {
+        speaker: 'Tool',
+        label: `🛠️ ${functionCall} ${toolStatus === 'running' ? '🔄'
+                                      : toolStatus === 'completed' ? '✔️'
+                                      : '❌'}`,
+      },
+      position: { x: 400, y: toolCount * 80 + 50 },
+      style: {
+        background: '#F59E0B',
+        color:       '#000',
+        padding:     8,
+        fontSize:    12,
+        width:    200,
+        height:   60,
+        boxShadow:"344px 0 0 0 rgba(252,211,77,.6)",
+        borderRadius: 8,
+      },
+    };
+  
+    const edge = {
+      id:     `e-${parentId}-${newId}`,
+      source: parentId,
+      target: newId,
+      animated: true,
+      style: { stroke: '#F59E0B', strokeDasharray: '4 2' },
+    };
+  
+    setNodes((nds) => [...nds, toolNode]);
+    setEdges((eds) => [...eds, edge]);
+  
+    return newId;
+  };
+  
 
+  
   /* ------------------------------------------------------------------ *
    *  VOICE RECOGNITION & WEBSOCKET
    * ------------------------------------------------------------------ */
@@ -373,24 +445,18 @@ export default function RealTimeVoiceApp() {
   };
 
   const handleSocketMessage = async (event) => {
-    /* binary = TTS audio */
     if (typeof event.data !== "string") {
-      try {
-        const ctx = new AudioContext();
-        const buf = await event.data.arrayBuffer();
-        const audioBuf = await ctx.decodeAudioData(buf);
-        const src = ctx.createBufferSource();
-        src.buffer = audioBuf;
-        src.connect(ctx.destination);
-        src.start();
-        appendLog("🔊 Audio played");
-      } catch {
-        appendLog("⚠️ audio error");
-      }
+      const ctx = new AudioContext();
+      const buf = await event.data.arrayBuffer();
+      const audioBuf = await ctx.decodeAudioData(buf);
+      const src = ctx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(ctx.destination);
+      src.start();
+      appendLog("🔊 Audio played");
       return;
     }
-
-    /* JSON payload */
+  
     let payload;
     try {
       payload = JSON.parse(event.data);
@@ -400,85 +466,120 @@ export default function RealTimeVoiceApp() {
     }
     const { type, content = "", message = "", function_call } = payload;
     const txt = content || message;
-
+  
     if (type === "assistant_streaming") {
       setActiveSpeaker("Assistant");
       setMessages((prev) => {
-        if (prev.length && prev.at(-1).streaming) {
-          const u = [...prev];
-          u[u.length - 1].text = txt;
-          return u;
+        if (prev.at(-1)?.streaming) {
+          return prev.map((m, i) => i === prev.length - 1 ? { ...m, text: txt } : m);
         }
         return [...prev, { speaker: "Assistant", text: txt, streaming: true }];
       });
       return;
     }
-
+  
     if (type === "assistant" || type === "status") {
-      setMessages((prev) => {
-        if (prev.length && prev.at(-1).streaming) {
-          const u = [...prev];
-          u[u.length - 1] = { speaker: "Assistant", text: txt };
-          return u;
-        }
-        return [...prev, { speaker: "Assistant", text: txt }];
-      });
       addMindMapNode({
         speaker: "Assistant",
         text: txt,
-        functionCall: function_call?.name,
+        parentId: lastUserId.current,
       });
+  
       setActiveSpeaker("Assistant");
+      setMessages((prev) => {
+        if (prev.at(-1)?.streaming) {
+          return prev.map((m, i) => i === prev.length - 1 ? { speaker: "Assistant", text: txt } : m);
+        }
+        return [...prev, { speaker: "Assistant", text: txt }];
+      });
       appendLog("🤖 Assistant responded");
       return;
     }
-
+  
     if (type === "tool_start") {
-      setMessages((p) => [
-        ...p,
-        { speaker: "Assistant", text: `⚙️ ${payload.tool} started` },
+      const parentId = lastAssistantId.current;
+    
+      // Always create a new tool node
+      addMindMapNode({
+        speaker: "Assistant",
+        functionCall: payload.tool,
+        parentId,
+        toolStatus: "running",
+      });
+    
+      setMessages((prev) => [
+        ...prev,
+        {
+          speaker: "Assistant",
+          isTool: true,
+          text: `🛠️ tool ${payload.tool} started 🔄`,
+        },
       ]);
+    
       appendLog(`⚙️ ${payload.tool} started`);
       return;
     }
-
+    
+  
     if (type === "tool_progress") {
       setMessages((prev) =>
         prev.map((m, i, arr) =>
-          i === arr.length - 1 && m.text.startsWith(`⚙️ ${payload.tool}`)
-            ? { ...m, text: `⚙️ ${payload.tool} ${payload.pct}%` }
+          i === arr.length - 1 && m.text.startsWith(`🛠️ tool ${payload.tool}`)
+            ? { ...m, text: `🛠️ tool ${payload.tool} ${payload.pct}% 🔄` }
             : m,
         ),
       );
       appendLog(`⚙️ ${payload.tool} ${payload.pct}%`);
       return;
     }
-
+  
     if (type === "tool_end") {
+      setNodes((prevNodes) =>
+        prevNodes.map((node) => {
+          if (node.data.label.includes(payload.tool)) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                label: `🛠️ ${payload.tool} ${
+                  payload.status === "success" ? "✔️ completed" : "❌ error"
+                }`,
+              },
+              style: {
+                ...node.style,
+                background: payload.status === "success" ? "#22C55E" : "#EF4444",
+              },
+            };
+          }
+          return node;
+        }),
+      );
+    
       const finalText =
         payload.status === "success"
-          ? `⚙️ ${payload.tool} completed\n${JSON.stringify(
+          ? `🛠️ tool ${payload.tool} completed ✔️\n${JSON.stringify(
               payload.result,
               null,
               2,
             )}`
-          : `⚙️ ${payload.tool} failed ❌\n${payload.error}`;
+          : `🛠️ tool ${payload.tool} failed ❌\n${payload.error}`;
+    
       setMessages((prev) =>
         prev.map((m, i, arr) =>
-          i === arr.length - 1 && m.text.startsWith(`⚙️ ${payload.tool}`)
+          i === arr.length - 1 && m.text.startsWith(`🛠️ tool ${payload.tool}`)
             ? { ...m, text: finalText }
             : m,
         ),
       );
-      appendLog(
-        `⚙️ ${payload.tool} ${payload.status} (${payload.elapsedMs} ms)`,
-      );
+    
+      appendLog(`⚙️ ${payload.tool} ${payload.status} (${payload.elapsedMs} ms)`);
     }
   };
+  
 
   /* ------------------------------------------------------------------ *
-   *  OUTBOUND CALL (ACS)
-   * ------------------------------------------------------------------ */
+  *  OUTBOUND CALL (ACS)
+  * ------------------------------------------------------------------ */
   const startACSCall = async () => {
     if (!targetPhoneNumber || !/^\+\d+$/.test(targetPhoneNumber)) {
       alert("Enter phone in E.164 format e.g. +15551234567");
@@ -498,28 +599,83 @@ export default function RealTimeVoiceApp() {
         return;
       }
 
-      appendLog(`📞 Call started → ${targetPhoneNumber}`);
+      // 1) Chat bubble
+      setMessages((m) => [
+        ...m,
+        { speaker: "Assistant", text: `📞 Call started → ${targetPhoneNumber}` },
+      ]);
+
+      // 2) Mind-map node
+      addMindMapNode({
+        speaker: "Assistant",
+        text: `📞 Call started → ${targetPhoneNumber}`,
+        parentId: lastAssistantId.current,
+      });
+      setActiveSpeaker("Assistant");
 
       /* optional: relay socket to surface call messages */
       const relay = new WebSocket(`${WS_URL}/relay`);
-      relay.onopen = () => appendLog("Relay WS connected");
-      relay.onclose = () => appendLog("Relay WS disconnected");
-      relay.onerror = (e) => appendLog(`Relay WS error: ${e.message}`);
+
+      relay.onopen = () => {
+        appendLog("Relay WS connected");
+        // you could also add a mind-map node here if you like:
+        // addMindMapNode({ speaker:"Assistant", text:"Relay WS connected", parentId:lastAssistantId.current })
+      };
+
+      relay.onerror = (e) => {
+        appendLog(`Relay WS error: ${e.message}`);
+        addMindMapNode({
+          speaker: "Assistant",
+          text: `Relay WS error: ${e.message}`,
+          parentId: lastAssistantId.current,
+        });
+        setActiveSpeaker("Assistant");
+      };
+
       relay.onmessage = ({ data }) => {
         try {
           const { sender, message } = JSON.parse(data);
-          if (sender === "User" || sender === "Assistant") {
-            setMessages((m) => [...m, { speaker: sender, text: message }]);
-          }
+
+          // 1) chat
+          setMessages((m) => [...m, { speaker: sender, text: message }]);
+
+          // 2) mind-map
+          addMindMapNode({
+            speaker: sender,
+            text: message,
+            parentId:
+              sender === "User" ? lastUserId.current : lastAssistantId.current,
+          });
+
+          setActiveSpeaker(sender);
           appendLog(`[Relay] ${sender}: ${message}`);
         } catch {
           appendLog("Relay message parse error");
         }
       };
+
+      relay.onclose = () => {
+        appendLog("Relay WS disconnected");
+        // Mind-map “call ended”
+        addMindMapNode({
+          speaker: "Assistant",
+          text: "📞 Call ended",
+          parentId: lastAssistantId.current,
+        });
+        setActiveSpeaker("Assistant");
+      };
     } catch (e) {
       appendLog(`Network error starting call: ${e.message}`);
+      // Mind-map error
+      addMindMapNode({
+        speaker: "Assistant",
+        text: `Network error starting call: ${e.message}`,
+        parentId: lastAssistantId.current,
+      });
+      setActiveSpeaker("Assistant");
     }
   };
+
 
   /* ------------------------------------------------------------------ *
    *  RENDER
