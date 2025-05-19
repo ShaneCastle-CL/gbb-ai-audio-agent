@@ -14,7 +14,6 @@ from azure.communication.callautomation import (AudioFormat,
                                                 PhoneNumberIdentifier)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
 
