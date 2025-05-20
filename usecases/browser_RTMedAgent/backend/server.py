@@ -185,7 +185,7 @@ async def process_gpt_response(
                     text_streaming = add_space("".join(collected).strip())
                     if is_acs:
                         # Send TTS audio to ACS WebSocket
-                        await broadcast_message(text_streaming, "Assistant")
+                        await broadcast_message(connected_clients, text_streaming, "Assistant")
                         send_response_to_acs(websocket, text_streaming)
                     else:
                         await send_tts_audio(text_streaming, websocket)
@@ -205,7 +205,7 @@ async def process_gpt_response(
             pending = "".join(collected).strip()
             if is_acs:
                 # Send TTS audio to ACS WebSocket
-                await broadcast_message(text_streaming, "Assistant")
+                await broadcast_message(connected_clients,text_streaming, "Assistant")
                 send_response_to_acs(websocket, pending)
             else:
                 await send_tts_audio(pending, websocket)
@@ -289,7 +289,7 @@ async def process_tool_followup(
             pending = "".join(collected).strip()
             if is_acs:
                 # Send TTS audio to ACS WebSocket
-                await broadcast_message(pending, "Assistant")
+                await broadcast_message(connected_clients, pending, "Assistant")
 
                 send_response_to_acs(websocket, pending)
             else:
@@ -539,37 +539,37 @@ async def handle_acs_callbacks(request: Request):
                     logger.info(
                         f"📞 Call connected event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message("📞 Call connected")
+                    await broadcast_message(connected_clients, "📞 Call connected")
                 elif event.type == "Microsoft.Communication.ParticipantsUpdated":
                     logger.info(
                         f"👥 Participants updated event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message("👥 Participants updated")
+                    await broadcast_message(connected_clients, "👥 Participants updated")
                 elif event.type == "Microsoft.Communication.CallDisconnected":
                     logger.info(
                         f"❌ Call disconnect event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message("❌ Call disconnected")
+                    await broadcast_message(connected_clients, "❌ Call disconnected")
                 elif event.type == "Microsoft.Communication.MediaStreamingStarted":
                     logger.info(
                         f"🎙️ Media streaming started for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message("🎙️ Media streaming started")
+                    await broadcast_message(connected_clients, "🎙️ Media streaming started")
                 elif event.type == "Microsoft.Communication.MediaStreamingStopped":
                     logger.info(
                         f"🛑 Media streaming stopped for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message("🛑 Media streaming stopped")
+                    await broadcast_message(connected_clients, "🛑 Media streaming stopped")
                 elif event.type == "Microsoft.Communication.MediaStreamingFailed":
                     logger.error(
                         f"⚠️ Media streaming failed for call connection id: {call_connection_id}. Details: {event.data}"
                     )
-                    await broadcast_message("⚠️ Media streaming failed")
+                    await broadcast_message(connected_clients, "⚠️ Media streaming failed")
                 else:
                     logger.info(
                         f"ℹ️ Unhandled event type: {event.type} for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(f"ℹ️ Unhandled event type: {event.type}")
+                    await broadcast_message(connected_clients, f"ℹ️ Unhandled event type: {event.type}")
 
             except Exception as e:
                 logger.error(
@@ -632,6 +632,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             loop=loop,
             message_queue=message_queue,
             language="en-US",
+            
         )
         recognizer.start_continuous_recognition_async()
         logger.info(f"🎙️ Continuous recognition started for call {call_connection_id}")
@@ -649,7 +650,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             logger.info(f"Playing initial greeting for call {call_connection_id}")
             # Don't await here, let it play while listening starts
             # Use the instance from app.state
-            await broadcast_message(initial_greeting, "Assistant")
+            await broadcast_message(connected_clients, initial_greeting, "Assistant")
             await send_response_to_acs(websocket, initial_greeting)
 
             cm.hist.append({"role": "assistant", "content": initial_greeting})
@@ -671,14 +672,14 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                     logger.info(
                         f"Processing recognized text for call {call_connection_id}: {recognized_text}"
                     )
-                    await broadcast_message(recognized_text, "User")
+                    await broadcast_message(connected_clients, recognized_text, "User")
 
                     if check_for_stopwords(recognized_text):
                         logger.info(
                             f"Stop word detected in call {call_connection_id}. Ending conversation."
                         )
                         # Optionally play a goodbye message
-                        await broadcast_message("Goodbye!", "Assistant")
+                        await broadcast_message(connected_clients, "Goodbye!", "Assistant")
 
                         await send_response_to_acs(websocket, "Goodbye!")
                         await asyncio.sleep(

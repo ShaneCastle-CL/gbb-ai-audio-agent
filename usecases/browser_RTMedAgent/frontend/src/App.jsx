@@ -634,6 +634,15 @@ export default function RealTimeVoiceApp() {
 
       relay.onmessage = ({ data }) => {
         try {
+            const obj = JSON.parse(data);
+            if (obj.type?.startsWith("tool_")) {
+              // forward the packet to the SAME handler used for browser /realtime WS
+              handleSocketMessage({ data: JSON.stringify(obj) });
+              return;                   // stop – we already handled it
+            }
+          } catch { /* not JSON → fall through to existing logic */ }
+          
+        try {
           const { sender, message } = JSON.parse(data);
 
           // 1) chat
