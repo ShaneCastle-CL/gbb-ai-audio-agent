@@ -29,12 +29,14 @@ CHANNELS = 1
 FORMAT = pyaudio.paInt16
 CHUNK = 1024
 
+
 def get_env_variable(name: str) -> str:
     """Get environment variable or raise RuntimeError if missing."""
     value = os.environ.get(name)
     if not value:
         raise RuntimeError(f"❌ Required environment variable '{name}' is missing.")
     return value
+
 
 async def main() -> None:
     """
@@ -79,9 +81,9 @@ async def main() -> None:
             noise_reduction="near_field",
             vad_type="server_vad",
             vad_config={
-            "threshold": 0.5,
-            "prefix_padding_ms": 300,
-            "silence_duration_ms": 2000,
+                "threshold": 0.5,
+                "prefix_padding_ms": 300,
+                "silence_duration_ms": 2000,
             },
             on_delta=print_delta,
             on_transcript=print_transcript,
@@ -90,6 +92,7 @@ async def main() -> None:
         print("\n🛑 Interrupted by user. Exiting...")
     except Exception as ex:
         print(f"\n❌ Error: {ex}")
+
 
 if __name__ == "__main__":
     try:

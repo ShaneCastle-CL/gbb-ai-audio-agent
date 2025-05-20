@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class TranscriptionClient:
     """
     Handles async websocket transcription session to Azure OpenAI STT.
@@ -131,6 +132,7 @@ class TranscriptionClient:
                 await self.send_audio_chunk(audio_data)
             except asyncio.CancelledError:
                 break
+
 
 class AudioTranscriber:
     """

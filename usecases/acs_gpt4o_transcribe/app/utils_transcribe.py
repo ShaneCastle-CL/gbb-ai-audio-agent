@@ -1,5 +1,6 @@
 import pyaudio
 
+
 def list_audio_input_devices() -> None:
     """
     Print all available input devices (microphones) for user selection.
@@ -28,7 +29,7 @@ def choose_audio_device(predefined_index: int = None) -> int:
         ]
         if not mic_indices:
             raise RuntimeError("❌ No audio input (microphone) devices found.")
-        
+
         if predefined_index is not None:
             if predefined_index in mic_indices:
                 print(f"🎤 Using predefined audio input device: {predefined_index}")
@@ -46,13 +47,17 @@ def choose_audio_device(predefined_index: int = None) -> int:
             print(f"  [{idx}]: {info['name']}")
         while True:
             try:
-                selection = input(f"Select audio input device index [{mic_indices[0]}]: ").strip()
-                if selection == '':
+                selection = input(
+                    f"Select audio input device index [{mic_indices[0]}]: "
+                ).strip()
+                if selection == "":
                     return mic_indices[0]
                 selected_index = int(selection)
                 if selected_index in mic_indices:
                     return selected_index
-                print(f"Index {selected_index} is not valid. Please choose from {mic_indices}.")
+                print(
+                    f"Index {selected_index} is not valid. Please choose from {mic_indices}."
+                )
             except ValueError:
                 print("Invalid input. Please enter a valid integer index.")
 

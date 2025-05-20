@@ -40,6 +40,8 @@ from usecases.browser_RTMedAgent.backend.tools_helper import (
     push_tool_start,
 )
 from usecases.browser_RTMedAgent.backend.tools import available_tools
+from src.redis.redis_client import AzureRedisManager
+
 from utils.ml_logging import get_logger
 
 # List to store connected WebSocket clients
@@ -55,11 +57,7 @@ from pydantic import BaseModel  # For request body validation
 from src.speech.speech_to_text import SpeechCoreTranslator
 
 # --- Global Clients (Initialized in lifespan) ---
-az_openai_client = AzureOpenAI(
-    api_version="2025-02-01-preview",
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    api_key=os.getenv("AZURE_OPENAI_KEY"),
-)
+
 logger = get_logger()
 
 
@@ -76,6 +74,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to initialize SpeechCoreTranslator: {e}", exc_info=True)
         app.state.stt_client = None  # Store None if failed
+
+    try:
+        app.state.redis = AzureRedisManager()
+        logger.info("Redis connection initialized.")
+    except Exception as e:
+        logger.error("Failed to initialize Redis: %s", e)
+        raise
+
+    try:
+        app.state.az_openai_client = AzureOpenAI(
+            api_version="2025-02-01-preview",
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+        )
+    except Exception as e:
+        logger.error("Failed to initialize Azure OpenAI client: %s", e)
+        raise
 
     # Initialize AcsCaller
     app.state.acs_caller = (
@@ -141,11 +156,12 @@ async def process_gpt_response(
         Tool output (only for ``authenticate_user``) or ``None``.
     """
     cm.hist.append({"role": "user", "content": user_prompt})
+    cm.persist_to_redis(app.state.redis)
     logger.info(f"🎙️ Processing prompt: {user_prompt}")
 
     try:
         stream_start = time.perf_counter()
-        response = az_openai_client.chat.completions.create(
+        response = app.state.az_openai_client.chat.completions.create(
             stream=True,
             messages=cm.hist,
             tools=available_tools,
@@ -221,6 +237,7 @@ async def process_gpt_response(
         text = "".join(final_collected).strip()
         if text:
             cm.hist.append({"role": "assistant", "content": text})
+            cm.persist_to_redis(app.state.redis)
             await push_final(websocket, "assistant", text, is_acs)
             logger.info(f"🧠 Assistant responded: {text}")
 
@@ -238,6 +255,7 @@ async def process_gpt_response(
                     ],
                 }
             )
+            cm.persist_to_redis(app.state.redis)
             return await handle_tool_call(tool_name, tool_id, args, cm, websocket)
 
     except asyncio.CancelledError:
@@ -255,7 +273,7 @@ async def process_tool_followup(
     final_collected: List[str] = []
 
     try:
-        response = az_openai_client.chat.completions.create(
+        response = app.state.az_openai_client.chat.completions.create(
             stream=True,
             messages=cm.hist,
             temperature=0.5,
@@ -302,6 +320,7 @@ async def process_tool_followup(
         final_text = "".join(final_collected).strip()
         if final_text:
             cm.hist.append({"role": "assistant", "content": final_text})
+            cm.persist_to_redis(app.state.redis)
             if is_acs:
                 try:
                     # Use the instance from app.state
@@ -370,7 +389,7 @@ async def handle_tool_call(  # unchanged signature
                 "content": json.dumps(result),
             }
         )
-
+        cm.persist_to_redis(app.state.redis)
         # -------- notify UI that we’re done ------------------------------------------
         await push_tool_end(
             websocket,
@@ -507,8 +526,6 @@ async def initiate_acs_phone_call(
 
 
 # --- ACS Callback Handler ---
-
-
 @app.post(ACS_CALLBACK_PATH)
 async def handle_acs_callbacks(request: Request):
     acs_caller_instance = request.app.state.acs_caller
@@ -590,7 +607,6 @@ async def handle_acs_callbacks(request: Request):
 call_user_raw_ids: Dict[str, str] = {}
 # Audio metadata storage for persisting configurations
 
-
 @app.websocket(ACS_WEBSOCKET_PATH)
 async def acs_websocket_endpoint(websocket: WebSocket):
     """Handles the bidirectional audio stream for an ACS call."""
@@ -614,7 +630,9 @@ async def acs_websocket_endpoint(websocket: WebSocket):
 
     loop = asyncio.get_event_loop()
     message_queue = asyncio.Queue()
-    cm = ConversationManager(auth=False)  # ACS calls usually start unauthenticated
+    redis_mgr = app.state.redis
+    # Try to hydrate from Redis; if not found, initialize new
+    cm = ConversationManager.from_redis(call_connection_id, redis_mgr)
     cm.cid = call_connection_id
     user_identifier = call_user_raw_ids.get(
         call_connection_id
@@ -653,6 +671,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             await send_response_to_acs(websocket, initial_greeting)
 
             cm.hist.append({"role": "assistant", "content": initial_greeting})
+            cm.persist_to_redis(app.state.redis)
             greeted_call_ids.add(call_connection_id)  # Mark as greeted
         else:
             logger.info(
@@ -817,56 +836,72 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                     f"Call ID mapping for {call_connection_id} already removed."
                 )
 
-
 # --- Main Flow Conversation---
 async def main_conversation(websocket: WebSocket, cm: ConversationManager) -> None:
-    """Main multi-turn loop after authentication."""
+    """Main multi-turn loop after authentication, with Redis persistence."""
     while True:
         raw = await receive_and_filter(websocket)
         if raw is None:
             continue
+
         try:
             prompt = json.loads(raw).get("text", raw)
         except json.JSONDecodeError:
             prompt = raw.strip()
+
         if not prompt:
             continue
+
         if check_for_stopwords(prompt):
             goodbye = "Thank you for using our service. Goodbye."
             await websocket.send_text(json.dumps({"type": "exit", "message": goodbye}))
             await send_tts_audio(goodbye, websocket)
+            cm.append_to_history("assistant", goodbye)
+            cm.persist_to_redis(app.state.redis)
             return
 
         total_start = time.perf_counter()
+
+        # Process GPT response and append tool calls if needed
         await process_gpt_response(cm, prompt, websocket)
+
+        # Persist after each turn
+        cm.persist_to_redis(app.state.redis)
+
         logger.info(
-            f"📊 phase:main | cid:{cm.cid} | "
-            f"total:{(time.perf_counter() - total_start)*1000:.1f}ms"
+            f"📊 phase:main | session_id:{cm.session_id} | "
+            f"total:{(time.perf_counter() - total_start) * 1000:.1f}ms"
         )
 
 
 async def authentication_conversation(
     websocket: WebSocket, cm: ConversationManager
 ) -> Optional[Dict[str, Any]]:
-    """Run the authentication sub-dialogue."""
+    """Run the authentication sub-dialogue with Redis persistence."""
     greeting = (
         "Hello from XMYX Healthcare Company! Before I can assist you, "
         "let’s verify your identity. How may I address you?"
     )
     await websocket.send_text(json.dumps({"type": "status", "message": greeting}))
     await send_tts_audio(greeting, websocket)
-    cm.hist.append({"role": "assistant", "content": greeting})
+    cm.append_to_history("assistant", greeting)
+
+    # Persist greeting to Redis
+    cm.persist_to_redis(app.state.redis)
 
     while True:
         raw = await receive_and_filter(websocket)
         if raw is None:
             continue
+
         try:
             prompt = json.loads(raw).get("text", raw)
         except json.JSONDecodeError:
             prompt = raw.strip()
+
         if not prompt:
             continue
+
         if check_for_stopwords(prompt):
             bye = "Thank you for calling. Goodbye."
             await websocket.send_text(json.dumps({"type": "exit", "message": bye}))
@@ -876,14 +911,25 @@ async def authentication_conversation(
         auth_start = time.perf_counter()
         result = await process_gpt_response(cm, prompt, websocket)
         logger.info(
-            f"[Latency Summary] phase:auth | cid:{cm.cid} | "
-            f"total:{(time.perf_counter() - auth_start)*1000:.1f}ms"
+            f"[Latency Summary] phase:auth | session_id:{cm.session_id} | "
+            f"total:{(time.perf_counter() - auth_start) * 1000:.1f}ms"
         )
-        if result and result.get("authenticated"):
-            return result
+
+        # Store all extracted fields and persist to Redis
+        if result:
+            for key, value in result.items():
+                cm.update_context(key, value)
+
+            cm.persist_to_redis(app.state.redis)
+
+            if result.get("authenticated"):
+                return result
 
 
 # --- Websocket EntryPoints---
+
+
+# Standalone WebSocket endpoint
 @app.websocket("/relay")
 async def relay_websocket(websocket: WebSocket):
     if websocket not in connected_clients:
@@ -900,13 +946,36 @@ async def relay_websocket(websocket: WebSocket):
 
 
 @app.websocket("/realtime")
-async def websocket_endpoint(websocket: WebSocket) -> None:  # noqa: D401
-    """Handle authentication flow, then main conversation."""
+async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
-    cm = ConversationManager(auth=True)
-    caller_ctx = await authentication_conversation(websocket, cm)
-    if caller_ctx:
-        cm = ConversationManager(auth=False)
+
+    # Get session ID (ideally from headers for ACS calls)
+    session_id = (
+        websocket.headers.get("x-ms-call-connection-id") or str(uuid.uuid4())[:8]
+    )
+
+    # Load from Redis or initialize new
+    redis_mgr = app.state.redis
+    cm = ConversationManager.from_redis(session_id, redis_mgr)
+
+    # Run authentication flow
+    result = await authentication_conversation(websocket, cm)
+    if result:
+        for key in (
+            "first_name",
+            "last_name",
+            "phone_number",
+            "patient_id",
+            "authenticated",
+        ):
+            if key in result:
+                cm.update_context(key, result[key])
+            else:
+                logger.warning(f"Missing expected key '{key}' in authentication result")
+        cm.persist_to_redis(app.state.redis)
+
+        # Rehydrate or continue with same object (optional)
+        cm = ConversationManager.from_redis(session_id, redis_mgr)
         await main_conversation(websocket, cm)
 
 
@@ -924,4 +993,5 @@ async def read_health() -> Dict[str, str]:
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8010)

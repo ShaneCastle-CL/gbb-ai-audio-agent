@@ -79,6 +79,9 @@ remove_conda_env:
 stt_aoai_tts_server: 
 	python usecases/browser_RTMedAgent/backend/server.py
 
+stt_aoai_tts_server_v2: 
+	python usecases/browser_RTMedAgent/backend/servertest.py
+
 stt_aoai_transcribe_microphone: 
 	python usecases/acs_gpt4o_transcribe/app/microphone_transcribe.py
 

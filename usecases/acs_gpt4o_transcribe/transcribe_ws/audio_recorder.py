@@ -5,6 +5,7 @@ from typing import Optional
 from usecases.acs_gpt4o_transcribe.app.utils_transcribe import choose_audio_device
 import os
 
+
 class AudioRecorder:
     """
     Async audio recorder using PyAudio.

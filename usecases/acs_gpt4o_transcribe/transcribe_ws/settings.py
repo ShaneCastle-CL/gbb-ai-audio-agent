@@ -14,9 +14,7 @@ if not AZURE_KEY or not AZURE_ENDPOINT:
 
 # Build WS URL
 AZURE_WS_URL: str = (
-    AZURE_ENDPOINT
-    .replace("https://", "wss://")
-    .rstrip("/")
+    AZURE_ENDPOINT.replace("https://", "wss://").rstrip("/")
     + "/openai/realtime"
     + "?api-version=2025-04-01-preview&intent=transcription"
 )
@@ -35,9 +33,7 @@ SESSION_CONFIG: Dict[str, Any] = {
         "input_audio_format": "pcm16",
         "input_audio_transcription": {
             "model": "gpt-4o-transcribe",
-            "prompt": (
-                "Respond in English. "
-            ),
+            "prompt": ("Respond in English. "),
         },
         "input_audio_noise_reduction": {"type": "near_field"},
         "turn_detection": {"type": "server_vad"},

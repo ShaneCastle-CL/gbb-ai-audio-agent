@@ -20,10 +20,9 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 logger = logging.getLogger("transcribe-relay")
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 routes = web.RouteTableDef()
+
 
 # ---------- UTILITIES ----------
 def log_audio_frame(b64_data: str, client_id: str):
@@ -35,13 +34,16 @@ def log_audio_frame(b64_data: str, client_id: str):
     with open(filename, "ab") as f:
         f.write(base64.b64decode(b64_data))
 
+
 def generate_client_id():
     return f"client_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}"
+
 
 # ---------- ROUTES ----------
 @routes.get("/health")
 async def health(request):
     return web.json_response({"status": "ok"})
+
 
 @routes.get("/transcribe")
 async def transcribe_ws(request):
@@ -80,10 +82,9 @@ async def transcribe_ws(request):
                         return
                 if b64:
                     log_audio_frame(b64, client_id)
-                    await azure_ws.send(json.dumps({
-                        "type": "input_audio_buffer.append",
-                        "audio": b64
-                    }))
+                    await azure_ws.send(
+                        json.dumps({"type": "input_audio_buffer.append", "audio": b64})
+                    )
                 elif msg.type == WSMsgType.ERROR:
                     logger.error(f"[{client_id}] Browser WS error: {ws.exception()}")
                     break
@@ -95,7 +96,7 @@ async def transcribe_ws(request):
 
         relay_tasks = [
             asyncio.create_task(client_to_azure()),
-            asyncio.create_task(azure_to_client())
+            asyncio.create_task(azure_to_client()),
         ]
         done, pending = await asyncio.wait(
             relay_tasks, return_when=asyncio.FIRST_COMPLETED

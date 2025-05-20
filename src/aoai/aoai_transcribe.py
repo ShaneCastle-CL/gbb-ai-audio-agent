@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class TranscriptionClient:
     """
     Handles async websocket transcription session to Azure OpenAI STT.
@@ -131,6 +132,7 @@ class TranscriptionClient:
                 await self.send_audio_chunk(audio_data)
             except asyncio.CancelledError:
                 break
+
 
 class AudioTranscriber:
     """
@@ -256,5 +258,7 @@ class AudioTranscriber:
                     recorder.stop()
                     if output_wav_file is None:
                         # Default to timestamped file if not provided
-                        output_wav_file = f"microphone_capture_{datetime.now():%Y%m%d_%H%M%S}.wav"
+                        output_wav_file = (
+                            f"microphone_capture_{datetime.now():%Y%m%d_%H%M%S}.wav"
+                        )
                     recorder.save_wav(output_wav_file)

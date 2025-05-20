@@ -18,26 +18,30 @@ import base64
 
 from azure.core.messaging import CloudEvent
 from openai import AzureOpenAI
-from fastapi import (FastAPI, HTTPException, Request, WebSocket,
-                     WebSocketDisconnect)
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
 from src.speech.text_to_speech import SpeechSynthesizer
 from usecases.browser_RTMedAgent.backend.acs_helpers import (
-    broadcast_message, initialize_acs_caller_instance, send_pcm_frames)
-from usecases.browser_RTMedAgent.backend.conversation_state import \
-    ConversationManager
-from usecases.browser_RTMedAgent.backend.helpers import (add_space,
-                                                         check_for_stopwords)
-from usecases.browser_RTMedAgent.backend.settings import (ACS_CALL_PATH,
-                                                          ACS_CALLBACK_PATH,
-                                                          ACS_WEBSOCKET_PATH,
-                                                          TTS_END)
-from usecases.browser_RTMedAgent.backend.tools_helper import (function_mapping,
-                                                              push_tool_end,
-                                                              push_tool_start)
-from usecases.browser_RTMedAgent.backend.tools import (available_tools)
+    broadcast_message,
+    initialize_acs_caller_instance,
+    send_pcm_frames,
+)
+from usecases.browser_RTMedAgent.backend.conversation_state import ConversationManager
+from usecases.browser_RTMedAgent.backend.helpers import add_space, check_for_stopwords
+from usecases.browser_RTMedAgent.backend.settings import (
+    ACS_CALL_PATH,
+    ACS_CALLBACK_PATH,
+    ACS_WEBSOCKET_PATH,
+    TTS_END,
+)
+from usecases.browser_RTMedAgent.backend.tools_helper import (
+    function_mapping,
+    push_tool_end,
+    push_tool_start,
+)
+from usecases.browser_RTMedAgent.backend.tools import available_tools
 from utils.ml_logging import get_logger
 
 # List to store connected WebSocket clients
@@ -46,6 +50,7 @@ connected_clients: List[WebSocket] = []
 from typing import Dict
 
 from azure.core.exceptions import HttpResponseError
+
 # --- ACS Integration ---
 from pydantic import BaseModel  # For request body validation
 from src.speech.speech_to_text import SpeechCoreTranslator
@@ -396,6 +401,7 @@ async def handle_tool_call(  # unchanged signature
         )
         return {}
 
+
 # --- TTS ---
 async def send_tts_audio(text: str, websocket: WebSocket) -> None:
     """Fire-and-forget TTS synthesis and log enqueue latency."""
@@ -583,6 +589,7 @@ async def handle_acs_callbacks(request: Request):
 call_user_raw_ids: Dict[str, str] = {}
 # Audio metadata storage for persisting configurations
 
+
 @app.websocket(ACS_WEBSOCKET_PATH)
 async def acs_websocket_endpoint(websocket: WebSocket):
     """Handles the bidirectional audio stream for an ACS call, using AOAI streaming STT, and records audio as a WAV file."""
@@ -607,9 +614,9 @@ async def acs_websocket_endpoint(websocket: WebSocket):
     RATE = 16000
     CHANNELS = 1
     FORMAT = 16  # PCM16
-    OUTPUT_FORMAT = "labs/recordings/test/acs_output.wav"  
-    THRESHOLD = 0.5 # VAD threshold
-    PREFIX_PADDING_MS = 300 # VAD prefix padding
+    OUTPUT_FORMAT = "labs/recordings/test/acs_output.wav"
+    THRESHOLD = 0.5  # VAD threshold
+    PREFIX_PADDING_MS = 300  # VAD prefix padding
     SILENCE_DURATION_MS = 1000  # VAD silence duration
 
     audio_queue = asyncio.Queue()
@@ -655,7 +662,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             },
             on_delta=lambda delta: asyncio.create_task(on_delta(delta)),
             on_transcript=lambda t: asyncio.create_task(on_transcript(t)),
-            output_wav_file=OUTPUT_FORMAT
+            output_wav_file=OUTPUT_FORMAT,
         )
     )
 
@@ -735,7 +742,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             f"🧹 Cleaning up ACS WebSocket handler for call {call_connection_id}."
         )
         await audio_queue.put(None)  # End audio for AOAI transcriber
-        await transcribe_task         # Flush all transcripts
+        await transcribe_task  # Flush all transcripts
 
         try:
             wav_file.close()  # <--- IMPORTANT: Close file so it's readable!
@@ -756,6 +763,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                 logger.warning(
                     f"Call ID mapping for {call_connection_id} already removed."
                 )
+
 
 # --- Main Flow Conversation---
 async def main_conversation(websocket: WebSocket, cm: ConversationManager) -> None:
@@ -821,6 +829,7 @@ async def authentication_conversation(
         if result and result.get("authenticated"):
             return result
 
+
 # Standalone WebSocket endpoint
 @app.websocket("/relay")
 async def relay_websocket(websocket: WebSocket):
@@ -863,4 +872,5 @@ async def read_health() -> Dict[str, str]:
 if __name__ == "__main__":
     import uvicorn
     import wave
+
     uvicorn.run(app, host="0.0.0.0", port=8010)
