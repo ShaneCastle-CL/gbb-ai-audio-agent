@@ -12,6 +12,7 @@ All agents are **stateless between turns** except for their Mem0 store and any
 private flags (e.g. AuthAgent._authenticated).  They are therefore safe to keep
 alive for the lifetime of a WebSocket connection.
 """
+
 from __future__ import annotations
 
 import asyncio

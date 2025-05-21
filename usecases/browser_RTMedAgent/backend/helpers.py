@@ -5,6 +5,7 @@ helpers.py
 Utility helpers shared by the browser_RTMedAgent backend and the new
 modular routers.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,6 +17,7 @@ from utils.ml_logging import get_logger
 from usecases.browser_RTMedAgent.backend.settings import STOP_WORDS
 
 logger = get_logger("helpers")
+
 
 # ---------------------------------------------------------------------------
 # Existing helpers (unchanged)
@@ -40,6 +42,7 @@ def add_space(text: str) -> str:
         return text + " "
     return text
 
+
 async def receive_and_filter(ws: WebSocket) -> Optional[str]:
     """
     Read one frame from `ws`.
@@ -57,7 +60,7 @@ async def receive_and_filter(ws: WebSocket) -> Optional[str]:
         if msg.get("type") == "interrupt":
             logger.info("🛑 interrupt received – stopping TTS playback")
             # The TTS synthesizer lives on FastAPI app state
-            ws.app.state.tts_client.stop_speaking()          # type: ignore[attr-defined]
+            ws.app.state.tts_client.stop_speaking()  # type: ignore[attr-defined]
             return None
         return msg.get("text", raw)
     except json.JSONDecodeError:

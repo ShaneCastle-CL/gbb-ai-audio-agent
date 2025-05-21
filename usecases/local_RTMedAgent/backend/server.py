@@ -219,7 +219,9 @@ async def process_gpt_response(history_snapshot, user_prompt, websocket: WebSock
             )
 
     except asyncio.CancelledError:
-        logger.info(f"🛑 process_gpt_response cancelled for input: '{user_prompt[:40]}'")
+        logger.info(
+            f"🛑 process_gpt_response cancelled for input: '{user_prompt[:40]}'"
+        )
         raise
 
 

@@ -5,6 +5,7 @@ Thin wrapper that creates (or returns) the AcsCaller helper you already
 have in `src.acs.acs_helper`.  Splitting it out lets `main.py`
 initialise it once during startup and any router import it later.
 """
+
 from __future__ import annotations
 from typing import Optional
 from usecases.browser_RTMedAgent.backend.settings import (
@@ -37,7 +38,9 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
     callback_url = f"{BASE_URL.rstrip('/')}{ACS_CALLBACK_PATH}"
     ws_url = construct_websocket_url(BASE_URL, ACS_WEBSOCKET_PATH)
     if not ws_url:
-        logger.error("Could not build ACS media WebSocket URL; disabling outbound calls")
+        logger.error(
+            "Could not build ACS media WebSocket URL; disabling outbound calls"
+        )
         return None
 
     try:

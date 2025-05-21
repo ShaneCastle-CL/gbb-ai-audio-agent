@@ -127,9 +127,9 @@ class RealtimeClient(RealtimeEventHandler):
     def _log_event(self, event: dict) -> None:
         realtime_event = {
             "time": datetime.utcnow().isoformat(),
-            "source": "client"
-            if event.get("type", "").startswith("client.")
-            else "server",
+            "source": (
+                "client" if event.get("type", "").startswith("client.") else "server"
+            ),
             "event": event,
         }
         self.dispatch("realtime.event", realtime_event)

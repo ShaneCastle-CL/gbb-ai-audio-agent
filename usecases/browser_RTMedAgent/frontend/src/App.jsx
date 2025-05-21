@@ -218,12 +218,14 @@ export default function RealTimeVoiceApp() {
             ...n,
             style: {
               ...n.style,
-              border: activeSpeaker === "User"
-                ? "2px solid #FCD34D"
-                : "2px solid transparent",
-              animation: activeSpeaker === "User"
-                ? "pulseNode 1.6s ease-out infinite"
-                : undefined,
+              border:
+                activeSpeaker === "User"
+                  ? "2px solid #FCD34D"
+                  : "2px solid transparent",
+              animation:
+                activeSpeaker === "User"
+                  ? "pulseNode 1.6s ease-out infinite"
+                  : undefined,
             },
           };
         }
@@ -232,12 +234,14 @@ export default function RealTimeVoiceApp() {
             ...n,
             style: {
               ...n.style,
-              border: activeSpeaker === "Assistant"
-                ? "2px solid #FCD34D"
-                : "2px solid transparent",
-              animation: activeSpeaker === "Assistant"
-                ? "pulseNode 1.6s ease-out infinite"
-                : undefined,
+              border:
+                activeSpeaker === "Assistant"
+                  ? "2px solid #FCD34D"
+                  : "2px solid transparent",
+              animation:
+                activeSpeaker === "Assistant"
+                  ? "pulseNode 1.6s ease-out infinite"
+                  : undefined,
             },
           };
         }
@@ -245,8 +249,6 @@ export default function RealTimeVoiceApp() {
       }),
     );
   }, [activeSpeaker]);
-  
-
 
   /* ---------- mind‑map functions ---------- */
   const resetMindMap = () => {
@@ -634,28 +636,21 @@ export default function RealTimeVoiceApp() {
 
       relay.onmessage = ({ data }) => {
         try {
-            const obj = JSON.parse(data);
-            if (obj.type?.startsWith("tool_")) {
-              // forward the packet to the SAME handler used for browser /realtime WS
-              handleSocketMessage({ data: JSON.stringify(obj) });
-              return;                   // stop – we already handled it
-            }
-          } catch { /* not JSON → fall through to existing logic */ }
-          
+          const obj = JSON.parse(data);
+          if (obj.type?.startsWith("tool_")) {
+            handleSocketMessage({ data: JSON.stringify(obj) });
+            return;                              // already handled
+          }
+        } catch { /* not JSON – fall through */ }
+
         try {
           const { sender, message } = JSON.parse(data);
-
-          // 1) chat
-          setMessages((m) => [...m, { speaker: sender, text: message }]);
-
-          // 2) mind-map
+          setMessages((m)=>[ ...m, { speaker: sender, text: message } ]);
           addMindMapNode({
-            speaker: sender,
-            text: message,
-            parentId:
-              sender === "User" ? lastUserId.current : lastAssistantId.current,
+            speaker:  sender,
+            text:     message,
+            parentId: sender==="User" ? lastUserId.current : lastAssistantId.current,
           });
-
           setActiveSpeaker(sender);
           appendLog(`[Relay] ${sender}: ${message}`);
         } catch {

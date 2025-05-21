@@ -23,6 +23,7 @@ from utils.ml_logging import get_logger
 # --- Init Logger ---
 logger = get_logger()
 
+
 # --- Helper Functions for Initialization ---
 def construct_websocket_url(base_url: str, path: str) -> Optional[str]:
     """Constructs a WebSocket URL from a base URL and path."""
@@ -150,7 +151,9 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
         return None
 
 
-async def broadcast_message(connected_clients: List[WebSocket], message: str, sender: str = "system"):
+async def broadcast_message(
+    connected_clients: List[WebSocket], message: str, sender: str = "system"
+):
     """
     Send a message to all connected WebSocket clients without duplicates.
 

@@ -15,6 +15,7 @@ Tools:
 - get_current_prescriptions
 - check_drug_interactions
 """
+
 from typing import Any, Dict, List
 
 schedule_appointment_schema: Dict[str, Any] = {

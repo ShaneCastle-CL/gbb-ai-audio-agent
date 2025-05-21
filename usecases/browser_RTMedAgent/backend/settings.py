@@ -5,6 +5,7 @@ Central place for every environment variable, constant path, and
 “magic number” used by the voice-agent service.  Import these symbols
 instead of hard-coding strings elsewhere.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,9 +22,9 @@ load_dotenv()
 # ------------------------------------------------------------------------------
 AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_KEY: str = os.getenv("AZURE_OPENAI_KEY", "")
-AZURE_OPENAI_CHAT_DEPLOYMENT_ID: str = os.getenv(
-    "AZURE_OPENAI_CHAT_DEPLOYMENT_ID", ""
-)
+AZURE_OPENAI_CHAT_DEPLOYMENT_ID: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_ID", "")
+AOAI_STT_KEY = os.environ["AZURE_OPENAI_STT_TTS_KEY"]
+AOAI_STT_ENDPOINT = os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
 
 # ------------------------------------------------------------------------------
 # Azure Communication Services (ACS)
@@ -57,12 +58,10 @@ ALLOWED_ORIGINS: list[str] = [
 ]
 
 # ------------------------------------------------------------------------------
-# Optional local file paths (logs, cache, etc.)
+# local file paths (logs)
 # ------------------------------------------------------------------------------
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 LOG_DIR: Path = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(exist_ok=True)
-
-# Create a new log file with date and time in the filename
 LOG_FILE: Path = LOG_DIR / f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"

@@ -5,6 +5,7 @@ Exposes:
   • /realtime   – bi-directional WebSocket for STT/LLM/TTS
   • /health     – simple liveness probe
 """
+
 import asyncio
 import json
 import os
@@ -242,7 +243,9 @@ async def process_gpt_response(
             return await handle_tool_call(tool_name, tool_id, args, cm, websocket)
 
     except asyncio.CancelledError:
-        logger.info(f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'")
+        logger.info(
+            f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'"
+        )
         raise
 
     return None
