@@ -1,15 +1,17 @@
 """
 tools_helper.py
 
-This module provides helper functions and mappings for managing tool execution and communication
-between the backend and frontend via WebSocket in the browser_RTMedAgent use case.
-
+Single source of truth for
+ • callable-name → python-function mapping
+ • JSON frames that announce tool_start / tool_progress / tool_end
 """
-import json
-import time
-from typing import Any, Callable, Dict
 
+from __future__ import annotations
+import asyncio, json, time, uuid
+from typing import Any, Callable, Dict
 from fastapi import WebSocket
+
+from utils.ml_logging import get_logger
 from usecases.browser_RTMedAgent.backend.functions import (
     authenticate_user,
     check_drug_interactions,
@@ -23,11 +25,11 @@ from usecases.browser_RTMedAgent.backend.functions import (
     schedule_appointment,
 )
 
-# --- Init Logger ---
-from utils.ml_logging import get_logger
+log = get_logger(__name__)
 
-logger = get_logger()
-
+# --------------------------------------------------------------------------- #
+#  public mapping {openai_tool_name: python_callable}
+# --------------------------------------------------------------------------- #
 function_mapping: Dict[str, Callable[..., Any]] = {
     "schedule_appointment": schedule_appointment,
     "refill_prescription": refill_prescription,
@@ -42,43 +44,67 @@ function_mapping: Dict[str, Callable[..., Any]] = {
 }
 
 
+# --------------------------------------------------------------------------- #
+#  low-level emitter
+# --------------------------------------------------------------------------- #
+async def _emit(ws: WebSocket, payload: dict, *, is_acs: bool) -> None:
+    """
+    • browser `/realtime`  → send JSON directly on that socket
+    • phone   `/call/*`    → fan-out to every dashboard on `/relay`
+
+    IMPORTANT: we forward the *raw* JSON (no additional wrapper) so that the
+               front-end can treat both transports identically.
+    """
+    frame = json.dumps(payload)
+
+    if is_acs:
+        # never block STT/TTS – fire-and-forget
+        for cli in set(ws.app.state.clients):
+            asyncio.create_task(cli.send_text(frame))
+    else:
+        await ws.send_text(frame)
+
+
+# --------------------------------------------------------------------------- #
+#  public helpers
+# --------------------------------------------------------------------------- #
+def _frame(
+    _type: str,
+    call_id: str,
+    name: str,
+    **extra: Any,
+) -> dict:
+    return {
+        "type": _type,
+        "callId": call_id,
+        "tool": name,
+        "ts": time.time(),
+        **extra,
+    }
+
+
 async def push_tool_start(
     ws: WebSocket,
     call_id: str,
     name: str,
     args: dict,
+    *,
+    is_acs: bool = False,
 ) -> None:
-    """Notify UI that a tool just kicked off."""
-    await ws.send_text(
-        json.dumps(
-            {
-                "type": "tool_start",
-                "callId": call_id,
-                "tool": name,
-                "args": args,  # keep it PHI-free
-                "ts": time.time(),
-            }
-        )
-    )
+    await _emit(ws, _frame("tool_start", call_id, name, args=args), is_acs=is_acs)
 
 
 async def push_tool_progress(
     ws: WebSocket,
     call_id: str,
+    name: str,
     pct: int,
     note: str | None = None,
+    *,
+    is_acs: bool = False,
 ) -> None:
-    """Optional: stream granular progress for long-running tools."""
-    await ws.send_text(
-        json.dumps(
-            {
-                "type": "tool_progress",
-                "callId": call_id,
-                "pct": pct,  # 0-100
-                "note": note,
-                "ts": time.time(),
-            }
-        )
+    await _emit(
+        ws, _frame("tool_progress", call_id, name, pct=pct, note=note), is_acs=is_acs
     )
 
 
@@ -86,23 +112,23 @@ async def push_tool_end(
     ws: WebSocket,
     call_id: str,
     name: str,
-    status: str,
+    status: str,  # "success" | "error"
     elapsed_ms: float,
+    *,
     result: dict | None = None,
     error: str | None = None,
+    is_acs: bool = False,
 ) -> None:
-    """Finalise the life-cycle (status = success|error)."""
-    await ws.send_text(
-        json.dumps(
-            {
-                "type": "tool_end",
-                "callId": call_id,
-                "tool": name,
-                "status": status,
-                "elapsedMs": round(elapsed_ms, 1),
-                "result": result,
-                "error": error,
-                "ts": time.time(),
-            }
-        )
+    await _emit(
+        ws,
+        _frame(
+            "tool_end",
+            call_id,
+            name,
+            status=status,
+            elapsedMs=round(elapsed_ms, 1),
+            result=result,
+            error=error,
+        ),
+        is_acs=is_acs,
     )

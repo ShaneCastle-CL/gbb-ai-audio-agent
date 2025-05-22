@@ -8,6 +8,7 @@ Relies on:
     utils.helpers.receive_and_filter
     orchestration.gpt_flow.route_turn
 """
+
 from __future__ import annotations
 
 import json
@@ -18,9 +19,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from conversation_state import ConversationManager
 from helpers import check_for_stopwords, receive_and_filter
 from orchestration.gpt_flow import route_turn
-from shared_ws import send_tts_audio, broadcast_message      # ‹— NEW
+from shared_ws import send_tts_audio, broadcast_message  # ‹— NEW
 
 router = APIRouter()
+
 
 # --------------------------------------------------------------------------- #
 #  /relay  – simple fan-out to connected dashboards
@@ -35,9 +37,10 @@ async def relay_ws(ws: WebSocket):
 
     try:
         while True:
-            await ws.receive_text()              # keep ping/pong alive
+            await ws.receive_text()  # keep ping/pong alive
     except WebSocketDisconnect:
         clients.remove(ws)
+
 
 # --------------------------------------------------------------------------- #
 #  /realtime  – browser conversation
@@ -71,7 +74,7 @@ async def realtime_ws(ws: WebSocket):
     # ---------------- main loop -------------------------------------------
     while True:
         prompt = await receive_and_filter(ws)
-        if prompt is None:          # interrupt frame – ignore
+        if prompt is None:  # interrupt frame – ignore
             continue
 
         if check_for_stopwords(prompt):

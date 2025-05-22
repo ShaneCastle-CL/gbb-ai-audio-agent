@@ -8,6 +8,7 @@ Helpers that BOTH realtime and ACS routers rely on:
     • push_final            – “close bubble” helper
     • broadcast_message     – relay to /relay dashboards
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,14 +29,12 @@ async def send_tts_audio(text: str, ws: WebSocket) -> None:
 
     Uses the synthesiser cached on FastAPI `app.state.tts_client`.
     """
-    synth: SpeechSynthesizer = ws.app.state.tts_client          # type: ignore[attr-defined]
+    synth: SpeechSynthesizer = ws.app.state.tts_client  # type: ignore[attr-defined]
     synth.start_speaking_text(text)
 
+
 async def send_response_to_acs(
-    ws: WebSocket,
-    text: str,
-    *,
-    blocking: bool = False
+    ws: WebSocket, text: str, *, blocking: bool = False
 ) -> Optional[asyncio.Task]:
     synth: SpeechSynthesizer = ws.app.state.tts_client
     pcm = synth.synthesize_to_base64_frames(text, sample_rate=16000)
@@ -46,7 +45,7 @@ async def send_response_to_acs(
         await coro
         return None
 
-    # ---------- NEW: remember the task so we can cancel it later -----------
+    # ---------- remember the task so we can cancel it later -----------
     if not hasattr(ws.app.state, "tts_tasks"):
         ws.app.state.tts_tasks: Set[asyncio.Task] = set()
 
@@ -55,6 +54,7 @@ async def send_response_to_acs(
     task.add_done_callback(lambda t: ws.app.state.tts_tasks.discard(t))
     # -----------------------------------------------------------------------
     return task
+
 
 async def push_final(
     ws: WebSocket,

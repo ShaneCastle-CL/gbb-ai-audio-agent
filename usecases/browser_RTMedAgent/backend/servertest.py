@@ -5,6 +5,7 @@ Exposes:
   • /realtime   – bi-directional WebSocket for STT/LLM/TTS
   • /health     – simple liveness probe
 """
+
 import asyncio
 import json
 import os
@@ -201,7 +202,9 @@ async def process_gpt_response(
                     text_streaming = add_space("".join(collected).strip())
                     if is_acs:
                         # Send TTS audio to ACS WebSocket
-                        await broadcast_message(connected_clients,text_streaming, "Assistant")
+                        await broadcast_message(
+                            connected_clients, text_streaming, "Assistant"
+                        )
                         send_response_to_acs(websocket, text_streaming)
                     else:
                         await send_tts_audio(text_streaming, websocket)
@@ -221,7 +224,7 @@ async def process_gpt_response(
             pending = "".join(collected).strip()
             if is_acs:
                 # Send TTS audio to ACS WebSocket
-                await broadcast_message(connected_clients,text_streaming, "Assistant")
+                await broadcast_message(connected_clients, text_streaming, "Assistant")
                 send_response_to_acs(websocket, pending)
             else:
                 await send_tts_audio(pending, websocket)
@@ -259,7 +262,9 @@ async def process_gpt_response(
             return await handle_tool_call(tool_name, tool_id, args, cm, websocket)
 
     except asyncio.CancelledError:
-        logger.info(f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'")
+        logger.info(
+            f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'"
+        )
         raise
 
     return None
@@ -307,7 +312,7 @@ async def process_tool_followup(
             pending = "".join(collected).strip()
             if is_acs:
                 # Send TTS audio to ACS WebSocket
-                await broadcast_message(connected_clients,pending, "Assistant")
+                await broadcast_message(connected_clients, pending, "Assistant")
 
                 send_response_to_acs(websocket, pending)
             else:
@@ -556,37 +561,47 @@ async def handle_acs_callbacks(request: Request):
                     logger.info(
                         f"📞 Call connected event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,"📞 Call connected")
+                    await broadcast_message(connected_clients, "📞 Call connected")
                 elif event.type == "Microsoft.Communication.ParticipantsUpdated":
                     logger.info(
                         f"👥 Participants updated event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,"👥 Participants updated")
+                    await broadcast_message(
+                        connected_clients, "👥 Participants updated"
+                    )
                 elif event.type == "Microsoft.Communication.CallDisconnected":
                     logger.info(
                         f"❌ Call disconnect event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,"❌ Call disconnected")
+                    await broadcast_message(connected_clients, "❌ Call disconnected")
                 elif event.type == "Microsoft.Communication.MediaStreamingStarted":
                     logger.info(
                         f"🎙️ Media streaming started for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,"🎙️ Media streaming started")
+                    await broadcast_message(
+                        connected_clients, "🎙️ Media streaming started"
+                    )
                 elif event.type == "Microsoft.Communication.MediaStreamingStopped":
                     logger.info(
                         f"🛑 Media streaming stopped for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,"🛑 Media streaming stopped")
+                    await broadcast_message(
+                        connected_clients, "🛑 Media streaming stopped"
+                    )
                 elif event.type == "Microsoft.Communication.MediaStreamingFailed":
                     logger.error(
                         f"⚠️ Media streaming failed for call connection id: {call_connection_id}. Details: {event.data}"
                     )
-                    await broadcast_message(connected_clients,"⚠️ Media streaming failed")
+                    await broadcast_message(
+                        connected_clients, "⚠️ Media streaming failed"
+                    )
                 else:
                     logger.info(
                         f"ℹ️ Unhandled event type: {event.type} for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients,f"ℹ️ Unhandled event type: {event.type}")
+                    await broadcast_message(
+                        connected_clients, f"ℹ️ Unhandled event type: {event.type}"
+                    )
 
             except Exception as e:
                 logger.error(
@@ -607,6 +622,7 @@ async def handle_acs_callbacks(request: Request):
 call_user_raw_ids: Dict[str, str] = {}
 # Audio metadata storage for persisting configurations
 
+
 async def route_turn(
     cm: ConversationManager,
     transcript: str,
@@ -620,9 +636,7 @@ async def route_turn(
 
     if not cm.get_context("authenticated", False):
         # --------------------- AUTHENTICATION STAGE ------------------------------ #
-        result = await process_gpt_response(
-            cm, transcript, websocket, is_acs=is_acs
-        )
+        result = await process_gpt_response(cm, transcript, websocket, is_acs=is_acs)
         if result:
             # cache any fields returned by the tool
             for k, v in result.items():
@@ -643,7 +657,9 @@ async def route_turn(
                         json.dumps({"type": "assistant", "content": confirm})
                     )
                     # Local/web clients hear TTS via the same channel
-                    from usecases.browser_RTMedAgent.backend.tts import send_tts_audio  # noqa
+                    from usecases.browser_RTMedAgent.backend.tts import (
+                        send_tts_audio,
+                    )  # noqa
 
                     await send_tts_audio(confirm, websocket)
     else:
@@ -733,7 +749,9 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                 recognised_text = None
 
             if recognised_text:
-                logger.info("[ACS %s] recognised: %s", call_connection_id, recognised_text)
+                logger.info(
+                    "[ACS %s] recognised: %s", call_connection_id, recognised_text
+                )
                 await broadcast_message(connected_clients, recognised_text, "User")
 
                 if check_for_stopwords(recognised_text):
@@ -754,11 +772,15 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                 data = json.loads(raw_data)
             except asyncio.TimeoutError:
                 if websocket.client_state != WebSocketState.CONNECTED:
-                    logger.warning("ACS WebSocket %s disconnected (timeout).", call_connection_id)
+                    logger.warning(
+                        "ACS WebSocket %s disconnected (timeout).", call_connection_id
+                    )
                     break
                 continue
             except WebSocketDisconnect:
-                logger.info("ACS WebSocket disconnected for call %s", call_connection_id)
+                logger.info(
+                    "ACS WebSocket disconnected for call %s", call_connection_id
+                )
                 break
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON from ACS for call %s", call_connection_id)
@@ -777,25 +799,34 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                     try:
                         push_stream.write(b64decode(b64))
                     except Exception as exc:
-                        logger.error("Error writing audio chunk: %s", exc, exc_info=True)
+                        logger.error(
+                            "Error writing audio chunk: %s", exc, exc_info=True
+                        )
 
             elif kind == "CallConnected":
-                participant_id = data.get("callConnected", {}).get("participant", {}).get("rawID")
+                participant_id = (
+                    data.get("callConnected", {}).get("participant", {}).get("rawID")
+                )
                 if participant_id and call_connection_id not in call_user_raw_ids:
                     call_user_raw_ids[call_connection_id] = participant_id
                     user_identifier = participant_id
 
             elif kind in {"PlayCompleted", "PlayFailed", "PlayCanceled"}:
-                logger.info("Received %s via WebSocket for call %s", kind, call_connection_id)
+                logger.info(
+                    "Received %s via WebSocket for call %s", kind, call_connection_id
+                )
 
     finally:
         # -----------------------------------------------------------------------
         #  Cleanup
         # -----------------------------------------------------------------------
-        logger.info("🧹 Cleaning up ACS WebSocket handler for call %s", call_connection_id)
+        logger.info(
+            "🧹 Cleaning up ACS WebSocket handler for call %s", call_connection_id
+        )
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(recognizer.stop_continuous_recognition_async), timeout=5.0
+                asyncio.to_thread(recognizer.stop_continuous_recognition_async),
+                timeout=5.0,
             )
         except Exception:  # pylint: disable=broad-except
             pass
@@ -804,6 +835,7 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             await websocket.close()
         call_user_raw_ids.pop(call_connection_id, None)
         cm.persist_to_redis(redis_mgr)  # final flush
+
 
 # --- Main Flow Conversation---
 async def main_conversation(websocket: WebSocket, cm: ConversationManager) -> None:
@@ -962,4 +994,5 @@ async def read_health() -> Dict[str, str]:
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8010)

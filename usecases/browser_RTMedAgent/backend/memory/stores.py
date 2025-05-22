@@ -3,6 +3,7 @@
 * **REDIS**  – hot working‑set, expiring keys keep RAM usage bounded.
 * **COSMOS** – durable long‑term store (optional – skip if creds missing).
 """
+
 from __future__ import annotations
 
 import os

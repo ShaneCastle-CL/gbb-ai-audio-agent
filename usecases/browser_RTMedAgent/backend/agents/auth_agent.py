@@ -1,6 +1,6 @@
 """agents.py
 This module defines the **BaseAgent** class and its concrete subclasses
-**AuthAgent** and **TaskAgent**. These classes are responsible for handling 
+**AuthAgent** and **TaskAgent**. These classes are responsible for handling
 identity verification and business logic respectively in a voice agent application.
 Each agent owns a **private Mem0** instance for durable semantic memory and
 shares a **ConversationMemory** timeline (Redis→Cosmos) with its peers."""

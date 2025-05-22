@@ -4,6 +4,7 @@
 • **history()**  – single LRANGE fetch (ordered list of dicts).
 • **flush()**    – one upsert to Cosmos at call end for durability.
 """
+
 from __future__ import annotations
 
 import json

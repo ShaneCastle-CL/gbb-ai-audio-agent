@@ -5,8 +5,12 @@ Single shared Azure OpenAI client.  Import `client` anywhere you need
 to talk to the Chat Completion API; it will be created once at
 import-time.
 """
+
 from openai import AzureOpenAI
-from usecases.browser_RTMedAgent.backend.settings import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY
+from usecases.browser_RTMedAgent.backend.settings import (
+    AZURE_OPENAI_ENDPOINT,
+    AZURE_OPENAI_KEY,
+)
 
 client = AzureOpenAI(
     api_version="2025-02-01-preview",

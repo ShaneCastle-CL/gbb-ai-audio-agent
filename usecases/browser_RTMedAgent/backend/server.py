@@ -5,6 +5,7 @@ Exposes:
   • /realtime   – bi-directional WebSocket for STT/LLM/TTS
   • /health     – simple liveness probe
 """
+
 import asyncio
 import json
 import os
@@ -185,7 +186,9 @@ async def process_gpt_response(
                     text_streaming = add_space("".join(collected).strip())
                     if is_acs:
                         # Send TTS audio to ACS WebSocket
-                        await broadcast_message(connected_clients, text_streaming, "Assistant")
+                        await broadcast_message(
+                            connected_clients, text_streaming, "Assistant"
+                        )
                         send_response_to_acs(websocket, text_streaming)
                     else:
                         await send_tts_audio(text_streaming, websocket)
@@ -205,7 +208,7 @@ async def process_gpt_response(
             pending = "".join(collected).strip()
             if is_acs:
                 # Send TTS audio to ACS WebSocket
-                await broadcast_message(connected_clients,text_streaming, "Assistant")
+                await broadcast_message(connected_clients, text_streaming, "Assistant")
                 send_response_to_acs(websocket, pending)
             else:
                 await send_tts_audio(pending, websocket)
@@ -241,7 +244,9 @@ async def process_gpt_response(
             return await handle_tool_call(tool_name, tool_id, args, cm, websocket)
 
     except asyncio.CancelledError:
-        logger.info(f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'")
+        logger.info(
+            f"🔚 process_gpt_response cancelled for input: '{user_prompt[:40]}'"
+        )
         raise
 
     return None
@@ -544,7 +549,9 @@ async def handle_acs_callbacks(request: Request):
                     logger.info(
                         f"👥 Participants updated event received for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients, "👥 Participants updated")
+                    await broadcast_message(
+                        connected_clients, "👥 Participants updated"
+                    )
                 elif event.type == "Microsoft.Communication.CallDisconnected":
                     logger.info(
                         f"❌ Call disconnect event received for call connection id: {call_connection_id}"
@@ -554,22 +561,30 @@ async def handle_acs_callbacks(request: Request):
                     logger.info(
                         f"🎙️ Media streaming started for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients, "🎙️ Media streaming started")
+                    await broadcast_message(
+                        connected_clients, "🎙️ Media streaming started"
+                    )
                 elif event.type == "Microsoft.Communication.MediaStreamingStopped":
                     logger.info(
                         f"🛑 Media streaming stopped for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients, "🛑 Media streaming stopped")
+                    await broadcast_message(
+                        connected_clients, "🛑 Media streaming stopped"
+                    )
                 elif event.type == "Microsoft.Communication.MediaStreamingFailed":
                     logger.error(
                         f"⚠️ Media streaming failed for call connection id: {call_connection_id}. Details: {event.data}"
                     )
-                    await broadcast_message(connected_clients, "⚠️ Media streaming failed")
+                    await broadcast_message(
+                        connected_clients, "⚠️ Media streaming failed"
+                    )
                 else:
                     logger.info(
                         f"ℹ️ Unhandled event type: {event.type} for call connection id: {call_connection_id}"
                     )
-                    await broadcast_message(connected_clients, f"ℹ️ Unhandled event type: {event.type}")
+                    await broadcast_message(
+                        connected_clients, f"ℹ️ Unhandled event type: {event.type}"
+                    )
 
             except Exception as e:
                 logger.error(
@@ -632,7 +647,6 @@ async def acs_websocket_endpoint(websocket: WebSocket):
             loop=loop,
             message_queue=message_queue,
             language="en-US",
-            
         )
         recognizer.start_continuous_recognition_async()
         logger.info(f"🎙️ Continuous recognition started for call {call_connection_id}")
@@ -679,7 +693,9 @@ async def acs_websocket_endpoint(websocket: WebSocket):
                             f"Stop word detected in call {call_connection_id}. Ending conversation."
                         )
                         # Optionally play a goodbye message
-                        await broadcast_message(connected_clients, "Goodbye!", "Assistant")
+                        await broadcast_message(
+                            connected_clients, "Goodbye!", "Assistant"
+                        )
 
                         await send_response_to_acs(websocket, "Goodbye!")
                         await asyncio.sleep(
@@ -925,4 +941,5 @@ async def read_health() -> Dict[str, str]:
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8010)

@@ -102,7 +102,8 @@ class SpeechCoreTranslator:
         """
         audio_config = speechsdk.audio.AudioConfig(stream=push_stream)
         self.speech_config.set_property(
-            speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, str(vad_silence_timeout_ms)
+            speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
+            str(vad_silence_timeout_ms),
         )
 
         # Use the instance's speech_config
@@ -202,9 +203,11 @@ class SpeechCoreTranslator:
         if auto_detect_source_language:
             auto_detect_source_language_config = (
                 speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
-                    languages=auto_detect_supported_languages
-                    if auto_detect_supported_languages is not None
-                    else self.supported_languages
+                    languages=(
+                        auto_detect_supported_languages
+                        if auto_detect_supported_languages is not None
+                        else self.supported_languages
+                    )
                 )
             )
         else:
@@ -567,9 +570,11 @@ class SpeechTranscriber(SpeechCoreTranslator):
         if auto_detect_source_language:
             auto_detect_source_language_config = (
                 speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
-                    languages=auto_detect_supported_languages
-                    if auto_detect_supported_languages is not None
-                    else self.supported_languages
+                    languages=(
+                        auto_detect_supported_languages
+                        if auto_detect_supported_languages is not None
+                        else self.supported_languages
+                    )
                 )
             )
         else:

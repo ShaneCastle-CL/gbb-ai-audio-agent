@@ -143,16 +143,18 @@ class SpeechSynthesizer:
 
         # 3) Build an SSML envelope with reduced rate (80%)
         ##  If you would like to speed up the speech, you can increase the `prosody rate`% accordingly.
+
         ssml = f"""
-        <speak version="1.0" xml:lang="en-US">
-        <voice name="{speech_config.speech_synthesis_voice_name}">
-            <prosody rate="10%"> 
-            {text}
-            </prosody>
-        </voice>
+        <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+          <voice name="{speech_config.speech_synthesis_voice_name}">
+            <mstts:express-as style="chat">
+              <prosody rate="15%" pitch="default">
+                {text}
+              </prosody>
+            </mstts:express-as>
+          </voice>
         </speak>
         """
-
         # 4) Synthesize
         result = synth.speak_ssml_async(ssml).get()
         if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
