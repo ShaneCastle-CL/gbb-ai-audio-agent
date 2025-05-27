@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class AudioRecorder:
     """
     Async audio recorder using PyAudio.
@@ -92,6 +93,7 @@ class AudioRecorder:
         wf.writeframes(b"".join(self.frames))
         wf.close()
         print(f"🎙️ Audio saved to {filename}")
+
 
 class TranscriptionClient:
     """
@@ -212,6 +214,7 @@ class TranscriptionClient:
                 await self.send_audio_chunk(audio_data)
             except asyncio.CancelledError:
                 break
+
 
 class AudioTranscriber:
     """
