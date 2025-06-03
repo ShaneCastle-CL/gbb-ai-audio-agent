@@ -16,4 +16,6 @@ model:
 prompts:
   path: non_healthcare_agent.jinja
 
-tools: []
+tools: 
+  - escalate_emergency
+  - handoff_agent

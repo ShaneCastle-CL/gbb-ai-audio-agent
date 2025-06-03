@@ -18,3 +18,4 @@ prompts:
 tools:
   - general_health_question
   - escalate_emergency
+  - handoff_agent

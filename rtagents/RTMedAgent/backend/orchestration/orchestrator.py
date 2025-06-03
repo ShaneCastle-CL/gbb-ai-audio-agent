@@ -93,7 +93,10 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
             logger.error(f"Agent '{agent_key}' not found! Fallback to NonHealthcareAgent.")
             agent = getattr(ws.app.state, "NonHealthcareAgent", None)
         cm.update_context("active_agent", agent_key)
+
+        latency_tool.start(f"processing_{agent_key}")
         result = await agent.respond(cm, transcript, ws, is_acs=is_acs)
+        latency_tool.stop(f"processing_{agent_key}", redis_mgr)
 
         if isinstance(result, dict) and result.get("finalize", False):
             cm.update_context("active_agent", None)
@@ -111,10 +114,12 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
         if not agent:
             logger.error(f"Agent '{agent_key}' not found! Fallback to NonHealthcareAgent.")
             agent = getattr(ws.app.state, "NonHealthcareAgent", None)
-
+        latency_tool.start(f"processing_{agent_key}")
         # Run the agent turn (may call backend tools, produce outputs)
         result = await agent.respond(cm, transcript, ws, is_acs=is_acs)
-        if isinstance(result, dict) and result.get("finalize", False):
+        latency_tool.stop(f"processing_{agent_key}", redis_mgr)
+        
+        if isinstance(result, dict) and result.get("finalize", True):
             cm.update_context("active_agent", None)
             handoffs = cm.get_context("handoff_history", [])
             handoffs.append({
@@ -131,7 +136,7 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
             if tool_name and tool_output:
                 cm.persist_tool_output(tool_name, tool_output)
 
-        latency_tool.stop(f"processing_{agent_key}", redis_mgr)
+        
 
     # Always persist conversation state to Redis after each turn
     cm.persist_to_redis(redis_mgr)

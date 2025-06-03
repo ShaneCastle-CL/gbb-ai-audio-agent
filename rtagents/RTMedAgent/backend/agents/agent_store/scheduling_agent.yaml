@@ -13,7 +13,7 @@ model:
   max_tokens: 1536
 
 prompts:
-  path: scheduling_agent_prompt.jinja
+  path: scheduling_agent.jinja
 
 tools:
   - schedule_appointment
