@@ -91,7 +91,6 @@ run_pylint:
 
 
 ## Deployment App
-
 # Use .ONESHELL to run all commands in a single shell instance
 .ONESHELL:
 

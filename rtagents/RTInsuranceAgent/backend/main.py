@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from utils.ml_logging import get_logger
 import os
-from rtagents.RTMedAgent.backend.settings import (
+from rtagents.RTInsuranceAgent.backend.settings import (
     ALLOWED_ORIGINS,
     AOAI_STT_KEY,
     AOAI_STT_ENDPOINT,
@@ -38,15 +38,15 @@ from services import (
     CosmosDBMongoCoreManager,
     AzureRedisManager,
 )
-from rtagents.RTMedAgent.backend.services.acs.acs_caller import (
+from rtagents.RTInsuranceAgent.backend.services.acs.acs_caller import (
     initialize_acs_caller_instance,
 )
 from routers import router as api_router
-from rtagents.RTMedAgent.backend.agents.base import RTAgent
-from rtagents.RTMedAgent.backend.services.openai_services import (
+from rtagents.RTInsuranceAgent.backend.agents.base import RTAgent
+from rtagents.RTInsuranceAgent.backend.services.openai_services import (
     client as azure_openai_client,
 )
-from rtagents.RTMedAgent.backend.agents.prompt_store.prompt_manager import PromptManager
+from rtagents.RTInsuranceAgent.backend.agents.prompt_store.prompt_manager import PromptManager
 
 logger = get_logger("main")
 
@@ -65,7 +65,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ---------------- Startup / Shutdown ---------------------------------------
 @app.on_event("startup")
@@ -109,37 +108,12 @@ async def on_startup() -> None:
     # Outbound ACS caller (may be None if env vars missing)
     app.state.acs_caller = initialize_acs_caller_instance()
     app.state.auth_agent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/auth_agent.yaml"
+        config_path="rtagents/RTInsuranceAgent/backend/agents/agent_store/auth_agent.yaml"
     )
-    app.state.auth_agent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/auth_agent.yaml"
-    )
-    app.state.intent_classifier_agent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/intent_classifier_agent.yaml"
-    )
-    app.state.MedicationAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/medication_agent.yaml"
-    )
-    app.state.BillingAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/billing_agent.yaml"
-    )
-    app.state.ReferralsAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/referrals_agent.yaml"
-    )
-    app.state.GeneralHealthcareAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/general_healthcare_agent.yaml"
-    )
-    app.state.NonHealthcareAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/non_healthcare_agent.yaml"
-    )
-    app.state.SchedulingAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/scheduling_agent.yaml"
-    )
-    app.state.TranslateAgent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/translation_agent.yaml"
+    app.state.claim_intake_agent = RTAgent(
+        config_path="rtagents/RTInsuranceAgent/backend/agents/agent_store/claim_intake_agent.yaml"
     )
     logger.info("startup complete")
-
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:

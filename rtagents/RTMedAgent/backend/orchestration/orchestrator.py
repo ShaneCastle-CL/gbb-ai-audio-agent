@@ -14,6 +14,7 @@ AGENT_CATEGORIES = [
     "General Healthcare",
     "Non-Healthcare",
     "Scheduling",
+    "Translation",
 ]
 
 INTENT_TO_AGENT = {
@@ -24,6 +25,7 @@ INTENT_TO_AGENT = {
     "General Healthcare": "GeneralHealthcareAgent",
     "Non-Healthcare": "NonHealthcareAgent",
     "Scheduling": "SchedulingAgent",
+    "Translation": "TranslateAgent",
 }
 
 
