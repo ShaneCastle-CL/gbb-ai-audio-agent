@@ -68,12 +68,10 @@ async def realtime_ws(ws: WebSocket):
         ws.state.cm = cm
         ws.state.session_id = session_id
         ws.state.lt = LatencyTool(cm)
-
-        # -------- send greeting and ask for full name, phone number, and DOB ---
         greeting = (
-            "Hello from XMYX Healthcare Company! Before I can assist you, "
+            "Hello from XYMZ Insurance! Before I can assist you, "
             "I need to verify your identity. "
-            "Could you please provide your full name, phone number, and date of birth?"
+            "Could you please provide your full name, and either the last 4 digits of your Social Security Number or your ZIP code?"
         )
         await ws.send_text(json.dumps({"type": "status", "message": greeting}))
         await send_tts_audio(greeting, ws, latency_tool=ws.state.lt)

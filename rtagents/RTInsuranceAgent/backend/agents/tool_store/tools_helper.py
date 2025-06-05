@@ -69,7 +69,6 @@ def _frame(
         **extra,
     }
 
-
 async def push_tool_start(
     ws: WebSocket,
     call_id: str,
