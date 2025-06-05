@@ -6,17 +6,21 @@ This module provides helper functions and utilities for integrating with Azure C
 """
 
 import json
+import asyncio
 from base64 import b64encode
 from typing import List, Optional
-
+from azure.communication.callautomation import CallConnectionClient, TextSource, SsmlSource
+from azure.core.exceptions import HttpResponseError
 from fastapi import WebSocket
+from fastapi.websockets import WebSocketState
 from src.acs.acs_helper import AcsCaller
-from rtagents.RTMedAgent.backend.settings import (
+from rtagents.RTAgent.backend.settings import (
     ACS_CALLBACK_PATH,
     ACS_CONNECTION_STRING,
     ACS_SOURCE_PHONE_NUMBER,
     ACS_WEBSOCKET_PATH,
     BASE_URL,
+    VOICE_TTS
 )
 from utils.ml_logging import get_logger
 
@@ -206,6 +210,7 @@ async def stop_audio(websocket):
         logger.info("🛑 Sent StopAudio command to ACS WebSocket.")
 
 
+
 async def resume_audio(websocket):
     """
     Tells the ACS Media Streaming service to resume accepting incoming audio from client.
@@ -215,3 +220,129 @@ async def resume_audio(websocket):
         start_payload = {"Kind": "StartAudio", "AudioData": None, "StartAudio": {}}
         await websocket.send_json(start_payload)
         logger.info("🎙️ Sent StartAudio command to ACS WebSocket.")
+
+
+async def play_response(
+    ws: WebSocket,
+    response_text: str,
+    use_ssml: bool = False,
+    voice_name: str = "en-US-JennyNeural",  # Fixed: Use valid Azure TTS voice
+    locale: str = "en-US",
+    participants: list = None,
+    max_retries: int = 5,
+    initial_backoff: float = 0.5,
+):
+    """
+    Plays `response_text` into the given ACS call, using the SpeechConfig.
+    Sets bot_speaking=True at start, False when done or on error.
+    
+    :param ws:                 WebSocket connection with app state
+    :param response_text:      Plain text or SSML to speak
+    :param use_ssml:           If True, wrap in SsmlSource; otherwise TextSource
+    :param voice_name:         Valid Azure TTS voice name (default: en-US-JennyNeural)
+    :param locale:             Voice locale (default: en-US)
+    :param participants:       List of call participants for target identification
+    :param max_retries:        Maximum retry attempts for 8500 errors
+    :param initial_backoff:    Initial backoff time in seconds
+    """
+    # 1) Get the call-specific client
+    call_connection_id = ws.headers.get("x-ms-call-connection-id")
+    acs_caller = ws.app.state.acs_caller
+    call_conn = acs_caller.get_call_connection(call_connection_id=call_connection_id)
+    cm = ws.app.state.cm
+    
+    if not call_conn:
+        logger.error(
+            f"Could not get call connection object for {call_connection_id}. Cannot play media."
+        )
+        return
+
+    # 2) Validate and sanitize response text
+    if not response_text or not response_text.strip():
+        logger.info(
+            f"Skipping media playback for call {call_connection_id} because response_text is empty."
+        )
+        return
+
+    # 3) Set bot_speaking flag at start
+    if cm:
+        cm.update_context("bot_speaking", True)
+        cm.persist_to_redis(ws.app.state.redis)
+
+    try:
+        # Sanitize and prepare the response text
+        sanitized_text = response_text.strip().replace('\n', ' ').replace('\r', ' ')
+        sanitized_text = ' '.join(sanitized_text.split())
+        
+        # Log the sanitized text (first 100 chars) for debugging
+        text_preview = sanitized_text[:100] + "..." if len(sanitized_text) > 100 else sanitized_text
+        logger.info(f"🔧 Playing text: '{text_preview}'")
+
+        # 4) Build the correct play_source object
+        if use_ssml:
+            source = SsmlSource(ssml_text=sanitized_text)
+            logger.debug(f"Created SsmlSource for call {call_connection_id}")
+        else:
+            source = TextSource(
+                text=sanitized_text,
+                voice_name=voice_name,
+                source_locale=locale
+            )
+            logger.debug(f"Created TextSource for call {call_connection_id} with voice {voice_name}")
+
+        # 5) Retry loop for 8500 errors
+        for attempt in range(max_retries):
+            try:
+                response = call_conn.play_media(
+                    play_source=source,
+                    play_to=participants,
+                    interrupt_call_media_operation=True,
+                )
+                logger.info(
+                    f"✅ Successfully played media on attempt {attempt + 1} for call {call_connection_id}"
+                )
+                return response
+                
+            except HttpResponseError as e:
+                if e.status_code == 8500 or "Media operation is already active" in str(e.message):
+                    if attempt < max_retries - 1:  # Don't wait on the last attempt
+                        wait_time = initial_backoff * (2 ** attempt)
+                        logger.warning(
+                            f"⏳ Media active (8500) error on attempt {attempt + 1} for call {call_connection_id}. "
+                            f"Retrying after {wait_time:.1f}s..."
+                        )
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(
+                            f"🚨 Failed to play media after {max_retries} retries for call {call_connection_id}"
+                        )
+                        raise RuntimeError(
+                            f"Failed to play media after {max_retries} retries for call {call_connection_id}"
+                        )
+                else:
+                    logger.error(f"❌ Unexpected ACS error during play_media: {e}")
+                    raise
+            except Exception as e:
+                logger.error(f"❌ Unexpected exception during play_media: {e}")
+                raise
+
+        # If we reach here, all retries failed
+        logger.error(
+            f"🚨 Failed to play media after {max_retries} retries for call {call_connection_id}"
+        )
+        raise RuntimeError(
+            f"Failed to play media after {max_retries} retries for call {call_connection_id}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error in play_response for call {call_connection_id}: {e}")
+        raise
+    finally:
+        # 6) Always clear bot_speaking flag when done (success or error)
+        if cm:
+            cm.update_context("bot_speaking", False)
+            cm.persist_to_redis(ws.app.state.redis)
+            logger.debug(f"🔄 Cleared bot_speaking flag for call {call_connection_id}")
+
+

@@ -2,7 +2,7 @@ import uuid
 import json
 from typing import Any, Dict, List, Optional
 
-from rtagents.RTMedAgent.backend.agents.prompt_store.prompt_manager import PromptManager
+from rtagents.RTAgent.backend.agents.prompt_store.prompt_manager import PromptManager
 from src.redis.manager import AzureRedisManager
 from statistics import mean
 from utils.ml_logging import get_logger

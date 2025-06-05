@@ -14,6 +14,8 @@ from rtagents.RTInsuranceAgent.backend.settings import (
     BASE_URL,
     ACS_CALLBACK_PATH,
     ACS_WEBSOCKET_PATH,
+    AZURE_SPEECH_ENDPOINT,
+    AZURE_STORAGE_CONTAINER_URL
 )
 from utils.ml_logging import get_logger
 from rtagents.RTInsuranceAgent.backend.services.acs.acs_helpers import construct_websocket_url
@@ -47,11 +49,14 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
         _instance = AcsCaller(
             source_number=ACS_SOURCE_PHONE_NUMBER,
             acs_connection_string=ACS_CONNECTION_STRING,
-            acs_callback_path=callback_url,
-            acs_media_streaming_websocket_path=ws_url,
+            callback_url=callback_url,
+            websocket_url=ws_url,
+            cognitive_services_endpoint=AZURE_SPEECH_ENDPOINT,
+            recording_storage_container_url=AZURE_STORAGE_CONTAINER_URL
         )
         logger.info("AcsCaller initialised")
     except Exception as exc:  # pylint: disable=broad-except
         logger.error("Failed to initialise AcsCaller: %s", exc, exc_info=True)
         _instance = None
     return _instance
+

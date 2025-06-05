@@ -2,7 +2,7 @@
 prompt_manager.py
 
 This module provides the PromptManager class for managing and rendering Jinja2 templates
-used to generate prompts for the backend of the browser_RTMedAgent application.
+used to generate prompts for the backend of the browser_RTAgent application.
 It supports loading templates from a specified directory and rendering them with
 dynamic context, such as patient information.
 
