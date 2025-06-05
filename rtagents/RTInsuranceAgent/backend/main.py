@@ -42,7 +42,7 @@ from rtagents.RTInsuranceAgent.backend.services.acs.acs_caller import (
     initialize_acs_caller_instance,
 )
 from routers import router as api_router
-from rtagents.RTInsuranceAgent.backend.agents.base import RTAgent
+from rtagents.RTInsuranceAgent.backend.agents.base import RTInsuranceAgent
 from rtagents.RTInsuranceAgent.backend.services.openai_services import (
     client as azure_openai_client,
 )
@@ -60,7 +60,7 @@ app.state.greeted_call_ids = set()  # to avoid double greetings
 # ---------------- Middleware ------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,10 +107,10 @@ async def on_startup() -> None:
     }
     # Outbound ACS caller (may be None if env vars missing)
     app.state.acs_caller = initialize_acs_caller_instance()
-    app.state.auth_agent = RTAgent(
+    app.state.auth_agent = RTInsuranceAgent(
         config_path="rtagents/RTInsuranceAgent/backend/agents/agent_store/auth_agent.yaml"
     )
-    app.state.claim_intake_agent = RTAgent(
+    app.state.claim_intake_agent = RTInsuranceAgent(
         config_path="rtagents/RTInsuranceAgent/backend/agents/agent_store/claim_intake_agent.yaml"
     )
     logger.info("startup complete")

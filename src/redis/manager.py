@@ -2,10 +2,17 @@ import os
 import time
 import threading
 import redis
+import asyncio
 from typing import Optional, Dict, Any, List
 from redis.exceptions import AuthenticationError
 from utils.ml_logging import get_logger
 from azure.identity import DefaultAzureCredential
+
+try:
+    import redis.asyncio as aioredis
+    ASYNC_REDIS_AVAILABLE = True
+except ImportError:
+    ASYNC_REDIS_AVAILABLE = False
 
 class AzureRedisManager:
     """
@@ -142,3 +149,37 @@ class AzureRedisManager:
     def list_connected_clients(self) -> List[Dict[str, str]]:
         """List currently connected clients."""
         return self.redis_client.client_list()
+
+    # ============================================================================
+    # ASYNC METHODS - Use these in async contexts to avoid blocking the event loop
+    # ============================================================================
+
+    async def store_session_data_async(self, session_id: str, data: Dict[str, Any]) -> bool:
+        """Async version of store_session_data using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.store_session_data, session_id, data)
+
+    async def get_session_data_async(self, session_id: str) -> Dict[str, str]:
+        """Async version of get_session_data using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_session_data, session_id)
+
+    async def update_session_field_async(self, session_id: str, field: str, value: str) -> bool:
+        """Async version of update_session_field using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.update_session_field, session_id, field, value)
+
+    async def delete_session_async(self, session_id: str) -> int:
+        """Async version of delete_session using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.delete_session, session_id)
+
+    async def get_value_async(self, key: str) -> Optional[str]:
+        """Async version of get_value using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.get_value, key)
+
+    async def set_value_async(self, key: str, value: str, ttl_seconds: Optional[int] = None) -> bool:
+        """Async version of set_value using thread pool executor."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.set_value, key, value, ttl_seconds)

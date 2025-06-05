@@ -55,7 +55,7 @@ async def process_gpt_response(
 ) -> Optional[Dict[str, Any]]:
     """
     Stream a chat completion, emit TTS, handle tool calls.
-    All sampling / model / tool parameters are injected by RTAgent and
+    All sampling / model / tool parameters are injected by RTInsuranceAgent and
     forwarded untouched through any follow-up calls.
     """
     agent_history = cm.get_history(agent_name)

@@ -19,7 +19,12 @@ import contextlib
 
 from azure.core.exceptions import HttpResponseError
 from azure.core.messaging import CloudEvent
-from rtagents.RTAgent.backend.services.acs.acs_helpers import stop_audio
+from rtagents.RTAgent.backend.services.acs.acs_helpers import (
+    stop_audio, 
+    play_response,
+    play_response_with_queue,
+    handle_transcription_resume_timeout
+)
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 # Import AudioStreamFormat from the appropriate SDK
@@ -147,16 +152,14 @@ async def callbacks(request: Request):
             cid = event.data.get("callConnectionId")
             redis_mgr = request.app.state.redis
 
-            cm = ConversationManager.from_redis(cid, redis_mgr)
-
-
-            # if etype == "Microsoft.Communication.ParticipantsUpdated":
+            cm = ConversationManager.from_redis(cid, redis_mgr)            # if etype == "Microsoft.Communication.ParticipantsUpdated":
             #     # Update the redis cache for the call connection id with participant info
             #     await broadcast_message(
             #         request.app.state.clients,
             #         f"\tParticipants updated for call {cid}",
             #         "System",
             #     )
+            
             if etype == "Microsoft.Communication.CallConnected":
                 participants = event.data.get("participants", [])
                 participant_count = len(participants)
@@ -175,17 +178,41 @@ async def callbacks(request: Request):
                 )
 
             if etype == "Microsoft.Communication.TranscriptionFailed":
+                reason = event.data.get("resultInformation", "Unknown reason")
+                logger.error(f"⚠️ {etype} for call {cid}: {reason}")
+                
+                # Log additional debugging information
+                if isinstance(reason, dict):
+                    error_code = reason.get('code', 'Unknown')
+                    sub_code = reason.get('subCode', 'Unknown')
+                    message = reason.get('message', 'No message')
+                    logger.error(f"   Error details - Code: {error_code}, SubCode: {sub_code}, Message: {message}")
+                    
+                    # Check if it's a WebSocket URL issue
+                    if sub_code == 8581:
+                        logger.error("🔴 WebSocket connection issue detected!")
+                        logger.error("   This usually means:")
+                        logger.error("   1. Your WebSocket endpoint is not accessible from Azure")
+                        logger.error("   2. Your BASE_URL is incorrect or not publicly accessible") 
+                        logger.error("   3. Your WebSocket server is not running or crashed")
+                        
+                        # Log the current configuration for debugging
+                        acs_caller = request.app.state.acs_caller
+                        if acs_caller and hasattr(acs_caller, 'acs_media_streaming_websocket_path'):
+                            logger.error(f"   Current WebSocket URL: {acs_caller.acs_media_streaming_websocket_path}")
+                
                 # Attempt to restart transcription if it fails
                 try:
                     acs_caller = request.app.state.acs_caller
                     if acs_caller and hasattr(acs_caller, "call_automation_client"):
                         call_connection_client = acs_caller.get_call_connection(cid)
-                        call_connection_client.start_transcription()
-                        logger.info(f"Attempted to restart transcription for call {cid}")
+                        if call_connection_client:
+                            call_connection_client.start_transcription()
+                            logger.info(f"✅ Attempted to restart transcription for call {cid}")
+                        else:
+                            logger.error(f"❌ Could not get call connection for {cid} to restart transcription")
                 except Exception as e:
-                    logger.error(f"Failed to restart transcription for call {cid}: {e}")
-                reason = event.data.get("resultInformation", "Unknown reason")
-                logger.error(f"⚠️ {etype} for call {cid}: {reason}")
+                    logger.error(f"❌ Failed to restart transcription for call {cid}: {e}", exc_info=True)
 
             if etype == "Microsoft.Communication.CallDisconnected":
                 logger.info(f"❌ Call disconnected for call {cid}")
@@ -194,9 +221,10 @@ async def callbacks(request: Request):
                 participants = event.data.get("participants", [])
                 logger.info(f"Disconnect reason: {disconnect_reason}")
                 logger.info(f"Participants at disconnect: {participants}")
+                
                 # Optionally, clean up conversation state or resources
                 try:
-                    cm.persist_to_redis(request.app.state.redis)
+                    await cm.persist_to_redis_async(request.app.state.redis)
                     logger.info(f"Persisted conversation state after disconnect for call {cid}")
                 except Exception as e:
                     logger.error(f"Failed to persist conversation state after disconnect for call {cid}: {e}")
@@ -242,30 +270,60 @@ async def acs_transcription_ws(ws: WebSocket):
     bot_speaking  = cm.context.get("bot_speaking", False)
     interrupt_cnt = cm.context.get("interrupt_count", 0)
 
-    call_conn = acs.get_call_connection(cid)    # 2) optional greeting
-    if not greeted:
-        greeting = (
-            "Hello, thank you for calling XMYX Healthcare Company. "
-            "Before I can assist you, let's verify your identity. "
-            "How may I address you today? Please state your full name clearly after the tone, "
-            "and let me know how I can help you with your healthcare needs."
-        )
-        # await call_conn.play_media(play_source=TextSource(text=greeting), interrupt_call_media_operations=True)
-        await play_response(
-            ws,
-            response_text=greeting,
-            participants=[ws.app.state.target_participant]
-        )
-
-        # play_response handles bot_speaking flag, just mark as greeted
-        greeted = True
-        cm.update_context("greeted", True)
-        cm.persist_to_redis(ws.app.state.redis)
-
+    call_conn = acs.get_call_connection(cid)
+    
+    # Flag to handle greeting inside the main loop for better transcription management
+    needs_greeting = not greeted
+    greeting_task = None
+    
     while True:
+        # Handle greeting as the first task inside the main loop
+        if needs_greeting and not greeting_task:
+            logger.info("🎤 Starting greeting inside main WebSocket loop for better transcription handling")
+            greeting = (
+                "Hello, thank you for calling XMYX Healthcare Company. "
+                "Before I can assist you, let's verify your identity. "
+                "How may I address you today? Please state your full name clearly after the tone, "
+                "and let me know how I can help you with your healthcare needs."
+            )
+              # Start the greeting as a background task
+            greeting_task = asyncio.create_task(
+                play_response_with_queue(
+                    ws,
+                    response_text=greeting,
+                    participants=[ws.app.state.target_participant]
+                )
+            )
+            
+            # Start monitoring for transcription resume
+            asyncio.create_task(
+                handle_transcription_resume_timeout(cid, cm, ws.app.state.redis, timeout_seconds=30.0)
+            )
+            
+            needs_greeting = False  # Mark that we've initiated the greeting
+        
+        # Check if greeting task is complete
+        if greeting_task and greeting_task.done():
+            try:
+                await greeting_task  # Ensure any exceptions are handled
+                logger.info("✅ Greeting completed successfully")
+            except Exception as e:
+                logger.error(f"❌ Error during greeting: {e}", exc_info=True)
+              # Mark as greeted
+            greeted = True
+            cm.update_context("greeted", True)
+            await cm.persist_to_redis_async(ws.app.state.redis)
+            greeting_task = None  # Clear the task reference
+
         try:
-            text_data = await ws.receive_text()
+            # Use a timeout to prevent blocking, but give more time for WebSocket messages
+            # During greeting, we still want to process transcription events
+            timeout = 0.5 if greeting_task and not greeting_task.done() else 1.0
+            text_data = await asyncio.wait_for(ws.receive_text(), timeout=timeout)
             msg = json.loads(text_data)
+        except asyncio.TimeoutError:
+            # Continue the loop to check greeting status and handle other tasks
+            continue
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected by client")
             break
@@ -284,32 +342,64 @@ async def acs_transcription_ws(ws: WebSocket):
             text   = td["text"].strip()
             words  = text.split()
             status = td["resultStatus"]   # "Intermediate" or "Final"
-            conf   = td.get("confidence", 0.0)            # 3) debounce only if bot is speaking
+            conf   = td.get("confidence", 0.0)
+            
+            # Enhanced logging to detect transcription during greeting
+            greeting_in_progress = greeting_task and not greeting_task.done()
+            if greeting_in_progress:
+                logger.info("🎤📝 Transcription received DURING greeting: '%s' (status: %s, conf: %.2f, bot_speaking: %s)", 
+                           text, status, conf, bot_speaking)
+            
+            # 3) debounce only if bot is speaking
+            # Note: When bot is speaking (media playback), ACS automatically pauses transcription
+            # to prevent feedback loops. This is expected behavior.
             if status == "Intermediate" and bot_speaking:
                 ok = len(words) >= 2 and conf >= 0.75
                 interrupt_cnt = interrupt_cnt + 1 if ok else 0
-                logger.info("🔊 Intermediate transcription: '%s' (status: %s, conf: %.2f)", text, status, conf)
+                logger.info("🔊 Intermediate transcription during bot speech: '%s' (status: %s, conf: %.2f)", text, status, conf)
                 cm.update_context("interrupt_count", interrupt_cnt)
-                cm.persist_to_redis(ws.app.state.redis)
+                await cm.persist_to_redis_async(ws.app.state.redis)
 
                 if interrupt_cnt >= 3:
                     logger.info("🔊 User interruption detected – stopping TTS")
                     try:
                         await call_conn.cancel_all_media_operations()
+                        
+                        # Check if media operations were cancelled and reset queue
+                        if await cm.is_media_cancelled():
+                            logger.info("🚫 Media cancellation detected, clearing queue and resetting flag")
+                            await cm.reset_media_cancelled_and_queue()
+                        
                     except Exception as cancel_error:
                         logger.error(f"Error canceling media operations: {cancel_error}")
                     bot_speaking  = False
                     interrupt_cnt = 0
                     cm.update_context("bot_speaking", False)
                     cm.update_context("interrupt_count", 0)
-                    cm.persist_to_redis()
+                    cm.update_context("transcription_paused_for_media", False)
+                    await cm.persist_to_redis_async(ws.app.state.redis)
                 continue
 
-            # 4) on final, reset counter and handle user turn
+            # Handle case where transcription resumes after media playback
+            if status == "Intermediate" and not bot_speaking:
+                # Clear the transcription pause flag if it was set
+                if cm.get_context("transcription_paused_for_media", False):
+                    logger.info("📝 Transcription resumed after media playback")
+                    cm.update_context("transcription_paused_for_media", False)
+                    await cm.persist_to_redis_async(ws.app.state.redis)
+                    
+                # Log intermediate transcription for debugging
+                logger.debug("📝 Intermediate transcription (bot not speaking): '%s' (conf: %.2f)", text, conf)            # 4) on final, reset counter and handle user turn
             if status == "Final":
                 interrupt_cnt = 0
                 cm.update_context("interrupt_count", 0)
-                cm.persist_to_redis()
+                
+                # Clear transcription pause flag if it was set (transcription has resumed)
+                if cm.get_context("transcription_paused_for_media", False):
+                    logger.info("📝 Transcription fully resumed - received final transcription")
+                    cm.update_context("transcription_paused_for_media", False)
+                
+                await cm.persist_to_redis_async(ws.app.state.redis)
 
                 # broadcast and route user text
                 await broadcast_message(ws.app.state.clients, text, "User")
@@ -321,7 +411,8 @@ async def acs_transcription_ws(ws: WebSocket):
                         logger.error(f"Error canceling media operations: {cancel_error}")
                     bot_speaking = False
                     cm.update_context("bot_speaking", False)
-                    cm.persist_to_redis(ws.app.state.redis)
+                    cm.update_context("transcription_paused_for_media", False)
+                    await cm.persist_to_redis_async(ws.app.state.redis)
 
                 # finally hand off to your orchestrator
                 # when it TTS's again, wrap that call with setting bot_speaking=True

@@ -72,6 +72,22 @@ class AcsCaller:
             if acs_connection_string
             else CallAutomationClient(endpoint=acs_endpoint, credential=DefaultAzureCredential())
         )
+        # Debugging: Log common misconfiguration sources
+        if websocket_url:
+            logger.info(f"Transcription transport_url (WebSocket): {websocket_url}")
+        else:
+            logger.warning("No websocket_url provided for transcription transport.")
+
+        if not self.source_number:
+            logger.warning("ACS source_number is not set.")
+        if not self.callback_url:
+            logger.warning("ACS callback_url is not set.")
+        if not (acs_connection_string or acs_endpoint):
+            logger.warning("Neither ACS connection string nor endpoint is set.")
+        if self.cognitive_services_endpoint is None:
+            logger.warning("No cognitive_services_endpoint provided (TTS/STT may not work).")
+        if self.recording_storage_container_url is None:
+            logger.warning("No recording_storage_container_url provided (recordings may not be saved).")
         logger.info("AcsCaller initialized")
 
     async def initiate_call(self, target_number: str) -> dict:

@@ -20,8 +20,8 @@ from rtagents.RTInsuranceAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTInsuranceAgent.backend.services.acs.acs_helpers import (
     broadcast_message,
     send_pcm_frames,
+    play_response_with_queue,
 )
-from services.acs.acs_helpers import play_response
 from typing import Optional, Set
 
 
@@ -40,6 +40,7 @@ async def send_tts_audio(
     synth.start_speaking_text(text)
     if latency_tool:
         latency_tool.stop("tts", ws.app.state.redis)
+
 
 async def send_response_to_acs(
     ws: WebSocket,
@@ -69,7 +70,7 @@ async def send_response_to_acs(
     if not acs_caller:
         raise RuntimeError("ACS caller is not initialized in WebSocket state.")
     
-    coro = play_response(
+    coro = play_response_with_queue(
         ws=ws,
         response_text=text,
         participants=[ws.app.state.target_participant]

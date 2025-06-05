@@ -13,7 +13,8 @@ from rtagents.RTMedAgent.backend.settings import (
 )
 
 client = AzureOpenAI(
-    api_version="2025-02-01-preview",
+    # api_version="2025-02-01-preview",
+    api_version="2025-01-01-preview",
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
     api_key=AZURE_OPENAI_KEY,
 )
