@@ -16,14 +16,14 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from rtagents.RTMedAgent.backend.orchestration.conversation_state import (
+from rtagents.RTAgent.backend.orchestration.conversation_state import (
     ConversationManager,
 )
-from rtagents.RTMedAgent.backend.latency.latency_tool import LatencyTool
+from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from helpers import check_for_stopwords, receive_and_filter
-from rtagents.RTMedAgent.backend.orchestration.orchestrator import route_turn
+from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
 from shared_ws import send_tts_audio, broadcast_message
-from rtagents.RTMedAgent.backend.postcall.push import build_and_flush
+from rtagents.RTAgent.backend.postcall.push import build_and_flush
 from utils.ml_logging import get_logger
 
 logger = get_logger("realtime_router")

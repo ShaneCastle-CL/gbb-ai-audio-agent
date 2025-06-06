@@ -2,7 +2,7 @@
 helpers.py
 ===========
 
-Utility helpers shared by the browser_RTMedAgent backend and the new
+Utility helpers shared by the browser_RTAgent backend and the new
 modular routers.
 """
 
@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 from fastapi import WebSocket
 
 from utils.ml_logging import get_logger
-from rtagents.RTMedAgent.backend.settings import STOP_WORDS
+from rtagents.RTAgent.backend.settings import STOP_WORDS
 
 logger = get_logger("helpers")
 

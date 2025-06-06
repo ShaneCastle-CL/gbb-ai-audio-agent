@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from utils.ml_logging import get_logger
 import os
-from rtagents.RTMedAgent.backend.settings import (
+from rtagents.RTAgent.backend.settings import (
     ALLOWED_ORIGINS,
     AOAI_STT_KEY,
     AOAI_STT_ENDPOINT,
@@ -38,11 +38,11 @@ from services import (
     CosmosDBMongoCoreManager,
     AzureRedisManager,
 )
-from rtagents.RTMedAgent.backend.services.acs.acs_caller import (
+from rtagents.RTAgent.backend.services.acs.acs_caller import (
     initialize_acs_caller_instance,
 )
 from routers import router as api_router
-from rtagents.RTMedAgent.backend.agents.base import RTAgent
+from rtagents.RTAgent.backend.agents.base import RTAgent
 
 logger = get_logger("main")
 
@@ -56,7 +56,7 @@ app.state.greeted_call_ids = set()  # to avoid double greetings
 # ---------------- Middleware ------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -103,10 +103,10 @@ async def on_startup() -> None:
     # Outbound ACS caller (may be None if env vars missing)
     app.state.acs_caller = initialize_acs_caller_instance()
     app.state.auth_agent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/auth_agent.yaml"
+        config_path="rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml"
     )
     app.state.task_agent = RTAgent(
-        config_path="rtagents/RTMedAgent/backend/agents/agent_store/task_agent.yaml"
+        config_path="rtagents/RTAgent/backend/agents/agent_store/task_agent.yaml"
     )
     logger.info("startup complete")
 

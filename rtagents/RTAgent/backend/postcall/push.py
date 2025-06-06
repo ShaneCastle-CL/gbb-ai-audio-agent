@@ -1,5 +1,5 @@
 import datetime
-from rtagents.RTMedAgent.backend.orchestration.conversation_state import (
+from rtagents.RTAgent.backend.orchestration.conversation_state import (
     ConversationManager,
 )
 from src.cosmosdb.manager import CosmosDBMongoCoreManager
@@ -14,7 +14,7 @@ def build_and_flush(cm: ConversationManager, cosmos: CosmosDBMongoCoreManager):
     (MongoDB API, _id = session_id).
     """
     session_id = cm.session_id
-    history = cm.hist
+    histories = cm.histories
     context = cm.context.copy()
     raw_lat = context.pop("latency_roundtrip", {})
 
@@ -34,9 +34,10 @@ def build_and_flush(cm: ConversationManager, cosmos: CosmosDBMongoCoreManager):
         "session_id": session_id,
         "timestamp": datetime.datetime.utcnow().replace(microsecond=0).isoformat()
         + "Z",
-        "history": history,
+        "histories": histories,  # store the whole agent->history map
         "context": context,
         "latency_summary": summary,
+        "agents": list(histories.keys()),  # optional: debug/analytics aid
     }
 
     try:

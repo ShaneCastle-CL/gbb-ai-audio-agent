@@ -688,7 +688,7 @@ export default function RealTimeVoiceApp() {
     <div style={styles.root}>
       {/* ------- HEADER ------- */}
       <header style={styles.header}>
-        <h1 style={styles.headerTitle}>🎙️ RTMedAgent</h1>
+        <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
         <p style={styles.headerSubtitle}>
           Transforming patient care with real‑time, intelligent voice
           interactions powered by Azure AI
