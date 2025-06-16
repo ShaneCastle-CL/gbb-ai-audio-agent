@@ -1,40 +1,46 @@
-# ---- Development Stage ----
-# Use a specific Node.js LTS version on Alpine Linux for a small and secure image.
-FROM node:slim
+# Dockerfile for the frontend React application
 
-# Set the working directory in the container.
+# Stage 1: Build the application
+FROM node:18-alpine AS builder
 WORKDIR /app
 
-# Copy package.json and package-lock.json.
-# This allows Docker to cache the dependency layer if these files haven't changed.
-COPY package.json package-lock.json* ./
+# Copy package.json and package-lock.json (or yarn.lock)
+COPY package.json package-lock.json ./
 
-# Copy the SSL root certificate into the container to make requests to backend
-COPY root.cer /usr/local/share/ca-certificates/root.crt
-RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates
-
-# Install dependencies. 'npm ci' is recommended for reproducible builds.
-# Ensure your lock file (package-lock.json) is committed to your repository.
+# Install dependencies
 RUN npm ci
-# Or for Yarn: RUN yarn install --frozen-lockfile
-# Or for PNPM: RUN pnpm install --frozen-lockfile
 
-# Copy the rest of the application source code into the image.
-# For `npm run dev` with hot-reloading, source code is typically volume-mounted from the host.
-# This copy ensures the image has the code if not volume mounting, or for initial setup.
-# Ensure you have a .dockerignore file to exclude node_modules, .git, etc.
+# Copy the rest of the application code
 COPY . .
 
-# Copy the SSL root certificate into the container.
+# Build the application for production
+RUN npm run build
 
-# Expose the port Vite dev server typically runs on (default 5173).
-# This needs to match the port specified in your Vite config or dev script.
-# Your docker-compose.yml maps host port 3000 to this container port.
+# Stage 2: Serve the application from a lightweight image
+FROM node:18-alpine
+WORKDIR /app
+
+# Copy only necessary files from the builder stage
+COPY --from=builder /app/dist ./dist
+COPY package.json package-lock.json ./
+
+# Install only production dependencies (like 'serve')
+# 'npm ci --omit=dev' would be better if your 'serve' is in dependencies not devDependencies
+# Or, if 'serve' is a regular dependency, 'npm ci' is fine.
+# For simplicity, if 'serve' is in dependencies:
+RUN npm ci --omit=dev 
+# If you added 'serve' as a devDependency, move it to 'dependencies' in package.json
+# or install it specifically: RUN npm install serve
+
+# Expose the port the app will run on (this should match your ingressTargetPort in Bicep)
 EXPOSE 5173
 
-# Set the default command to run the Vite development server.
-# IMPORTANT: Ensure your "dev" script in package.json (e.g., "vite")
-# is configured to listen on all network interfaces.
-# Example package.json script: "dev": "vite --host 0.0.0.0 --port 5173"
-# If not specified, Vite might only listen on localhost, making it inaccessible from outside the container.
-CMD ["npm", "run", "dev"]
+# Set the PORT environment variable (Azure Container Apps also sets this based on ingress)
+ENV PORT=5173
+
+# Command to start the production server
+# This will use the 'start' script from package.json if defined as above,
+# or you can specify the command directly.
+CMD ["npm", "start"]
+# Alternatively, directly:
+# CMD ["npx", "serve", "-s", "dist", "-l", "tcp://0.0.0.0:5173"]

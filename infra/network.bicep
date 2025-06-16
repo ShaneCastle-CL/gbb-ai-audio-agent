@@ -29,19 +29,19 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-07-01' = {
         vnetAddressPrefix
       ]
     }
-    subnets: [for subnet in subnets: {
-      name: subnet.name
-      properties: {
-        addressPrefix: subnet.addressPrefix
-        // Fix the delegation syntax
-        delegations: subnet.?delegations ?? []
-        // Add service endpoints if they exist
-        serviceEndpoints: subnet.?serviceEndpoints ?? []
-        // // Ensure private endpoint policies are disabled for delegation compatibility
-        // privateEndpointNetworkPolicies: 'Disabled'
-        // privateLinkServiceNetworkPolicies: 'Disabled'  
-      }
-    }]
+    // subnets: [for subnet in subnets: {
+    //   name: subnet.name
+    //   properties: {
+    //     addressPrefix: subnet.addressPrefix
+    //     // Fix the delegation syntax
+    //     delegations: subnet.?delegations ?? []
+    //     // Add service endpoints if they exist
+    //     serviceEndpoints: subnet.?serviceEndpoints ?? []
+    //     // // Ensure private endpoint policies are disabled for delegation compatibility
+    //     // privateEndpointNetworkPolicies: 'Disabled'
+    //     // privateLinkServiceNetworkPolicies: 'Disabled'  
+    //   }
+    // }]
   }
 }
 @batchSize(1)
@@ -68,6 +68,8 @@ resource subnetUpdate 'Microsoft.Network/virtualNetworks/subnets@2024-07-01' = [
     networkSecurityGroup: {
       id: nsg[i].id
     }
+    delegations: subnet.?delegations ?? []
+    serviceEndpoints: subnet.?serviceEndpoints ?? []
   }
   dependsOn: [
     nsg[i]

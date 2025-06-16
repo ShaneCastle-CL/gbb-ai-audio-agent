@@ -38,31 +38,43 @@ param azureOpenAIBackendConfig BackendConfigItem[]
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, environmentName, location)
 
+param principalType string = 'User' // or 'ServicePrincipal' based on your requirements
+param vaultSku string = 'standard' // or 'premium' based on your requirements
+
+
 // Network Config
 // -----------------------------------------------------------
 param hubVNetName string = 'vnet-hub-${name}-${environmentName}'
 param spokeVNetName string = 'vnet-spoke-${name}-${environmentName}'
 param hubVNetAddressPrefix string = '10.0.0.0/16'
 param spokeVNetAddressPrefix string = '10.1.0.0/16'
+param apimSubnetConfig SubnetConfig = {
+  name: 'apim'
+  addressPrefix: '10.0.1.0/27'
+  securityRules: [
+    
+  ]
+}
+
 param hubSubnets SubnetConfig[] = [
   {
     name: 'loadBalancer'          // App Gateway or L4 LB
     addressPrefix: '10.0.0.0/27'
   }
-  {
-    name: 'apim'                  // Internal APIM instance
-    addressPrefix: '10.0.1.0/27'
-    delegations: [
-      {
-        name: 'apimDelegation'
-        properties: {
-          serviceName: 'Microsoft.Web/serverfarms'
-          // serviceName: 'Microsoft.ApiManagement/service'
-        }
-      }
+  // {
+  //   name: 'apim'                  // Internal APIM instance
+  //   addressPrefix: '10.0.1.0/27'
+  //   delegations: [
+  //     {
+  //       name: 'apimDelegation'
+  //       properties: {
+  //         serviceName: 'Microsoft.Web/serverfarms'
+  //         // serviceName: 'Microsoft.ApiManagement/service'
+  //       }
+  //     }
 
-    ]  
-  }
+  //   ]  
+  // }
   {
     name: 'services'          // Shared services like monitor, orchestrators (if colocated)
     addressPrefix: '10.0.0.64/26'
@@ -135,7 +147,8 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.1.0' = {
   }
 }
 
-// Hub and Spoke VNets
+// Hub and Spoke VNets + Private DNS Zones
+// ============================================
 module hubNetwork 'network.bicep' = {
 scope: hubRg
   name: hubVNetName
@@ -301,7 +314,8 @@ module peerSpokeToHub './modules/networking/peer-virtual-networks.bicep' = {
 
 param acsDataLocation string = 'UnitedStates'
 
-
+// Application Identities
+// ============================================
 module uaiAudioAgentBackendIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
   name: 'uaiAudioAgentBackend'
   scope: spokeRg
@@ -321,9 +335,8 @@ module uaiAudioAgentFrontendIdentity 'br/public:avm/res/managed-identity/user-as
   }
 }
 
-param principalType string = 'User' // or 'ServicePrincipal' based on your requirements
-param vaultSku string = 'standard' // or 'premium' based on your requirements
-// Key Vault for storing secrets
+// Key Vault 
+// ============================================
 module keyVault 'br/public:avm/res/key-vault/vault:0.12.1' = {
   name: 'kv-${name}-${environmentName}-${resourceToken}'
   scope: spokeRg
@@ -457,6 +470,32 @@ module acs 'modules/communication/communication-services.bicep' = {
 param jwtAudience string
 param entraGroupId string
 
+
+// module appgwModule 'modules/gateway/appgw.bicep' = {
+//   name: 'appgwDeploy'
+//   scope: resourceGroup(networkingRG.name)
+//   dependsOn: [
+//     apimModule
+//   ]
+//   params: {
+//     appGatewayName: appGatewayName
+//     appGatewayFQDN: appGatewayFqdn
+//     location: location
+//     appGatewaySubnetId: networking.outputs.appGatewaySubnetid
+//     primaryBackendEndFQDN: '${apimName}.azure-api.net'
+//     keyVaultName: shared.outputs.keyVaultName
+//     keyVaultResourceGroupName: sharedRG.name
+//     appGatewayCertType: appGatewayCertType
+//     certKey: certKey
+//     certData: certData
+//     appGatewayPublicIpName: networking.outputs.appGatewayPublicIpName
+//     deploymentIdentityName: shared.outputs.deploymentIdentityName
+//     deploymentSubnetId: networking.outputs.deploymentSubnetId
+//     deploymentStorageName: shared.outputs.deploymentStorageName
+//   }
+// }
+
+
 module aiGateway 'ai-gateway.bicep' = {
   scope: hubRg
   name: 'ai-gateway'
@@ -470,7 +509,9 @@ module aiGateway 'ai-gateway.bicep' = {
     apimSku: 'StandardV2'
     virtualNetworkType: 'External'
     backendConfig: azureOpenAIBackendConfig
-    apimSubnetResourceId: hubNetwork.outputs.subnets.apim
+    apimSubnetConfig: apimSubnetConfig
+    apimIntegrationVnetName: hubNetwork.outputs.vnetName
+    // apimSubnetResourceId: hubNetwork.outputs.subnets.apim
 
     // apimDnsZoneId: networkIsolation ? apimDnsZone.outputs.id : ''
     aoaiDnsZoneId: networkIsolation ? openaiDnsZone.outputs.id : ''
@@ -654,11 +695,36 @@ module app 'app.bicep' = {
     rtaudioServerExists: rtaudioServerExists
 
     // Network configuration from network module
-    vnetName: spokeNetwork.outputs.vnetName
-    appgwSubnetResourceId: hubNetwork.outputs.subnets.loadBalancer
+    // vnetName: spokeNetwork.outputs.vnetName
+    // appgwSubnetResourceId: hubNetwork.outputs.subnets.loadBalancer
     appSubnetResourceId: spokeNetwork.outputs.subnets.app
+    privateEndpointSubnetId: spokeNetwork.outputs.subnets.privateEndpoint
+
+    cosmosDnsZoneId: cosmosMongoDnsZone.outputs.id
   }
 }
+
+
+// resource aiDeveloperRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+//   name: guid(app.outputs.backendAppName, 'AI Developer')
+//   scope: resourceGroup()
+//   properties: {
+//     principalId: backendUserAssignedIdentity.outputs.principalId
+//     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee') // AI Developer
+//     principalType: 'ServicePrincipal'
+//   }
+// }
+
+// resource cognitiveServicesContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+//   name: guid(backendUserAssignedIdentity.name, 'Cognitive Services Contributor')
+//   scope: resourceGroup()
+//   properties: {
+//     principalId: backendUserAssignedIdentity.outputs.principalId
+//     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68') // Cognitive Services Contributor
+//     principalType: 'ServicePrincipal'
+//   }
+// }
+
 
 // module loadbalancer 'loadbalancer.bicep' = {
 //   scope: rg
@@ -675,6 +741,11 @@ module app 'app.bicep' = {
 //     sslCertBase64: rootCertificateBase64Value
 //   }
 // }
+
+// Downstream dependencies for AZD app deployments
+// ===========================================
+output AZURE_RESOURCE_GROUP string = spokeRg.name
+output AZURE_CONTAINER_REGISTRY_ENDPOINT string = app.outputs.containerRegistryEndpoint
 
 // output containerRegistryEndpoint string = app.outputs.containerRegistryEndpoint
 // output containerRegistryResourceId string = app.outputs.containerRegistryResourceId
@@ -762,3 +833,4 @@ module loadBalancer 'loadbalancer-wrapper.bicep' = {
 output loadBalancerEndpoints object = loadBalancer.outputs.webSocketEndpoints
 output frontendPublicUrl string = loadBalancer.outputs.frontendUrl
 */
+

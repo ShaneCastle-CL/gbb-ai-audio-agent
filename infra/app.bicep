@@ -25,8 +25,8 @@ param logAnalyticsWorkspaceResourceId string = '00000000-0000-0000-0000-00000000
 param keyVaultResourceId string
 
 // Network parameters for reference
-param vnetName string
-param appgwSubnetResourceId string
+// param vnetName string
+// param appgwSubnetResourceId string
 param appSubnetResourceId string
 
 @description('Id of the user or app to assign application roles')
@@ -36,22 +36,41 @@ param principalType string
 // App Dependencies
 param aoai_endpoint string
 param aoai_chat_deployment_id string
-param acsResourceId string = ''
+// param acsResourceId string = ''
 
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
 
-param apimDnsZoneId string = '' // Optional DNS zone ID for APIM, can be used for private endpoints
-param aoaiDnsZoneId string = '' // Optional DNS zone ID for Azure OpenAI, can be used for private endpoints
+// param apimDnsZoneId string = '' // Optional DNS zone ID for APIM, can be used for private endpoints
+// param aoaiDnsZoneId string = '' // Optional DNS zone ID for Azure OpenAI, can be used for private endpoints
 param cosmosDnsZoneId string = '' // Optional DNS zone ID for Cosmos DB, can be used for private endpoints
 param privateEndpointSubnetId string = '' // Subnet ID for private endpoints, if applicable
 
 param disableLocalAuth bool = true // Keep enabled for now, can be disabled in prod
-param vnetIntegrationSubnetId string = ''
-param privateEndpoints array = []
+// param vnetIntegrationSubnetId string = ''
+// param privateEndpoints array = []
 
+
+module frontendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
+  name: 'gbbAiAudioAgentidentity'
+  params: {
+    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgent-${resourceToken}'
+    location: location
+  }
+}
+
+module backendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
+  name: 'gbbAiAudioAgentBackendIdentity'
+  params: {
+    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgentBackend-${resourceToken}'
+    location: location
+  }
+}
+
+var beContainerName =  toLower(substring('rtagent-server-${resourceToken}', 0, 22))
+var feContainerName =  toLower(substring('rtagent-client-${resourceToken}', 0, 22))
 
 
 // Cosmos DB MongoDB Cluster
@@ -139,17 +158,28 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
     location: location
     tags: tags
     publicNetworkAccess: 'Enabled'
-    roleAssignments:[
+    roleAssignments: [
       {
-        principalId: frontendUserAssignedIdentity.outputs.principalId
-        principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+        principalId: principalId
+        principalType: principalType
+        roleDefinitionIdOrName: 'AcrPull'
       }
       {
-        principalId: backendUserAssignedIdentity.outputs.principalId
-        principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+        principalId: principalId
+        principalType: principalType
+        roleDefinitionIdOrName: 'AcrPush'
       }
+      // Temporarily disabled - managed identity deployment timing issue
+      // {
+      //   principalId: frontendUserAssignedIdentity.outputs.principalId
+      //   principalType: 'ServicePrincipal'
+      //   roleDefinitionIdOrName: 'AcrPull'
+      // }
+      // {
+      //   principalId: backendUserAssignedIdentity.outputs.principalId
+      //   principalType: 'ServicePrincipal'
+      //   roleDefinitionIdOrName: 'AcrPull'
+      // }
     ]
   }
 }
@@ -208,11 +238,11 @@ module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
       ]
     }
     roleAssignments: [
-      {
-        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-        principalId: backendUserAssignedIdentity.outputs.principalId
-        principalType: 'ServicePrincipal'
-      }
+      // {
+      //   roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+      //   principalId: backendUserAssignedIdentity.outputs.principalId
+      //   principalType: 'ServicePrincipal'
+      // }
       // {
       //   roleDefinitionIdOrName: 'Storage Blob Data Reader'
       //   principalId: principalId
@@ -228,24 +258,6 @@ module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
     ]
   }
 }
-
-module frontendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
-  name: 'gbbAiAudioAgentidentity'
-  params: {
-    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgent-${resourceToken}'
-    location: location
-  }
-}
-module backendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
-  name: 'gbbAiAudioAgentBackendIdentity'
-  params: {
-    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgentBackend-${resourceToken}'
-    location: location
-  }
-}
-
-var beContainerName =  toLower(substring('rtagent-server-${resourceToken}', 0, 22))
-var feContainerName =  toLower(substring('rtagent-client-${resourceToken}', 0, 22))
 
 module fetchFrontendLatestImage './modules/app/fetch-container-image.bicep' = {
   name: 'gbbAiAudioAgent-fetch-image'
@@ -274,11 +286,11 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
       ]
       allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
       allowedHeaders: ['*']
-      allowCredentials: true
+      allowCredentials: false
     }
+    
     publicAccessAllowed: true
 
-    ingressExposedPort: 8080
     ingressTargetPort: 5173
     scaleMinReplicas: 1
     scaleMaxReplicas: 10
@@ -312,7 +324,9 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
       }
     ]
     userAssignedResourceId: frontendUserAssignedIdentity.outputs.resourceId
-    registries:[
+
+    registries: [
+      // Temporarily disabled - managed identity access issue
       {
         server: containerRegistry.outputs.loginServer
         identity: frontendUserAssignedIdentity.outputs.resourceId
@@ -323,11 +337,16 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
     location: location
     tags: union(tags, { 'azd-service-name': 'rtaudio-client' })
   }
+  dependsOn: [
+    containerAppsEnvironment
+    frontendUserAssignedIdentity
+    fetchFrontendLatestImage
+  ]
 }
 
-@description('Resource ID of an existing Application Gateway to use')
+// @description('Resource ID of an existing Application Gateway to use')
 // param existingAppGatewayResourceName string = 'ai-realtime-sandbox-wus2-appgw'
-param existingAppGatewayResourceGroupName string = 'ai-realtime-sandbox'
+// param existingAppGatewayResourceGroupName string = 'ai-realtime-sandbox'
 
 // resource existingAppGateway 'Microsoft.Network/applicationGateways@2022-09-01' existing = if (!empty(existingAppGatewayResourceName)) {
 //   scope: resourceGroup(existingAppGatewayResourceGroupName)
@@ -355,7 +374,7 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
     scaleMaxReplicas: 10
     corsPolicy: {
       allowedOrigins: [
-      'https://${frontendAudioAgent.outputs.containerAppFqdn}'
+      // 'https://${frontendAudioAgent.outputs.containerAppFqdn}'
       // 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
       // 'https://${existingAppGatewayPublicIp.properties.ipAddress}'
       'http://localhost:5173'
@@ -431,6 +450,11 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
       }
     ]
     userAssignedResourceId: backendUserAssignedIdentity.outputs.resourceId
+    // managedIdentities: {
+    //   userAssignedResourceIds: [
+    //     backendUserAssignedIdentity.outputs.resourceId
+    //   ]
+    // }
     registries: [
       {
         server: containerRegistry.outputs.loginServer
@@ -440,26 +464,6 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
     environmentResourceId: containerAppsEnvironment.outputs.resourceId
     location: location
     tags: union(tags, { 'azd-service-name': 'rtaudio-server' })
-  }
-}
-
-resource aiDeveloperRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(backendUserAssignedIdentity.name, 'AI Developer')
-  scope: resourceGroup()
-  properties: {
-    principalId: backendUserAssignedIdentity.outputs.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee') // AI Developer
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource cognitiveServicesContributorRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(backendUserAssignedIdentity.name, 'Cognitive Services Contributor')
-  scope: resourceGroup()
-  properties: {
-    principalId: backendUserAssignedIdentity.outputs.principalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68') // Cognitive Services Contributor
-    principalType: 'ServicePrincipal'
   }
 }
 
@@ -484,7 +488,7 @@ output backendUserAssignedIdentityResourceId string = backendUserAssignedIdentit
 // output communicationServicesEndpoint string = communicationServices.properties.hostName
 
 // Container Apps
-output frontendContainerAppResourceId string = frontendAudioAgent.outputs.containerAppResourceId
+// output frontendContainerAppResourceId string = frontendAudioAgent.outputs.containerAppResourceId
 output backendContainerAppResourceId string = backendAudioAgent.outputs.containerAppResourceId
 output frontendAppName string = feContainerName
 output backendAppName string = beContainerName

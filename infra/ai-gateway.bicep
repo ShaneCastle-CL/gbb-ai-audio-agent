@@ -5,7 +5,7 @@
   - Role assignments for APIM to access AI services
 */
 
-import { BackendConfigItem } from './modules/types.bicep'
+import { SubnetConfig, BackendConfigItem } from './modules/types.bicep'
 
 // Parameters
 @description('The name of the deployment or resource.')
@@ -36,19 +36,139 @@ param apimPublisherEmail string = 'noreply@microsoft.com'
 param apimPublisherName string = 'Microsoft'
 
 
-@description('Subnet resource ID for API Management virtual network integration')
-param apimSubnetResourceId string = ''
+
+param apimIntegrationVnetName string
+param apimSubnetConfig SubnetConfig = {
+  name: 'apim'
+  addressPrefix: '10.0.50.0/27'
+} 
 
 // Get reference to existing subnet for APIM delegation
-resource existingSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = if (!empty(apimSubnetResourceId)) {
-  name: '${split(apimSubnetResourceId, '/')[8]}/${last(split(apimSubnetResourceId, '/'))}'
+resource existingVnet 'Microsoft.Network/virtualNetworks@2023-11-01' existing = {
+  name: apimIntegrationVnetName
+}
+
+// Create NSG for API Management subnet
+resource apimNsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = {
+  name: 'nsg-apim-${name}-${resourceSuffix}'
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowHTTPS'
+        properties: {
+          priority: 1000
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+        }
+      }
+      {
+        name: 'AllowHTTP'
+        properties: {
+          priority: 1010
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '80'
+        }
+      }
+      {
+        name: 'AllowAPIMManagement'
+        properties: {
+          priority: 1020
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'ApiManagement'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'VirtualNetwork'
+          destinationPortRange: '3443'
+        }
+      }
+      {
+        name: 'AllowLoadBalancer'
+        properties: {
+          priority: 1030
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '6390'
+        }
+      }
+      {
+        name: 'AllowOutboundHTTPS'
+        properties: {
+          priority: 1000
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Outbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Internet'
+          destinationPortRange: '443'
+        }
+      }
+      {
+        name: 'AllowOutboundHTTP'
+        properties: {
+          priority: 1010
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Outbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Internet'
+          destinationPortRange: '80'
+        }
+      }
+      {
+        name: 'AllowOutboundSQL'
+        properties: {
+          priority: 1020
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Outbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Sql'
+          destinationPortRange: '1433'
+        }
+      }
+      {
+        name: 'AllowOutboundStorage'
+        properties: {
+          priority: 1030
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Outbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Storage'
+          destinationPortRange: '443'
+        }
+      }
+    ]
+  }
+  tags: tags
 }
 
 // Update subnet with API Management delegation
-resource apimSubnetDelegation 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = if (!empty(apimSubnetResourceId)) {
-  name: '${split(apimSubnetResourceId, '/')[8]}/${last(split(apimSubnetResourceId, '/'))}'
+resource apimSubnetDelegation 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = if (!empty(apimSubnetConfig.name)) {
+  name: apimSubnetConfig.name
+  parent: existingVnet
   properties: {
-    addressPrefix: existingSubnet.properties.addressPrefix
+    addressPrefix: apimSubnetConfig.addressPrefix
     delegations: [
       {
         name: 'Microsoft.Web/serverFarms'
@@ -57,7 +177,10 @@ resource apimSubnetDelegation 'Microsoft.Network/virtualNetworks/subnets@2023-11
         }
       }
     ]
-    serviceEndpoints: existingSubnet.properties.?serviceEndpoints ?? []
+    networkSecurityGroup: {
+      id: apimNsg.id
+    }
+    // serviceEndpoints: existingSubnet.properties.?serviceEndpoints ?? []
   }
 }
 

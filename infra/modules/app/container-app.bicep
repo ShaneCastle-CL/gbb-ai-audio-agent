@@ -4,8 +4,6 @@ param name string
 @description('Ingress target port for the container app')
 param ingressTargetPort int
 
-param ingressExposedPort int = ingressTargetPort
-
 @description('Minimum number of replicas')
 param scaleMinReplicas int = 1
 
@@ -67,7 +65,6 @@ type SecretEnvVarType = {
   name: string
   secretRef: string
 }
-
 param corsPolicy object = {}
 
 resource userAssignedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' existing = if (!empty(userAssignedResourceId)) {
@@ -83,19 +80,11 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
     tags: tags
     environmentResourceId: environmentResourceId
     secrets: _secrets
-    managedIdentities: empty(userAssignedResourceId)
-      ? {
-          type: 'SystemAssigned'
-        }
-      : {
-          type: 'UserAssigned'
-          userAssignedIdentities: [
-            {
-              resourceId: userAssignedIdentity.id
-              identityId: userAssignedIdentity.properties.principalId
-            }
-          ]
-        }
+    managedIdentities: {
+      userAssignedResourceIds: [
+        userAssignedResourceId
+      ]
+    }
     registries: registries
     containers: [for c in containers: {
       name: c.name
@@ -106,13 +95,6 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
         secretEnvRefs
       )
     }]
-    additionalPortMappings:[
-      {
-        external: publicAccessAllowed
-        exposedPort: ingressExposedPort
-        targetPort: ingressTargetPort
-      }
-    ]
     scaleSettings: {
       minReplicas: scaleMinReplicas
       maxReplicas: scaleMaxReplicas
@@ -137,7 +119,7 @@ module easyAuthAppReg '../identity/appregistration.bicep' = if (enableEasyAuth) 
     webAppEndpoint: 'https://${containerApp.outputs.fqdn}'
     webAppIdentityId: empty(userAssignedResourceId) 
       ? (containerApp.outputs.?systemAssignedMIPrincipalId ?? '') 
-      : userAssignedIdentity.id
+      : userAssignedResourceId
     issuer: issuer
   }
 }
