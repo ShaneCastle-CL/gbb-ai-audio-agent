@@ -51,31 +51,31 @@ resource communicationService 'Microsoft.Communication/CommunicationServices@202
 
 @description('Diagnostic settings for the Communication Service')
 resource communicationServiceDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (!empty(diagnosticSettings)) {
-  name: 'default'
+  name: '${communicationService.name}-diagnostic-settings'
   scope: communicationService
   properties: {
     workspaceId: diagnosticSettings.?workspaceResourceId
     storageAccountId: diagnosticSettings.?storageAccountResourceId
     eventHubAuthorizationRuleId: diagnosticSettings.?eventHubAuthorizationRuleResourceId
     eventHubName: diagnosticSettings.?eventHubName
-    logs: [
+    logs: diagnosticSettings.?logs ?? [
       {
-        categoryGroup: 'allLogs'
-        enabled: true
-        retentionPolicy: {
-          enabled: false
-          days: 0
-        }
+      categoryGroup: 'allLogs'
+      enabled: true
+      retentionPolicy: {
+        enabled: false
+        days: 0
+      }
       }
     ]
-    metrics: [
+    metrics: diagnosticSettings.?metrics ?? [
       {
-        category: 'AllMetrics'
-        enabled: true
-        retentionPolicy: {
-          enabled: false
-          days: 0
-        }
+      category: 'AllMetrics'
+      enabled: true
+      retentionPolicy: {
+        enabled: false
+        days: 0
+      }
       }
     ]
   }
