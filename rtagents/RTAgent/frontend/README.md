@@ -1,4 +1,4 @@
-# 🏥 RT Agent Frontend
+# 🏥 RT Insurance Agent Frontend
 
 A modern React-based frontend for the Real-Time Insurance Agent, featuring voice-enabled conversations, visual conversation mapping, and multi-channel communication support.
 

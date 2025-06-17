@@ -43,6 +43,10 @@ from rtagents.RTAgent.backend.services.acs.acs_caller import (
 )
 from routers import router as api_router
 from rtagents.RTAgent.backend.agents.base import RTAgent
+from rtagents.RTAgent.backend.services.openai_services import (
+    client as azure_openai_client,
+)
+from rtagents.RTAgent.backend.agents.prompt_store.prompt_manager import PromptManager
 
 logger = get_logger("main")
 
@@ -62,7 +66,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ---------------- Startup / Shutdown ---------------------------------------
 @app.on_event("startup")
 async def on_startup() -> None:
@@ -81,6 +84,8 @@ async def on_startup() -> None:
         database_name=AZURE_COSMOS_DB_DATABASE_NAME,
         collection_name=AZURE_COSMOS_DB_COLLECTION_NAME,
     )
+    app.state.azureopenai_client = azure_openai_client
+    app.state.promptsclient = PromptManager()
 
     # Gpt4o-transcribe config
     app.state.aoai_stt_cfg = {
@@ -105,11 +110,10 @@ async def on_startup() -> None:
     app.state.auth_agent = RTAgent(
         config_path="rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml"
     )
-    app.state.task_agent = RTAgent(
-        config_path="rtagents/RTAgent/backend/agents/agent_store/task_agent.yaml"
+    app.state.claim_intake_agent = RTAgent(
+        config_path="rtagents/RTAgent/backend/agents/agent_store/claim_intake_agent.yaml"
     )
     logger.info("startup complete")
-
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:

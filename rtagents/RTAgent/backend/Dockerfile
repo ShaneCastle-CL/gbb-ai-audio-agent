@@ -1,3 +1,5 @@
+# Note: build this image from the root of the project directory
+
 # Use an official Python runtime as a parent image
 FROM python:3.11-slim-bookworm
 
@@ -27,7 +29,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the current directory contents into the container at /app
-COPY ./usecases/browser_RTMedAgent/backend /app/usecases/browser_RTMedAgent/backend
+COPY ./rtagents/RTAgent/backend /app/rtagents/RTAgent/backend
 COPY ./src /app/src
 COPY ./utils /app/utils
 
@@ -41,6 +43,6 @@ USER appuser
 EXPOSE 8000
 
 # Define the command to run the application
-# Assuming your FastAPI app instance is named 'app' in 'server.py'
-# And your server.py is in the root of the copied content (i.e., /app/server.py)
-CMD ["uvicorn", "usecases.browser_RTMedAgent.backend.server:app", "--host", "0.0.0.0", "--port", "8010"]
+# Assuming your FastAPI app instance is named 'app' in 'main.py'
+# And your main.py is in the root of the copied content (i.e., /app/main.py)
+CMD ["uvicorn", "rtagents.RTAgent.backend.main:app", "--host", "0.0.0.0", "--port", "8010"]

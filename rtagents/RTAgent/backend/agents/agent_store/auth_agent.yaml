@@ -10,13 +10,14 @@ agent:
     Handles caller authentication, then hands off to clinical agents.
 
 model:
-  deployment_id: gpt-4o-standard
+  deployment_id: gpt-4o
   temperature: 0.15
   top_p: 0.9
   max_tokens: 1024
 
 prompts:
-  path: voice_agent_authentication.jinja
+  path: voice_agent_authetication.jinja
 
 tools:
-  - authenticate_user
+  - authenticate_caller
+  - escalate_emergency

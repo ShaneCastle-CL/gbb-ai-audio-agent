@@ -12,36 +12,32 @@ from typing import Any, Callable, Dict
 from fastapi import WebSocket
 
 from utils.ml_logging import get_logger
-from rtagents.RTAgent.backend.agents.tool_store.functions import (
-    authenticate_user,
-    check_drug_interactions,
-    escalate_emergency,
-    evaluate_prior_authorization,
-    fill_new_prescription,
-    get_current_prescriptions,
-    lookup_medication_info,
-    lookup_side_effects,
-    refill_prescription,
-    schedule_appointment,
+from rtagents.RTAgent.backend.agents.tool_store.fnol import (
+    record_fnol,
+    escalate_emergency
 )
+
+from rtagents.RTAgent.backend.agents.tool_store.auth import authenticate_caller
 
 log = get_logger("tools_helper")
 
-# --------------------------------------------------------------------------- #
-#  public mapping {openai_tool_name: python_callable}
-# --------------------------------------------------------------------------- #
 function_mapping: Dict[str, Callable[..., Any]] = {
-    "schedule_appointment": schedule_appointment,
-    "refill_prescription": refill_prescription,
-    "lookup_medication_info": lookup_medication_info,
-    "evaluate_prior_authorization": evaluate_prior_authorization,
+    "record_fnol": record_fnol,
     "escalate_emergency": escalate_emergency,
-    "authenticate_user": authenticate_user,
-    "fill_new_prescription": fill_new_prescription,
-    "lookup_side_effects": lookup_side_effects,
-    "get_current_prescriptions": get_current_prescriptions,
-    "check_drug_interactions": check_drug_interactions,
+    "authenticate_caller": authenticate_caller,
 }
+
+async def call_agent_tool(tool_name: str, args: dict) -> Any:
+    fn = function_mapping.get(tool_name)
+    if fn is None:
+        log.error(f"No function mapped for tool '{tool_name}'")
+        return {"ok": False, "message": f"Tool '{tool_name}' not supported."}
+    try:
+        result = await fn(args)
+        return result
+    except Exception as e:
+        log.exception(f"Error running tool '{tool_name}'")
+        return {"ok": False, "message": str(e)}
 
 
 async def _emit(ws: WebSocket, payload: dict, *, is_acs: bool) -> None:
@@ -75,7 +71,6 @@ def _frame(
         "ts": time.time(),
         **extra,
     }
-
 
 async def push_tool_start(
     ws: WebSocket,

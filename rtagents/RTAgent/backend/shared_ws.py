@@ -14,13 +14,15 @@ from __future__ import annotations
 import asyncio
 import json
 from fastapi import WebSocket
+
 from rtagents.RTAgent.backend.services.speech_services import SpeechSynthesizer
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTAgent.backend.services.acs.acs_helpers import (
     broadcast_message,
+    send_pcm_frames,
     play_response_with_queue,
 )
-from typing import Optional
+from typing import Optional, Set
 
 
 async def send_tts_audio(
@@ -54,6 +56,15 @@ async def send_response_to_acs(
     """
     if latency_tool:
         latency_tool.start("tts")
+    # synth: SpeechSynthesizer = ws.app.state.tts_client
+    # pcm = synth.synthesize_to_base64_frames(text, sample_rate=16000)
+    # coro = send_pcm_frames(ws, pcm_bytes=pcm, sample_rate=16000)
+
+    # if blocking:
+    #     await coro
+    #     if latency_tool:
+    #         latency_tool.stop("tts", ws.app.state.redis)
+    #     return None
 
     acs_caller = ws.app.state.acs_caller
     if not acs_caller:

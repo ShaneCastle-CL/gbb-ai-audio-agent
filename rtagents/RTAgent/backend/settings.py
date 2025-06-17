@@ -28,10 +28,11 @@ AOAI_STT_ENDPOINT = os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
 # ------------------------------------------------------------------------------
 # Azure Communication Services (ACS)
 # ------------------------------------------------------------------------------
+ACS_ENDPOINT: str = os.getenv("ACS_ENDPOINT", "")
 ACS_CONNECTION_STRING: str = os.getenv("ACS_CONNECTION_STRING", "")
 ACS_SOURCE_PHONE_NUMBER: str = os.getenv("ACS_SOURCE_PHONE_NUMBER", "")
 BASE_URL: str = os.getenv("BASE_URL", "")
-AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT", "")
+AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT") or os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
 
 # Blob Container URL for recording storage
 AZURE_STORAGE_CONTAINER_URL: str = os.getenv("AZURE_STORAGE_CONTAINER_URL", "")
@@ -72,7 +73,7 @@ VOICE_TTS = "en-US-JennyMultilingualNeural"
 # ------------------------------------------------------------------------------
 STOP_WORDS: List[str] = ["goodbye", "exit", "see you later", "bye"]
 # Character(s) that mark a chunk boundary for TTS streaming:
-TTS_END: set[str] = {".", "!", "?", ";"}
+TTS_END: set[str] = { ";" }
 
 # Allowed CORS origins for the FastAPI app:
 ALLOWED_ORIGINS: list[str] = [

@@ -16,12 +16,12 @@ class MediaCancelledException(Exception):
     pass
 
 
-from azure.communication.callautomation import CallConnectionClient, TextSource, SsmlSource
-from azure.core.exceptions import HttpResponseError
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
+from azure.core.exceptions import HttpResponseError
+from azure.communication.callautomation import TextSource, SsmlSource
+
 from src.acs.acs_helper import AcsCaller
-from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
 from rtagents.RTAgent.backend.settings import (
     ACS_CALLBACK_PATH,
     ACS_CONNECTION_STRING,
@@ -36,7 +36,6 @@ from utils.ml_logging import get_logger
 
 # --- Init Logger ---
 logger = get_logger()
-
 
 # --- Helper Functions for Initialization ---
 def construct_websocket_url(base_url: str, path: str) -> Optional[str]:
@@ -95,6 +94,7 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
     logger.info("Attempting to initialize AcsCaller...")
     logger.info(f"ACS Callback URL: {acs_callback_url}")
     logger.info(f"ACS WebSocket URL: {acs_websocket_url}")
+
 
     try:
         caller_instance = AcsCaller(
@@ -180,22 +180,6 @@ async def resume_audio(websocket):
         logger.info("🎙️ Sent StartAudio command to ACS WebSocket.")
 
 
-async def estimate_speech_duration(text: str, voice_name: str = VOICE_TTS, wpm: int = 150) -> float:
-    """
-    Estimate the duration in seconds it will take to speak the given text.
-    
-    :param text: The text to be spoken
-    :param voice_name: The TTS voice name (for future voice-specific adjustments)
-    :param wpm: Words per minute (default 150 for most TTS voices)
-    :return: Estimated duration in seconds
-    """
-    word_count = len(text.split())
-    duration = (word_count / wpm) * 60
-    # Add a small buffer for pauses and sentence breaks
-    buffer = min(2.0, duration * 0.1)  # 10% buffer, max 2 seconds
-    return duration + buffer
-
-
 async def play_response(
     ws: WebSocket,
     response_text: str,
@@ -205,24 +189,19 @@ async def play_response(
     participants: list = None,
     max_retries: int = 5,
     initial_backoff: float = 0.5,
-    transcription_resume_delay: float = 1.0,
 ):
     """
     Plays `response_text` into the given ACS call, using the SpeechConfig.
     Sets bot_speaking=True at start, False when done or on error.
     
-    IMPORTANT: During media playback, ACS automatically pauses transcription to prevent
-    audio feedback loops. This is expected behavior, not a bug.
-    
-    :param ws:                        WebSocket connection with app state
-    :param response_text:             Plain text or SSML to speak
-    :param use_ssml:                  If True, wrap in SsmlSource; otherwise TextSource
-    :param voice_name:                Valid Azure TTS voice name (default: en-US-JennyNeural)
-    :param locale:                    Voice locale (default: en-US)
-    :param participants:              List of call participants for target identification
-    :param max_retries:               Maximum retry attempts for 8500 errors
-    :param initial_backoff:           Initial backoff time in seconds
-    :param transcription_resume_delay: Extra delay after media ends to ensure transcription resumes
+    :param ws:                 WebSocket connection with app state
+    :param response_text:      Plain text or SSML to speak
+    :param use_ssml:           If True, wrap in SsmlSource; otherwise TextSource
+    :param voice_name:         Valid Azure TTS voice name (default: en-US-JennyNeural)
+    :param locale:             Voice locale (default: en-US)
+    :param participants:       List of call participants for target identification
+    :param max_retries:        Maximum retry attempts for 8500 errors
+    :param initial_backoff:    Initial backoff time in seconds
     """
     # 1) Get the call-specific client
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
@@ -230,6 +209,17 @@ async def play_response(
     call_conn = acs_caller.get_call_connection(call_connection_id=call_connection_id)
     cm = ws.app.state.cm
     
+    # If participants is empty or None, try to get target_participant from ws.app.state
+    if not participants:
+        logger.warning(f"No participants provided for call {call_connection_id}. Attempting to use ws.app.state.target_participant.")
+        target_participant = getattr(ws.app.state, "target_participant", None)
+        if target_participant:
+            participants = [target_participant]
+            logger.info(f"Using target_participant from ws.app.state for call {call_connection_id}.")
+        else:
+            logger.error(f"No target_participant found in ws.app.state for call {call_connection_id}. Cannot play media.")
+            return
+
     if not call_conn:
         logger.error(
             f"Could not get call connection object for {call_connection_id}. Cannot play media."
@@ -241,34 +231,17 @@ async def play_response(
         logger.info(
             f"Skipping media playback for call {call_connection_id} because response_text is empty."
         )
-        return
+        return    # 3) Set bot_speaking flag at start
 
-    # 3) Set bot_speaking flag and transcription_paused indicator at start
-    if cm:
-        cm.update_context("bot_speaking", True)
-        cm.update_context("transcription_paused_for_media", True)
-        await cm.persist_to_redis_async(ws.app.state.redis)
 
     try:
         # Sanitize and prepare the response text
         sanitized_text = response_text.strip().replace('\n', ' ').replace('\r', ' ')
         sanitized_text = ' '.join(sanitized_text.split())
         
-        # Estimate speech duration for monitoring
-        estimated_duration = await estimate_speech_duration(sanitized_text, voice_name)
-        
         # Log the sanitized text (first 100 chars) for debugging
         text_preview = sanitized_text[:100] + "..." if len(sanitized_text) > 100 else sanitized_text
-        logger.info(
-            f"� Playing text: '{text_preview}' "
-            f"(estimated duration: {estimated_duration:.1f}s)"
-        )
-        
-        # IMPORTANT: Inform about expected transcription pause
-        logger.info(
-            f"📝 Note: ACS will automatically pause transcription during media playback to prevent feedback loops. "
-            f"This is expected behavior for call {call_connection_id}."
-        )
+        logger.info(f"🔧 Playing text: '{text_preview}'")
 
         # 4) Build the correct play_source object
         if use_ssml:
@@ -280,11 +253,7 @@ async def play_response(
                 voice_name=voice_name,
                 source_locale=locale
             )
-            logger.debug(f"Created TextSource for call {call_connection_id} with voice {voice_name}")
-
-        # 5) Retry loop for 8500 errors
-        media_start_time = asyncio.get_event_loop().time()
-        
+            logger.debug(f"Created TextSource for call {call_connection_id} with voice {voice_name}")        # 5) Retry loop for 8500 errors
         for attempt in range(max_retries):
             try:
                 # Run the synchronous play_media call in a thread pool to avoid blocking
@@ -293,30 +262,37 @@ async def play_response(
                     None,
                     lambda: call_conn.play_media(
                         play_source=source,
-                        play_to=participants,
+                        # play_to=participants,
                         interrupt_call_media_operation=True,
                     )
                 )
-                
-                media_end_time = asyncio.get_event_loop().time()
-                actual_duration = media_end_time - media_start_time
-                
                 logger.info(
-                    f"✅ Successfully played media on attempt {attempt + 1} for call {call_connection_id} "
-                    f"(actual duration: {actual_duration:.1f}s)"
+                    f"✅ Successfully played media on attempt {attempt + 1} to play response: {sanitized_text}"
                 )
-                
-                # Add a small delay to ensure ACS has time to resume transcription
-                if transcription_resume_delay > 0:
-                    logger.debug(
-                        f"⏳ Waiting {transcription_resume_delay}s for transcription to resume for call {call_connection_id}"
-                    )
-                    await asyncio.sleep(transcription_resume_delay)
-                
                 return response
-                
+
             except HttpResponseError as e:
-                if e.status_code == 8500 or "Media operation is already active" in str(e.message):
+                # Check for cancellation-related errors that indicate interrupt
+                cancellation_indicators = [
+                    "cancelled",
+                    "disconnected", 
+                    "call ended",
+                    "media cancelled",
+                    "operation cancelled",
+                    "connection closed"
+                ]
+                
+                error_message = str(e).lower()
+                if any(indicator in error_message for indicator in cancellation_indicators):
+                    logger.warning(f"🚫 Media cancellation detected for call {call_connection_id}: {e}")
+                    await cm.set_media_cancelled(True)
+                    raise MediaCancelledException(f"Media playback cancelled: {e}")
+                
+                # Check for 8500 error code or message indicating media operation is already active
+                logger.warning(
+                    f"⏳ Media active (8500) error on attempt {attempt + 1} for call {call_connection_id}. "
+                )
+                if getattr(e, "status_code", None) == 8500 or "already in media operation" in str(e) or "Media operation is already active" in str(e):
                     if attempt < max_retries - 1:  # Don't wait on the last attempt
                         wait_time = initial_backoff * (2 ** attempt)
                         logger.warning(
@@ -338,7 +314,6 @@ async def play_response(
             except Exception as e:
                 logger.error(f"❌ Unexpected exception during play_media: {e}")
                 raise
-
         # If we reach here, all retries failed
         logger.error(
             f"🚨 Failed to play media after {max_retries} retries for call {call_connection_id}"
@@ -351,15 +326,14 @@ async def play_response(
         logger.error(f"❌ Error in play_response for call {call_connection_id}: {e}")
         raise
     finally:
-        # 6) Always clear bot_speaking flag and transcription_paused indicator when done
+        # 6) Always clear bot_speaking flag when done (success or error)
         if cm:
             cm.update_context("bot_speaking", False)
-            cm.update_context("transcription_paused_for_media", False)
             await cm.persist_to_redis_async(ws.app.state.redis)
-            logger.debug(f"🔄 Cleared bot_speaking and transcription flags for call {call_connection_id}")
-            logger.info(f"📝 Transcription should now resume for call {call_connection_id}")
+            logger.debug(f"🔄 Cleared bot_speaking flag for call {call_connection_id}")
 
 
+# async def play_response_with_queue(
 async def play_response_with_queue(
     ws: WebSocket,
     response_text: str,
@@ -390,7 +364,11 @@ async def play_response_with_queue(
     
     # Check if bot is currently speaking
     bot_speaking = cm.get_context("bot_speaking", False)
-    
+    logger.info(
+        f"Queue processing: {cm.is_queue_processing()}, "
+        f"Bot speaking: {bot_speaking}, "
+        f"Queue Size: {cm.get_queue_size()}"
+    )
     if bot_speaking or cm.is_queue_processing():
         # Bot is speaking or queue is being processed, add to queue
         logger.info(f"🎵 Bot is speaking or queue processing for call {call_connection_id}. Adding message to queue.")
@@ -435,24 +413,33 @@ async def process_message_queue(ws: WebSocket):
     
     try:
         while True:
+            # Check if media was cancelled due to interrupt
+            if cm.is_media_cancelled():
+                logger.info(f"🚫 Media cancelled detected for call {call_connection_id}. Stopping queue processing.")
+                break
+                
             message_data = await cm.get_next_message()
             if not message_data:
                 break
                 
             logger.info(f"🎵 Processing queued message for call {call_connection_id}")
             
-            # Play the queued message
-            await _play_response_direct(
-                ws=ws,
-                response_text=message_data["response_text"],
-                use_ssml=message_data["use_ssml"],
-                voice_name=message_data["voice_name"] or VOICE_TTS,
-                locale=message_data["locale"],
-                participants=message_data["participants"],
-                max_retries=message_data["max_retries"],
-                initial_backoff=message_data["initial_backoff"],
-                transcription_resume_delay=message_data.get("transcription_resume_delay", 1.0)
-            )
+            try:
+                # Play the queued message
+                await _play_response_direct(
+                    ws=ws,
+                    response_text=message_data["response_text"],
+                    use_ssml=message_data["use_ssml"],
+                    voice_name=message_data["voice_name"] or VOICE_TTS,
+                    locale=message_data["locale"],
+                    participants=message_data["participants"],
+                    max_retries=message_data["max_retries"],
+                    initial_backoff=message_data["initial_backoff"],
+                    transcription_resume_delay=message_data.get("transcription_resume_delay", 1.0)
+                )
+            except MediaCancelledException:
+                logger.info(f"🚫 Media playback cancelled for call {call_connection_id}. Stopping queue processing.")
+                break
             
             # Small delay between messages to allow for proper state transitions
             await asyncio.sleep(0.1)
@@ -478,7 +465,16 @@ async def _play_response_direct(
     """
     Direct implementation of play_response without queuing logic.
     This is the core playback function that handles the actual TTS.
-    (Copy of the original play_response logic)
+    
+    :param ws:                        WebSocket connection with app state
+    :param response_text:             Plain text or SSML to speak
+    :param use_ssml:                  If True, wrap in SsmlSource; otherwise TextSource
+    :param voice_name:                Valid Azure TTS voice name (default: en-US-JennyNeural)
+    :param locale:                    Voice locale (default: en-US)
+    :param participants:              List of call participants for target identification
+    :param max_retries:               Maximum retry attempts for 8500 errors
+    :param initial_backoff:           Initial backoff time in seconds
+    :param transcription_resume_delay: Extra delay after media ends to ensure transcription resumes
     """
     # 1) Get the call-specific client
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
@@ -486,6 +482,17 @@ async def _play_response_direct(
     call_conn = acs_caller.get_call_connection(call_connection_id=call_connection_id)
     cm = ws.app.state.cm
     
+    # If participants is empty or None, try to get target_participant from ws.app.state
+    if not participants:
+        logger.warning(f"No participants provided for call {call_connection_id}. Attempting to use target participant in state.")
+        target_participant = getattr(ws.app.state, "target_participant", None)
+        if target_participant:
+            participants = [target_participant]
+            logger.info(f"Using target_participant from ws.app.state for call {call_connection_id}.")
+        else:
+            logger.error(f"No target_participant found in ws.app.state for call {call_connection_id}. Cannot play media.")
+            return
+
     if not call_conn:
         logger.error(
             f"Could not get call connection object for {call_connection_id}. Cannot play media."
@@ -500,22 +507,20 @@ async def _play_response_direct(
         return
 
     # 3) Set bot_speaking flag and transcription_paused indicator at start
-    if cm:
-        cm.update_context("bot_speaking", True)
-        cm.update_context("transcription_paused_for_media", True)
-        await cm.persist_to_redis_async(ws.app.state.redis)
+    #.   Note: This is now managed on the CallConnected event callback (routers/acs.py)
+    # if cm:
+        # cm.update_context("bot_speaking", True)
+        # cm.update_context("transcription_paused_for_media", True)
+        # await cm.persist_to_redis_async(ws.app.state.redis)
 
     try:
         # Sanitize and prepare the response text
         sanitized_text = response_text.strip().replace('\n', ' ').replace('\r', ' ')
         sanitized_text = ' '.join(sanitized_text.split())
         
-        # Estimate speech duration for monitoring
-        estimated_duration = len(sanitized_text.split()) * 0.6  # ~0.6 seconds per word
-        
         # Log the sanitized text (first 100 chars) for debugging
         text_preview = sanitized_text[:100] + "..." if len(sanitized_text) > 100 else sanitized_text
-        logger.info(f"🔧 Playing text (est. {estimated_duration:.1f}s): '{text_preview}'")
+        logger.info(f"🔧 Playing text: '{text_preview}'")
 
         # 4) Build the correct play_source object
         if use_ssml:
@@ -538,12 +543,12 @@ async def _play_response_direct(
                     None,
                     lambda: call_conn.play_media(
                         play_source=source,
-                        play_to=participants,
+                        # play_to=participants,
                         interrupt_call_media_operation=True,
                     )
                 )
                 logger.info(
-                    f"✅ Successfully played media on attempt {attempt + 1} for call {call_connection_id}"
+                    f"✅ Successfully played media on attempt {attempt + 1} to play response: {sanitized_text}"
                 )
                 
                 # Add delay for transcription to resume
@@ -570,6 +575,9 @@ async def _play_response_direct(
                     raise MediaCancelledException(f"Media playback cancelled: {e}")
                 
                 # Check for 8500 error code or message indicating media operation is already active
+                logger.warning(
+                    f"⏳ Media active (8500) error on attempt {attempt + 1} for call {call_connection_id}. "
+                )
                 if getattr(e, "status_code", None) == 8500 or "already in media operation" in str(e) or "Media operation is already active" in str(e):
                     if attempt < max_retries - 1:  # Don't wait on the last attempt
                         wait_time = initial_backoff * (2 ** attempt)
@@ -607,36 +615,9 @@ async def _play_response_direct(
     finally:
         # 6) Always clear bot_speaking flag when done (success or error)
         if cm:
-            cm.update_context("bot_speaking", False)
-            cm.update_context("transcription_paused_for_media", False)
-            await cm.persist_to_redis_async(ws.app.state.redis)
+            # cm.update_context("bot_speaking", False)
+            # cm.update_context("transcription_paused_for_media", False)
+            # await cm.persist_to_redis_async(ws.app.state.redis)
             logger.debug(f"🔄 Cleared bot_speaking flag for call {call_connection_id}")
 
-
-async def handle_transcription_resume_timeout(
-    call_connection_id: str, 
-    cm: ConversationManager, 
-    redis_mgr, 
-    timeout_seconds: float = 30.0
-):
-    """
-    Monitor for transcription resume after media playback ends.
-    This is a diagnostic helper to detect if transcription doesn't resume as expected.
-    
-    :param call_connection_id: The ACS call connection ID
-    :param cm: Conversation manager instance
-    :param redis_mgr: Redis manager for state updates
-    :param timeout_seconds: How long to wait before logging a warning
-    """
-    await asyncio.sleep(timeout_seconds)
-    
-    # Check if transcription should have resumed by now
-    if cm.get_context("transcription_paused_for_media", False):
-        logger.warning(
-            f"⚠️ Transcription appears to still be paused {timeout_seconds}s after media playback "
-            f"for call {call_connection_id}. This may indicate an issue."
-        )
-        # Reset the flag since it's been too long
-        cm.update_context("transcription_paused_for_media", False)
-        await cm.persist_to_redis_async(redis_mgr)
 
