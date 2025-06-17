@@ -180,3 +180,9 @@ records/
 .DS_Store
 
 .ssl/
+
+# Don't include UV artifacts in version control
+uv.lock
+pyproject.toml
+.python-version
+*package-lock.json
