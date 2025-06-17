@@ -25,6 +25,7 @@ from rtagents.RTInsuranceAgent.backend.orchestration.orchestrator import route_t
 from shared_ws import send_tts_audio, broadcast_message
 from rtagents.RTInsuranceAgent.backend.settings import GREETING
 from rtagents.RTInsuranceAgent.backend.postcall.push import build_and_flush
+import json, uuid, asyncio
 from utils.ml_logging import get_logger
 
 logger = get_logger("realtime_router")
@@ -56,43 +57,81 @@ async def relay_ws(ws: WebSocket):
 # --------------------------------------------------------------------------- #
 @router.websocket("/realtime")
 async def realtime_ws(ws: WebSocket):
-    """
-    Browser/WebRTC client sends STT text; we stream GPT + TTS back.
-    The shared `route_turn` handles auth vs. main dialog.
-    """
+    await ws.accept()
+    session_id = ws.headers.get("x-ms-call-connection-id") or uuid.uuid4().hex[:8]
+
+    redis_mgr = ws.app.state.redis
+    cm = ConversationManager.from_redis(session_id, redis_mgr)
+    ws.state.cm = cm
+    ws.state.lt = LatencyTool(cm)
+    ws.state.is_synthesizing = False 
+    ws.state.user_buffer = ""
+
+    greeting = GREETING
+    await ws.send_text(json.dumps({"type":"status","message":greeting}))
+    await send_tts_audio(greeting, ws, latency_tool=ws.state.lt)
+    await broadcast_message(ws.app.state.clients, greeting, "Assistant")
+    cm.append_to_history("system","assistant",greeting)
+    cm.persist_to_redis(redis_mgr)
+
+    def on_partial(txt: str, lang: str):
+        logger.info(f"[STT Partial] {txt} (lang={lang})")
+        if ws.state.is_synthesizing:
+            try:
+                ws.app.state.tts_client.stop_speaking()
+                ws.state.is_synthesizing = False 
+                logger.info("🛑 TTS interrupted due to user speech (server VAD)")
+            except Exception as e:
+                logger.error(f"Error stopping TTS: {e}", exc_info=True)
+        asyncio.create_task(ws.send_text(
+            json.dumps({"type": "assistant_streaming", "content": txt})
+        ))
+
+    ws.app.state.stt_bytes_client.set_partial_result_callback(on_partial)
+
+    def on_final(txt: str, lang: str):
+        logger.info(f"[STT Final] {txt} (lang={lang})")
+        ws.state.user_buffer += txt.strip() + "\n"
+        asyncio.create_task(ws.send_text(
+            json.dumps({"type":"assistant","content":txt})
+        ))
+
+    ws.app.state.stt_bytes_client.set_final_result_callback(on_final)
+    ws.app.state.stt_bytes_client.start()
+    logger.info("STT recognizer started for session %s", session_id)
+
     try:
-        await ws.accept()
-        session_id = ws.headers.get("x-ms-call-connection-id") or uuid.uuid4().hex[:8]
-
-        redis_mgr = ws.app.state.redis
-        cm = ConversationManager.from_redis(session_id, redis_mgr)
-        ws.state.cm = cm
-        ws.state.session_id = session_id
-        ws.state.lt = LatencyTool(cm)
-        greeting = GREETING
-        await ws.send_text(json.dumps({"type": "status", "message": greeting}))
-        await send_tts_audio(greeting, ws, latency_tool=ws.state.lt)
-        await broadcast_message(ws.app.state.clients, greeting, "Assistant")
-        cm.append_to_history("system", "assistant", greeting)
-        cm.persist_to_redis(redis_mgr)
-
-        # ---------------- main loop -------------------------------------------
         while True:
-            prompt = await receive_and_filter(ws)
-            if prompt is None:
+            msg = await ws.receive()  # can be text or bytes
+            # —— binary frames: feed audio into recognizer ——
+            if msg.get("type") == "websocket.receive" and msg.get("bytes") is not None:
+                logger.info(f"Received audio bytes from frontend: {len(msg['bytes'])} bytes")
+                ws.app.state.stt_bytes_client.write_bytes(msg["bytes"])
+                logger.debug(f"First 8 bytes: {msg['bytes'][:8].hex()}")
+                if ws.state.user_buffer.strip():
+                    prompt = ws.state.user_buffer.strip()
+                    ws.state.user_buffer = ""
+
+                    if check_for_stopwords(prompt):
+                        goodbye = "Thank you for using our service. Goodbye."
+                        await ws.send_text(json.dumps({"type":"exit","message":goodbye}))
+                        await send_tts_audio(goodbye, ws, latency_tool=ws.state.lt)
+                        break
+
+                    # pass to GPT orchestrator
+                    await route_turn(cm, prompt, ws, is_acs=False)
                 continue
 
-            if check_for_stopwords(prompt):
-                goodbye = "Thank you for using our service. Goodbye."
-                await ws.send_text(json.dumps({"type": "exit", "message": goodbye}))
-                await send_tts_audio(goodbye, ws, latency_tool=ws.state.lt)
+            # —— handle disconnect ——
+            if msg.get("type") == "websocket.disconnect":
                 break
 
-            await route_turn(cm, prompt, ws, is_acs=False)
-
     finally:
+        ws.app.state.stt_bytes_client.close_stream()
+        ws.app.state.stt_bytes_client.stop()
+        logger.info("STT recognizer stopped for session %s", session_id)
+
         try:
-            cm = getattr(ws.state, "cm", None)
             cosmos = getattr(ws.app.state, "cosmos", None)
             if cm and cosmos:
                 build_and_flush(cm, cosmos)
