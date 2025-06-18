@@ -164,6 +164,10 @@ class ConversationManager:
 
     def get_context(self, key: str, default: Any = None) -> Any:
         return self.context.get(key, default)
+    
+    def set_context(self, key: str, value: Any) -> None:
+        """Set a context value, replacing any existing value."""
+        self.context[key] = value
 
     def update_context(self, key: str, value: Any) -> None:
         self.context[key] = value

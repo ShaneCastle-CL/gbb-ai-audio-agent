@@ -22,9 +22,10 @@ load_dotenv(override=True)
 AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_KEY: str = os.getenv("AZURE_OPENAI_KEY", "")
 AZURE_OPENAI_CHAT_DEPLOYMENT_ID: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_ID", "")
-AOAI_STT_KEY = os.environ["AZURE_OPENAI_STT_TTS_KEY"]
-AOAI_STT_ENDPOINT = os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
-
+AZURE_SPEECH_REGION: str = os.getenv("AZURE_SPEECH_REGION", "")
+AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT") or os.environ.get("AZURE_OPENAI_STT_TTS_ENDPOINT", "")
+AZURE_SPEECH_KEY: str = os.getenv("AZURE_SPEECH_KEY") or os.environ.get("AZURE_OPENAI_STT_TTS_KEY", "")
+AZURE_SPEECH_RESOURCE_ID: str = os.getenv("AZURE_SPEECH_RESOURCE_ID", "")
 # ------------------------------------------------------------------------------
 # Azure Communication Services (ACS)
 # ------------------------------------------------------------------------------
@@ -32,11 +33,11 @@ ACS_ENDPOINT: str = os.getenv("ACS_ENDPOINT", "")
 ACS_CONNECTION_STRING: str = os.getenv("ACS_CONNECTION_STRING", "")
 ACS_SOURCE_PHONE_NUMBER: str = os.getenv("ACS_SOURCE_PHONE_NUMBER", "")
 BASE_URL: str = os.getenv("BASE_URL", "")
-AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT") or os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
 
 # Blob Container URL for recording storage
 AZURE_STORAGE_CONTAINER_URL: str = os.getenv("AZURE_STORAGE_CONTAINER_URL", "")
 
+STREAMING_MODE: str = "media"
 # API route fragments (keep them in one place so routers can import)
 ACS_CALL_PATH = "/api/call"
 ACS_CALLBACK_PATH: str = "/call/callbacks"

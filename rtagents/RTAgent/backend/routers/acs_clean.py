@@ -123,89 +123,28 @@ async def media_callbacks(request: Request):
 # --------------------------------------------------------------------------- #
 #  4. Media-streaming WebSocket  (WS /call/stream)
 # --------------------------------------------------------------------------- #
-# @router.websocket(ACS_WEBSOCKET_PATH)
-# async def acs_media_streaming_ws(ws: WebSocket):
-#     """Handle ACS WebSocket media streaming."""
-#     await ws.accept()
-#     acs = ws.app.state.acs_caller
-#     redis_mgr = ws.app.state.redis
-
-#     cid = ws.headers["x-ms-call-connection-id"]
-#     cm = ConversationManager.from_redis(cid, redis_mgr)
-#     target_phone_number = cm.get_context("target_number")
-    
-#     if not target_phone_number:
-#         logger.debug(f"No target phone number found for session {cm.session_id}")
-
-#     ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
-#     ws.app.state.cm = cm
-#     ws.state.lt = LatencyTool(cm)
-
-#     call_conn = acs.get_call_connection(cid)
-
-#     while True:
-#         try:
-#             data = await ws.receive_bytes()
-#         except asyncio.TimeoutError:
-#             continue
-#         except WebSocketDisconnect:
-#             logger.info("WebSocket disconnected by client")
-#             break
-#         except Exception as e:
-#             logger.error(f"Unexpected error in WebSocket receive loop: {e}", exc_info=True)
-#             break
-
-#         # Process media data using handler
-#         try:
-#             await ACSHandler.handle_websocket_media(
-#                 ws=ws,
-#                 data=data,
-#                 cm=cm,
-#                 redis_mgr=redis_mgr,
-#                 call_conn=call_conn,
-#                 clients=ws.app.state.clients
-#             )
-#         except Exception as e:
-#             logger.error(f"Error processing media data: {e}", exc_info=True)
-#             continue
-
-# @router.websocket(ACS_WEBSOCKET_PATH)
-@router.websocket("/call/stream")
+@router.websocket(ACS_WEBSOCKET_PATH)
 async def acs_media_ws(ws: WebSocket):
-    await ACSHandler.handle_websocket_media_stream(ws)
-    # from fastapi import FastAPI, WebSocket
-    # await ws.accept()
-    # print("✅ WebSocket connected")
-    # # try:
-    # #     while True:
-    # #         data = await ws.receive_text()
-    # #         await ws.send_text(f"Echo: {data}")
-    # # except Exception as e:
-    # #     print(f"WebSocket closed: {e}")
+    """Handle ACS WebSocket media streaming."""
+    speech = ws.app.state.stt_client
+    acs = ws.app.state.acs_caller
+    if not speech or not acs:
+        await ws.close(code=1011)
+        return
 
-    # """Handle ACS WebSocket media streaming."""
-    # acs = ws.app.state.acs_caller
-    # redis_mgr = ws.app.state.redis
-    # speech = ws.app.state.stt_client
+    await ws.accept()
+    cid = ws.headers.get("x-ms-call-connection-id", "UnknownCall")
+    
+    # Delegate to handler
+    await ACSHandler.handle_websocket_media_stream(
+        ws=ws,
+        acs_caller=acs,
+        redis_mgr=ws.app.state.redis,
+        clients=ws.app.state.clients,
+        cid=cid,
+        speech_client=speech
+    )
 
-    # if not speech or not acs:
-    #     await ws.close(code=1011)
-    #     return
-
-    # cid = ws.headers["x-ms-call-connection-id"]
-    # cm = ConversationManager.from_redis(cid, redis_mgr)
-    # target_phone_number = cm.get_context("target_number")
-    # ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
-
-    # # Delegate to handler
-    # await ACSHandler.handle_websocket_media_stream(
-    #     ws=ws,
-    #     acs_caller=acs,
-    #     redis_mgr=ws.app.state.redis,
-    #     clients=ws.app.state.clients,
-    #     cid=cid,
-    #     speech_client=speech
-    # )
 
 @router.websocket("/call/transcription")
 async def acs_transcription_ws(ws: WebSocket):
@@ -257,4 +196,3 @@ async def acs_transcription_ws(ws: WebSocket):
         except Exception as e:
             logger.error(f"Error processing transcription message: {e}", exc_info=True)
             continue
-

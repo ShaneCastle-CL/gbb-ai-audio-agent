@@ -18,8 +18,8 @@ from utils.ml_logging import get_logger
 import os
 from rtagents.RTAgent.backend.settings import (
     ALLOWED_ORIGINS,
-    AOAI_STT_KEY,
-    AOAI_STT_ENDPOINT,
+    AZURE_SPEECH_KEY,
+    AZURE_SPEECH_ENDPOINT,
     AZURE_COSMOS_CONNECTION_STRING,
     AZURE_COSMOS_DB_DATABASE_NAME,
     AZURE_COSMOS_DB_COLLECTION_NAME,
@@ -37,6 +37,7 @@ from services import (
     SpeechCoreTranslator,
     CosmosDBMongoCoreManager,
     AzureRedisManager,
+    StreamingSpeechRecognizerFromBytes
 )
 from rtagents.RTAgent.backend.services.acs.acs_caller import (
     initialize_acs_caller_instance,
@@ -60,10 +61,11 @@ app.state.greeted_call_ids = set()  # to avoid double greetings
 # ---------------- Middleware ------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    max_age=86400,
 )
 
 # ---------------- Startup / Shutdown ---------------------------------------
@@ -74,7 +76,10 @@ async def on_startup() -> None:
     # Speech SDK
     app.state.stt_client = SpeechCoreTranslator()
     app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS)
-
+    app.state.stt_bytes_client = StreamingSpeechRecognizerFromBytes(
+        candidate_languages=["en-US", "es-ES", "fr-FR", "ko-KR", "it-IT"],
+        audio_format="pcm"
+    )
     # Redis connection
     app.state.redis = AzureRedisManager()
 
@@ -89,9 +94,9 @@ async def on_startup() -> None:
 
     # Gpt4o-transcribe config
     app.state.aoai_stt_cfg = {
-        "url": f"{AOAI_STT_ENDPOINT.replace('https','wss')}"
+        "url": f"{AZURE_SPEECH_ENDPOINT.replace('https','wss')}"
         "/openai/realtime?api-version=2025-04-01-preview&intent=transcription",
-        "headers": {"api-key": AOAI_STT_KEY},
+        "headers": {"api-key": AZURE_SPEECH_KEY},
         "rate": RATE,
         "channels": CHANNELS,  # Mono audio
         "format_": FORMAT,  # PCM16

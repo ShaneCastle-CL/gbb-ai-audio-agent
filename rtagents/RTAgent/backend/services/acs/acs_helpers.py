@@ -17,7 +17,9 @@ class MediaCancelledException(Exception):
 
 
 from fastapi import WebSocket
-from fastapi.websockets import WebSocketState
+from fastapi.websockets import WebSocketState, WebSocketDisconnect
+from websockets.exceptions import ConnectionClosedError
+
 from azure.core.exceptions import HttpResponseError
 from azure.communication.callautomation import TextSource, SsmlSource
 
@@ -134,18 +136,55 @@ async def broadcast_message(
                 logger.error(f"Failed to send message to a client: {e}")
 
 
-async def send_pcm_frames(ws: WebSocket, pcm_bytes: bytes, sample_rate: int):
-    packet_size = 640 if sample_rate == 16000 else 960
-    for i in range(0, len(pcm_bytes), packet_size):
-        frame = pcm_bytes[i : i + packet_size]
-        # pad last frame
-        if len(frame) < packet_size:
-            frame += b"\x00" * (packet_size - len(frame))
-        b64 = b64encode(frame).decode("ascii")
+# async def send_pcm_frames(ws: WebSocket, pcm_bytes: list, sample_rate: int):
 
-        payload = {"kind": "AudioData", "audioData": {"data": b64}, "stopAudio": None}
-        await ws.send_text(json.dumps(payload))
+#     packet_size = 640 if sample_rate == 16000 else 960
+#     for i in range(0, len(pcm_bytes), packet_size):
+#         frame = pcm_bytes[i : i + packet_size]
+#         # pad last frame
+#         if len(frame) < packet_size:
+#             frame += b"\x00" * (packet_size - len(frame))
+#         b64 = b64encode(frame).decode("ascii")
 
+#         payload = {"kind": "AudioData", "AudioData": {"data": b64}, "StopAudio": None}
+#         await send_data(ws, json.dumps(payload))
+
+async def send_pcm_frames(
+        ws: WebSocket, 
+        b64_frames: 
+        list[str], 
+        # redis, 
+        # call_id: str
+        ):
+    try:
+        import sys
+
+        for b64 in b64_frames:
+            # interrupt_flag = await redis.get(f"session:{call_id}:interrupt")
+            # if interrupt_flag and interrupt_flag.decode("utf-8") == "true":
+            #     logger.info("Voice interruption detected — stopping playback.")
+            #     return
+
+            payload = {
+                "kind": "AudioData",
+                "AudioData": {"data": b64},
+                "StopAudio": None
+            }
+
+            print(f"Payload size: {sys.getsizeof(json.dumps(payload))} bytes")
+            await ws.send_json({
+                "kind": "AudioData",
+                "AudioData": {"data": b64},
+                "StopAudio": None
+            })
+            # await asyncio.sleep(0.02)
+
+    except asyncio.CancelledError:
+        logger.info("TTS task cancelled")
+    except (WebSocketDisconnect, ConnectionClosedError) as e:
+        logger.warning(f"WebSocket disconnected during TTS stream: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error in send_pcm_frames: {e}", exc_info=True)
 
 async def send_data(websocket, buffer):
     if websocket.client_state == WebSocketState.CONNECTED:
