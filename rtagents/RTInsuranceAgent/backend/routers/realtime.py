@@ -70,7 +70,6 @@ async def realtime_ws(ws: WebSocket):
     greeting = GREETING
     await ws.send_text(json.dumps({"type":"status","message":greeting}))
     await send_tts_audio(greeting, ws, latency_tool=ws.state.lt)
-    await broadcast_message(ws.app.state.clients, greeting, "Assistant")
     cm.append_to_history("system","assistant",greeting)
     cm.persist_to_redis(redis_mgr)
 
@@ -92,9 +91,6 @@ async def realtime_ws(ws: WebSocket):
     def on_final(txt: str, lang: str):
         logger.info(f"[STT Final] {txt} (lang={lang})")
         ws.state.user_buffer += txt.strip() + "\n"
-        asyncio.create_task(ws.send_text(
-            json.dumps({"type":"assistant","content":txt})
-        ))
 
     ws.app.state.stt_bytes_client.set_final_result_callback(on_final)
     ws.app.state.stt_bytes_client.start()
@@ -103,7 +99,6 @@ async def realtime_ws(ws: WebSocket):
     try:
         while True:
             msg = await ws.receive()  # can be text or bytes
-            # —— binary frames: feed audio into recognizer ——
             if msg.get("type") == "websocket.receive" and msg.get("bytes") is not None:
                 logger.info(f"Received audio bytes from frontend: {len(msg['bytes'])} bytes")
                 ws.app.state.stt_bytes_client.write_bytes(msg["bytes"])
@@ -111,6 +106,10 @@ async def realtime_ws(ws: WebSocket):
                 if ws.state.user_buffer.strip():
                     prompt = ws.state.user_buffer.strip()
                     ws.state.user_buffer = ""
+                    await broadcast_message(ws.app.state.clients, prompt, "User")
+
+                    # Send user message to frontend immediately
+                    await ws.send_text(json.dumps({"sender": "User", "message": prompt}))
 
                     if check_for_stopwords(prompt):
                         goodbye = "Thank you for using our service. Goodbye."
@@ -130,7 +129,6 @@ async def realtime_ws(ws: WebSocket):
         ws.app.state.stt_bytes_client.close_stream()
         ws.app.state.stt_bytes_client.stop()
         logger.info("STT recognizer stopped for session %s", session_id)
-
         try:
             cosmos = getattr(ws.app.state, "cosmos", None)
             if cm and cosmos:

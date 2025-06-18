@@ -12,7 +12,6 @@ from rtagents.RTInsuranceAgent.backend.agents.tool_store.fnol import claims_db
 
 logger = get_logger("fnol_route")
 
-
 async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> None:
     """
     Two-stage FNOL flow:
@@ -68,7 +67,6 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
                 "claim_id": claim_id,
                 
             }))
-            # Up to you: close socket now or let caller hang up
             # await ws.close(code=1000)
 
     cm.persist_to_redis(redis_mgr)

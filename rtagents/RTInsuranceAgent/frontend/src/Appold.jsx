@@ -448,6 +448,15 @@ export default function RealTimeVoiceApp() {
     appendLog("🛑 PCM streaming stopped");
   };
 
+  // Helper to dedupe consecutive identical messages
+  const pushIfChanged = (arr, msg) => {
+    // Only dedupe if the last message is from the same speaker and has the same text
+    if (arr.length === 0) return [...arr, msg];
+    const last = arr[arr.length - 1];
+    if (last.speaker === msg.speaker && last.text === msg.text) return arr;
+    return [...arr, msg];
+  };
+
   const handleSocketMessage = async (event) => {
     if (typeof event.data !== "string") {
       const ctx = new AudioContext();
@@ -468,34 +477,49 @@ export default function RealTimeVoiceApp() {
       appendLog("Ignored non‑JSON frame");
       return;
     }
-    const { type, content = "", message = "", function_call } = payload;
+    // --- Handle relay/broadcast messages with {sender, message} ---
+    if (payload.sender && payload.message) {
+      // Route all relay messages through the same logic
+      payload.speaker = payload.sender;
+      payload.content = payload.message;
+      // fall through to unified logic below
+    }
+    const { type, content = "", message = "", function_call, speaker } = payload;
     const txt = content || message;
-  
+    const msgType = (type || "").toLowerCase();
+
+    /* ---------- USER BRANCH ---------- */
+    if (msgType === "user" || speaker === "User") {
+      setActiveSpeaker("User");
+      // Always append user message immediately, do not dedupe
+      setMessages(prev => [...prev, { speaker: "User", text: txt }]);
+      addMindMapNode({ speaker: "User", text: txt, parentId: lastAssistantId.current });
+      appendLog(`User: ${txt}`);
+      return;
+    }
+
+    /* ---------- ASSISTANT STREAM ---------- */
     if (type === "assistant_streaming") {
       setActiveSpeaker("Assistant");
-      setMessages((prev) => {
+      setMessages(prev => {
         if (prev.at(-1)?.streaming) {
-          return prev.map((m, i) => i === prev.length - 1 ? { ...m, text: txt } : m);
+          return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt} : m);
         }
-        return [...prev, { speaker: "Assistant", text: txt, streaming: true }];
+        return [...prev, { speaker:"Assistant", text:txt, streaming:true }];
       });
       return;
     }
-  
-    if (type === "assistant" || type === "status") {
-      addMindMapNode({
-        speaker: "Assistant",
-        text: txt,
-        parentId: lastUserId.current,
-      });
-  
+
+    /* ---------- ASSISTANT FINAL ---------- */
+    if (msgType === "assistant" || msgType === "status" || speaker === "Assistant") {
       setActiveSpeaker("Assistant");
-      setMessages((prev) => {
+      setMessages(prev => {
         if (prev.at(-1)?.streaming) {
-          return prev.map((m, i) => i === prev.length - 1 ? { speaker: "Assistant", text: txt } : m);
+          return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt, streaming:false} : m);
         }
-        return [...prev, { speaker: "Assistant", text: txt }];
+        return pushIfChanged(prev, { speaker:"Assistant", text:txt });
       });
+      addMindMapNode({ speaker:"Assistant", text:txt, parentId:lastUserId.current });
       appendLog("🤖 Assistant responded");
       return;
     }
@@ -636,29 +660,7 @@ export default function RealTimeVoiceApp() {
         setActiveSpeaker("Assistant");
       };
 
-      relay.onmessage = ({ data }) => {
-        try {
-          const obj = JSON.parse(data);
-          if (obj.type?.startsWith("tool_")) {
-            handleSocketMessage({ data: JSON.stringify(obj) });
-            return;                              // already handled
-          }
-        } catch { /* not JSON – fall through */ }
-
-        try {
-          const { sender, message } = JSON.parse(data);
-          setMessages((m)=>[ ...m, { speaker: sender, text: message } ]);
-          addMindMapNode({
-            speaker:  sender,
-            text:     message,
-            parentId: sender==="User" ? lastUserId.current : lastAssistantId.current,
-          });
-          setActiveSpeaker(sender);
-          appendLog(`[Relay] ${sender}: ${message}`);
-        } catch {
-          appendLog("Relay message parse error");
-        }
-      };
+      relay.onmessage = handleSocketMessage;
 
       relay.onclose = () => {
         appendLog("Relay WS disconnected");
