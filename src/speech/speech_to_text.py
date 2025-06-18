@@ -14,6 +14,8 @@ from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
 from utils.ml_logging import get_logger
+from azure.identity import DefaultAzureCredential
+from azure.core.credentials import AccessToken
 
 load_dotenv()
 
@@ -58,9 +60,26 @@ class SpeechCoreTranslator:
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         self.connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-        self.speech_config = speechsdk.SpeechConfig(
-            subscription=self.speech_key, region=self.speech_region
-        )
+        # Check if connection string is available, otherwise use DefaultAzureCredential
+        if not self.speech_key:
+            logger.warning("Azure Speech key not found, using DefaultAzureCredential for authentication")
+
+            # Get token for Speech service
+            credential = DefaultAzureCredential()
+            token: AccessToken = credential.get_token("https://cognitiveservices.azure.com/.default")
+            
+            # Use the token instead of subscription key
+            self.speech_config = speechsdk.SpeechConfig(
+                auth_token=token.token,
+                region=self.speech_region
+            )
+        else:
+            # Use subscription key if available (existing logic will be moved below)
+            self.speech_config = speechsdk.SpeechConfig(
+                subscription=self.speech_key, 
+                region=self.speech_region
+            )
+            
         self.speech_config.set_property(
             speechsdk.PropertyId.SpeechServiceConnection_EnableAudioLogging, "true"
         )

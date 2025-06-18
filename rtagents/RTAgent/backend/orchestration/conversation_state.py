@@ -90,6 +90,23 @@ class ConversationManager:
             f"histories per agent: {[f'{a}: {len(h)}' for a, h in self.histories.items()]}, ctx_keys={list(self.context.keys())}"
         )
 
+    # -- VAD ------------------------------------------------------
+    async def set_tts_interrupted(self, redis_mgr: Optional[AzureRedisManager], value: bool) -> None:
+        """Set the TTS interrupted flag."""
+        await self.set_live_context_value(
+            redis_mgr or self._redis_manager, 
+            "tts_interrupted", 
+            value
+        )
+
+    async def is_tts_interrupted(self, redis_mgr: Optional[AzureRedisManager] = None) -> bool:
+        """Check if TTS is interrupted, optionally checking live Redis data."""
+        if redis_mgr:
+            # Get live value from Redis
+            live_value = await self.get_live_context_value(redis_mgr, "tts_interrupted", False)
+            return live_value
+        # Fallback to local context
+        return self.get_context("tts_interrupted", False)
 
     # --- SLOTS & TOOL OUTPUTS -----------------------------------------
     def update_slots(self, slots: dict) -> None:

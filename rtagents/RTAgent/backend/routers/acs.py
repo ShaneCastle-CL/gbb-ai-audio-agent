@@ -78,13 +78,14 @@ async def callbacks(request: Request):
     if not request.app.state.acs_caller:
         return JSONResponse({"error": "ACS not initialised"}, status_code=503)
 
+    if not request.app.state.stt_client:
+        return JSONResponse({"error": "STT client not initialised"}, status_code=503)
+
     try:
         events = await request.json()
         result = await ACSHandler.process_callback_events(
             events=events,
-            acs_caller=request.app.state.acs_caller,
-            redis_mgr=request.app.state.redis,
-            clients=request.app.state.clients
+            request=request,
         )
         
         if "error" in result:
@@ -169,10 +170,101 @@ async def media_callbacks(request: Request):
 #             logger.error(f"Error processing media data: {e}", exc_info=True)
 #             continue
 
+from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
+from base64 import b64decode
 # @router.websocket(ACS_WEBSOCKET_PATH)
 @router.websocket("/call/stream")
 async def acs_media_ws(ws: WebSocket):
-    await ACSHandler.handle_websocket_media_stream(ws)
+    """
+    Handle WebSocket media streaming for ACS calls.
+
+    Args:
+        ws: WebSocket connection
+        recognizer: Speech-to-text recognizer instance
+        cm: ConversationManager instance
+        redis_mgr: Redis manager instance
+        clients: List of connected WebSocket clients
+        cid: Call connection ID
+    """
+    try:
+        await ws.accept()
+
+        recognizer = ws.app.state.stt_client
+        redis_mgr = ws.app.state.redis
+        cid = ws.headers.get("x-ms-call-connection-id")
+        cm = ConversationManager.from_redis(cid, redis_mgr)
+
+        # Define handlers for partial and final results
+        def on_partial_result(text, lang):
+            """Handle partial transcription."""
+            logger.info(f"🗣️ User (partial) in {lang}: {text}")
+            # Set flag to interrupt
+            cm.set_tts_interrupted(True)
+            cm.persist_to_redis(redis_mgr)
+
+
+
+        def on_final_result(text, lang):
+            """Handle final transcription."""
+            logger.info(f"🧾 User (final) in {lang}: {text}")
+            # Reset interrupt flag
+            cm.set_tts_interrupted(False)
+            cm.persist_to_redis(redis_mgr)
+
+            # Route the final text to the gpt orchestrator
+            asyncio.create_task(route_turn(cm, text, ws, is_acs=True))
+
+        # Initialize recognizer with handlers
+        recognizer.set_partial_result_callback(on_partial_result)
+        recognizer.set_final_result_callback(on_final_result)
+
+        # Start recognition
+        recognizer.start()
+
+        # Main processing loop
+        while True:
+            try:
+                raw_data = await ws.receive_text()
+                data = json.loads(raw_data)
+
+                if data.get("kind") == "AudioMetadata":
+                    # Log metadata attributes cleanly
+                    logger.info(f"📊 Metadata: {json.dumps(data, indent=2)}")
+                elif data.get("kind") == "AudioData":
+                    # Extract and decode audio data
+                    audioData = data.get("audioData", "")
+                    if not audioData:
+                        logger.warning("Received empty audio data")
+                        continue
+                    audio_bytes = audioData.get("data", "")
+                    target_participant = audioData.get("participantRawID", "")
+                    timestamp = audioData.get("timestamp", None)
+                    # Write audio data to recognizer queue
+                    # Convert audio_bytes from base64 string to bytes if needed
+                    if isinstance(audio_bytes, str):
+                        try:
+                            audio_bytes = b64decode(audio_bytes)
+                        except Exception as e:
+                            logger.error(f"Failed to decode base64 audio data: {e}")
+                            continue
+                    recognizer.write_bytes(audio_bytes)
+                else:
+                    # Handle other data types
+                    logger.debug(f"Received unknown data type: {data.get('kind', 'unknown')}")
+                # Ensure audio_data is bytes
+
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket media stream: {e}", exc_info=True)
+                break
+
+    finally:
+        recognizer.stop()
+        logger.info("Recognition stopped")
+
+
     # from fastapi import FastAPI, WebSocket
     # await ws.accept()
     # print("✅ WebSocket connected")

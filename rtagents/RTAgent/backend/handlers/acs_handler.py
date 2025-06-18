@@ -27,6 +27,7 @@ from rtagents.RTAgent.backend.services.acs.acs_helpers import play_response
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
 from shared_ws import broadcast_message
+from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from utils.ml_logging import get_logger
 
 logger = get_logger("handlers.acs_handler")
@@ -34,7 +35,6 @@ logger = get_logger("handlers.acs_handler")
 from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
 from base64 import b64decode
 from fastapi.websockets import WebSocketState
-from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
 from rtagents.RTAgent.backend.helpers import check_for_stopwords
 from shared_ws import broadcast_message, send_response_to_acs
 from rtagents.RTAgent.backend.services.speech_services import SpeechSynthesizer
@@ -135,78 +135,87 @@ class ACSHandler:
     @staticmethod
     async def process_callback_events(
         events: list, 
-        acs_caller, 
-        redis_mgr, 
-        clients: list
+        request
     ) -> Dict[str, str]:
         """
         Process callback events from Azure Communication Services.
         
         Args:
             events: List of ACS events to process
-            acs_caller: The ACS caller instance
-            redis_mgr: Redis manager instance
-            clients: List of connected WebSocket clients
+            request: FastAPI request object containing app state
             
         Returns:
             Dict with processing status
         """
+        # Derive dependencies from request app state
+        acs_caller = request.app.state.acs_caller
+        stt_client = request.app.state.stt_client
+        redis_mgr = request.app.state.redis
+        clients = request.app.state.clients
+        
+        # Event handler mapping for cleaner code organization
+        event_handlers = {
+            "Microsoft.Communication.ParticipantsUpdated": ACSHandler._handle_participants_updated,
+            "Microsoft.Communication.CallConnected": ACSHandler._handle_call_connected,
+            "Microsoft.Communication.TranscriptionFailed": ACSHandler._handle_transcription_failed,
+            "Microsoft.Communication.CallDisconnected": ACSHandler._handle_call_disconnected,
+        }
+        
+        # Media events that update bot_speaking context
+        media_events = {
+            "Microsoft.Communication.PlayStarted": True,
+            "Microsoft.Communication.PlayCompleted": False,
+            "Microsoft.Communication.PlayFailed": False,
+            "Microsoft.Communication.PlayCanceled": False,
+            "Microsoft.Communication.MediaStreamingFailed": False,
+        }
+        
         try:
             for raw in events:
                 event = CloudEvent.from_dict(raw)
-                await ACSHandler._process_single_event(
-                    event, acs_caller, redis_mgr, clients
-                )
+                etype = event.type
+                cid = event.data.get("callConnectionId")
+                cm = ConversationManager.from_redis(cid, redis_mgr)
+
+                # Handle specific events with dedicated handlers
+                if etype in event_handlers:
+                    handler = event_handlers[etype]
+                    if etype == "Microsoft.Communication.CallConnected":
+                        await handler(event, cm, redis_mgr, clients, cid, acs_caller, stt_client)
+                    elif etype in ["Microsoft.Communication.ParticipantsUpdated"]:
+                        await handler(event, cm, redis_mgr, clients, cid)
+                    elif etype == "Microsoft.Communication.TranscriptionFailed":
+                        await handler(event, cm, redis_mgr, cid, acs_caller)
+                    elif etype == "Microsoft.Communication.CallDisconnected":
+                        await handler(event, cm, redis_mgr, cid)
+                
+                # Handle media events that affect bot_speaking state
+                elif etype in media_events:
+                    cm.update_context("bot_speaking", media_events[etype])
+                    action = "Set" if media_events[etype] else "Set"
+                    logger.info(f"{etype.split('.')[-1]}: {action} bot_speaking={media_events[etype]} for call {cm.session_id}")
+                    
+                    # Log errors for failed events
+                    if "Failed" in etype:
+                        reason = event.data.get("resultInformation", "Unknown reason")
+                        logger.error(f"⚠️ {etype.split('.')[-1]} for call {cid}: {reason}")
+                
+                # Handle other failed events
+                elif "Failed" in etype:
+                    reason = event.data.get("resultInformation", "Unknown reason")
+                    logger.error("⚠️ %s for call %s: %s", etype, cid, reason)
+                
+                # Log unhandled events
+                else:
+                    logger.info("Unhandled event: %s for call %s", etype, cid)
+
+                cm.persist_to_redis(redis_mgr)
+                
             return {"status": "callback received"}
             
         except Exception as exc:
             logger.error("Callback error: %s", exc, exc_info=True)
             return {"error": str(exc)}
-
-    @staticmethod
-    async def _process_single_event(
-        event: CloudEvent, 
-        acs_caller, 
-        redis_mgr, 
-        clients: list
-    ) -> None:
-        """
-        Process a single ACS event.
-        
-        Args:
-            event: CloudEvent to process
-            acs_caller: The ACS caller instance
-            redis_mgr: Redis manager instance
-            clients: List of connected WebSocket clients
-        """
-        etype = event.type
-        cid = event.data.get("callConnectionId")
-        cm = ConversationManager.from_redis(cid, redis_mgr)
-
-        if etype == "Microsoft.Communication.ParticipantsUpdated":
-            await ACSHandler._handle_participants_updated(event, cm, redis_mgr, clients, cid)
-        elif etype == "Microsoft.Communication.CallConnected":
-            await ACSHandler._handle_call_connected(event, cm, redis_mgr, clients, cid, acs_caller)
-        elif etype == "Microsoft.Communication.TranscriptionFailed":
-            await ACSHandler._handle_transcription_failed(event, cm, redis_mgr, cid, acs_caller)
-        elif etype == "Microsoft.Communication.CallDisconnected":
-            await ACSHandler._handle_call_disconnected(event, cm, redis_mgr, cid)
-        elif etype in ["Microsoft.Communication.PlayStarted", "Microsoft.Communication.PlayCompleted", 
-                       "Microsoft.Communication.PlayFailed", "Microsoft.Communication.PlayCanceled"]:
-            await ACSHandler._handle_media_events(event, cm, redis_mgr, etype)
-
-        elif etype == "Microsoft.Communication.MediaStreamingFailed":
-            reason = event.data.get("resultInformation", "Unknown reason")
-            logger.error("⚠️ MediaStreamingFailed for call %s: %s", cid, reason)
-            cm.update_context("bot_speaking", False)
-            logger.info("MediaStreamingFailed: Set bot_speaking=False for call %s", cid)
-        elif "Failed" in etype:
-            reason = event.data.get("resultInformation", "Unknown reason")
-            logger.error("⚠️ %s for call %s: %s", etype, cid, reason)
-        else:
-            logger.info("%s %s", etype, cid)
-
-        cm.persist_to_redis(redis_mgr)
 
     @staticmethod
     async def _handle_participants_updated(
@@ -244,26 +253,32 @@ class ACSHandler:
         clients: list, 
         cid: str, 
         acs_caller,
+        stt_client,
         stream_mode: str = "media"
     ) -> None:
         """Handle call connected event and play greeting."""
         await broadcast_message(clients, f"Call Connected: {cid}", "System")
 
-        greeting = (
-            "Hello, thank you for calling XMYX Insurance Company. "
-            "Before I can assist you, let's verify your identity. "
-            "How may I address you today? Please state your full name clearly after the tone, "
-            "and let me know how I can help you with your insurance needs."
-        )
-        
-        try:
-            text_source = TextSource(
-                text=greeting,
-                source_locale="en-US",
-                voice_name="en-US-JennyNeural"
+        # If using real-time bidirectional media streaming, start speech recognition
+        if stream_mode == "media":
+            stt_client.start()
+
+        # If using real-time transcription, play greeting
+        if stream_mode == "transcription":
+            greeting = (
+                "Hello, thank you for calling XMYX Insurance Company. "
+                "Before I can assist you, let's verify your identity. "
+                "How may I address you today? Please state your full name clearly after the tone, "
+                "and let me know how I can help you with your insurance needs."
             )
-            call_conn = acs_caller.get_call_connection(cid)
-            if stream_mode == "transcription":
+            
+            try:
+                text_source = TextSource(
+                    text=greeting,
+                    source_locale="en-US",
+                    voice_name="en-US-JennyNeural"
+                )
+                call_conn = acs_caller.get_call_connection(cid)
                 call_conn.play_media(play_source=text_source)
                 await cm.set_live_context_value(redis_mgr, "greeted", True)
                 logger.info(f"Greeting played for call {cid}")
@@ -271,8 +286,8 @@ class ACSHandler:
             #     call_conn.start_media_streaming(
             #         operation_context="startMediaStreamingContext"
             #     )
-        except Exception as e:
-            logger.error(f"Error playing greeting for call {cid}: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error playing greeting for call {cid}: {e}", exc_info=True)
 
     @staticmethod
     async def _handle_transcription_failed(
@@ -344,27 +359,27 @@ class ACSHandler:
             logger.error(f"Failed to persist conversation state after disconnect for call {cid}: {e}")
 
     @staticmethod
-    async def _handle_media_events(
-        event: CloudEvent, 
-        cm: ConversationManager, 
-        redis_mgr, 
-        etype: str
-    ) -> None:
-        """Handle media-related events (play started/completed/failed/canceled)."""
-        if etype == "Microsoft.Communication.PlayStarted":
-            cm.update_context("bot_speaking", True)
-            logger.info(f"PlayStarted: Set bot_speaking=True for call {cm.session_id}")
-        elif etype == "Microsoft.Communication.PlayCompleted":
-            cm.update_context("bot_speaking", False)
-            logger.info(f"PlayCompleted: Set bot_speaking=False for call {cm.session_id}")
-        elif etype == "Microsoft.Communication.PlayFailed":
-            reason = event.data.get("resultInformation", "Unknown reason")
-            logger.error(f"⚠️ PlayFailed for call {cm.session_id}: {reason}")
-            cm.update_context("bot_speaking", False)
-            logger.info(f"PlayFailed: Set bot_speaking=False for call {cm.session_id}")
-        elif etype == "Microsoft.Communication.PlayCanceled":
-            cm.update_context("bot_speaking", False)
-            logger.info(f"PlayCanceled: Set bot_speaking=False for call {cm.session_id}")
+    # async def _handle_media_events(
+    #     event: CloudEvent, 
+    #     cm: ConversationManager, 
+    #     redis_mgr, 
+    #     etype: str
+    # ) -> None:
+    #     """Handle media-related events (play started/completed/failed/canceled)."""
+    #     if etype == "Microsoft.Communication.PlayStarted":
+    #         cm.update_context("bot_speaking", True)
+    #         logger.info(f"PlayStarted: Set bot_speaking=True for call {cm.session_id}")
+    #     elif etype == "Microsoft.Communication.PlayCompleted":
+    #         cm.update_context("bot_speaking", False)
+    #         logger.info(f"PlayCompleted: Set bot_speaking=False for call {cm.session_id}")
+    #     elif etype == "Microsoft.Communication.PlayFailed":
+    #         reason = event.data.get("resultInformation", "Unknown reason")
+    #         logger.error(f"⚠️ PlayFailed for call {cm.session_id}: {reason}")
+    #         cm.update_context("bot_speaking", False)
+    #         logger.info(f"PlayFailed: Set bot_speaking=False for call {cm.session_id}")
+    #     elif etype == "Microsoft.Communication.PlayCanceled":
+    #         cm.update_context("bot_speaking", False)
+    #         logger.info(f"PlayCanceled: Set bot_speaking=False for call {cm.session_id}")
 
     @staticmethod
     async def process_media_callbacks(
@@ -483,182 +498,156 @@ class ACSHandler:
             # Continue processing rather than breaking the connection
 
 
-
-
-    @staticmethod
-    async def handle_websocket_media_stream(
-        ws: WebSocket,
-        # acs_caller,
-        # redis_mgr,
-        # clients: list,
-        # cid: str,
-        # speech_client=None
-    ) -> None:
-        """
-        Handle WebSocket media streaming for ACS calls.
+    # @staticmethod
+    # async def handle_websocket_media_stream(
+    #     ws: WebSocket,
+    #     # acs_caller,
+    #     # redis_mgr,
+    #     # clients: list,
+    #     # cid: str,
+    #     # speech_client: StreamingSpeechRecognizerFromBytes
+    # ) -> None:
+    #     """
+    #     Handle WebSocket media streaming for ACS calls.
         
-        This method includes the core logic from the original acs_media_ws method but
-        with cleaner error handling, better separation of concerns, and improved modularity.
+    #     This method includes the core logic from the original acs_media_ws method but
+    #     with cleaner error handling, better separation of concerns, and improved modularity.
         
-        Args:
-            ws: WebSocket connection
-            acs_caller: ACS caller instance
-            redis_mgr: Redis manager instance
-            clients: List of connected WebSocket clients
-            cid: Call connection ID
-            speech_client: Speech-to-text client for audio processing
-        """
-        try:
-            await ws.accept()
-            # while True:
-            #     msg = await ws.receive_text()
-            #     await ws.send_text("ok")
+    #     Args:
+    #         ws: WebSocket connection
+    #         acs_caller: ACS caller instance
+    #         redis_mgr: Redis manager instance
+    #         clients: List of connected WebSocket clients
+    #         cid: Call connection ID
+    #         speech_client: Speech-to-text client for audio processing
+    #     """
+    #     try:
+    #         await ws.accept()
+    #         # while True:
+    #         #     msg = await ws.receive_text()
+    #         #     await ws.send_text("ok")
 
+    #         """Handle ACS WebSocket media streaming."""
+    #         acs_caller = ws.app.state.acs_caller
+    #         redis_mgr = ws.app.state.redis
+    #         speech_client = ws.app.state.stt_client
+    #         clients = ws.app.state.clients
 
+    #         def on_partial(text, lang):
+    #             """Handle partial transcription."""
+    #             if cm.is_tts_interrupted():
+    #                 logger.info("TTS already interrupted, skipping further actions.")
+    #                 return
 
-            """Handle ACS WebSocket media streaming."""
-            acs_caller = ws.app.state.acs_caller
-            redis_mgr = ws.app.state.redis
-            speech_client = ws.app.state.stt_client
-            clients = ws.app.state.clients
+    #             logger.info(f"🗣️ User (partial) in {lang}: {text}")
+    #             cm.set_tts_interrupted(True)
+    #             cm.persist_to_redis(redis_mgr)
 
-            if not speech_client or not acs_caller:
-                await ws.close(code=1011)
-                return
+    #         def on_final(text, lang):
+    #             """Handle final transcription."""
+    #             logger.info(f"🧾 User (final) in {lang}: {text}")
+    #             cm.set_tts_interrupted(False)
+    #             cm.persist_to_redis(redis_mgr)
 
-            cid = ws.headers["x-ms-call-connection-id"]
-            cm = ConversationManager.from_redis(cid, redis_mgr)
-            target_phone_number = cm.get_context("target_number")
-            ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
+    #         if not speech_client or not acs_caller:
+    #             await ws.close(code=1011)
+    #             return
 
-            # Global state for tracking call participants
-            if not hasattr(ws.app.state, 'call_user_raw_ids'):
-                ws.app.state.call_user_raw_ids = {}
-            call_user_raw_ids = ws.app.state.call_user_raw_ids
+    #         cid = ws.headers["x-ms-call-connection-id"]
+    #         cm = ConversationManager.from_redis(cid, redis_mgr)
+    #         target_phone_number = cm.get_context("target_number")
+    #         ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
             
-            try:
-                logger.info("▶ media WS connected - %s", cid)
-                    
-                    # Initialize conversation manager
-                cm = ConversationManager.from_redis(cid, redis_mgr)
+    #         # Speech Recognition Config for audio stream handling
+    #         speech_client.set_partial_result_callback(on_partial)
+    #         speech_client.set_final_result_callback(on_final)
+    #         speech_client.start()
+
+    #         # Global state for tracking call participants
+    #         if not hasattr(ws.app.state, 'call_user_raw_ids'):
+    #             ws.app.state.call_user_raw_ids = {}
+    #         call_user_raw_ids = ws.app.state.call_user_raw_ids
+            
+    #         logger.info("▶ media WS connected - %s", cid)
                 
-                # Initialize speech recognition components
-                queue: asyncio.Queue[str] = asyncio.Queue()
-                push_stream = None
-                recognizer = None
-                
-                if speech_client:
-                    try:
-                        push_stream = PushAudioInputStream(
-                            stream_format=AudioStreamFormat(
-                                samples_per_second=16000, 
-                                bits_per_sample=16, 
-                                channels=1
-                            )
-                        )
-                        recognizer = speech_client.create_realtime_recognizer(
-                            push_stream=push_stream,
-                            loop=asyncio.get_event_loop(),
-                            message_queue=queue,
-                            language="en-US",
-                            vad_silence_timeout_ms=500,
-                        )
-                        recognizer.start_continuous_recognition_async()
-                        logger.info(f"Speech recognition initialized for call {cid}")
-                    except Exception as e:
-                        logger.warning(f"Could not initialize speech recognition for call {cid}: {e}")
+    #         # Initialize speech recognition components
+    #         queue: asyncio.Queue[str] = asyncio.Queue()
+    #         push_stream = None
+    #         recognizer = None
 
-                # Handle greeting logic
-                if not cm.get_context("greeted", False):
-                    greeting = (
-                        "Hello from XMYX Healthcare Company! Before I can assist you, "
-                        "let's verify your identity. How may I address you?"
-                    )
-                    await broadcast_message(clients, greeting, "Assistant")
-                    await send_response_to_acs(ws, greeting, stream_mode="media")
-                    cm.append_to_history("wss_media_stream", "assistant", greeting)
-                    cm.set_context("greeted", True)
-
-                # Track user participant ID
-                user_raw_id = call_user_raw_ids.get(cid)
-                
-                # Main processing loop
-                while True:
-                    # Process speech recognition queue
-                    spoken_text = await ACSHandler._process_speech_queue(queue)
+    #         # # Handle greeting logic asynchronously
+    #         # if not cm.get_context("greeted", False):
+    #         #     async def send_greeting():
+    #         #         greeting = (
+    #         #             "Hello from XMYX Healthcare Company! Before I can assist you, "
+    #         #             "let's verify your identity. How may I address you?"
+    #         #         )
+    #         #         await broadcast_message(clients, greeting, "Assistant")
                     
-                    if spoken_text:
-                        # # Stop any ongoing TTS
-                        # tts_client = getattr(ws.app.state, 'tts_client', None)
-                        # if tts_client and hasattr(tts_client, 'stop_speaking'):
-                        #     tts_client.stop_speaking()
-
-                        # # Cancel any pending TTS tasks
-                        # tts_tasks = getattr(ws.app.state, 'tts_tasks', [])
-                        # for task in list(tts_tasks):
-                        #     task.cancel()
-
-                        # Broadcast the spoken text
-                        await broadcast_message(clients, spoken_text, "User")
-
-                        # Check for stop words
-                        if check_for_stopwords(spoken_text):
-                            goodbye_msg = "Goodbye!"
-                            await broadcast_message(clients, goodbye_msg, "Assistant")
-                            await send_response_to_acs(ws, goodbye_msg, blocking=True)
-                            await asyncio.sleep(1)
-                            if acs_caller:
-                                await acs_caller.disconnect_call(cid)
-                            break
-
-                        # Route the turn to the orchestrator
-                        await route_turn(cm, spoken_text, ws, is_acs=True)
-
-                    # Handle WebSocket messages
-                    try:
-                        raw = await asyncio.wait_for(ws.receive_text(), timeout=5.0)
-                        data = json.loads(raw)
-                    except asyncio.TimeoutError:
-                        # Check if WebSocket is still connected
-                        if ws.client_state != WebSocketState.CONNECTED:
-                            break
-                        continue
-                    except (WebSocketDisconnect, json.JSONDecodeError):
-                        logger.info(f"WebSocket disconnected or JSON decode error for call {cid}")
-                        break
-                    except Exception as e:
-                        logger.error(f"Unexpected WebSocket error for call {cid}: {e}", exc_info=True)
-                        break
-
-                    # Process different message types
-                    await ACSHandler._process_websocket_message(
-                        data=data,
-                        cid=cid,
-                        user_raw_id=user_raw_id,
-                        call_user_raw_ids=call_user_raw_ids,
-                        push_stream=push_stream
-                    )
+    #         #         # Import the function at the module level to avoid issues
+    #         #         await send_response_to_acs(ws, greeting)
                     
-                    # Update user_raw_id if it was set during message processing
-                    if cid in call_user_raw_ids:
-                        user_raw_id = call_user_raw_ids[cid]
-                        
-            except Exception as e:
-                logger.error(f"Error in media WebSocket handler for call {cid}: {e}", exc_info=True)
-            finally:
-                # Clean up resources
-                try:
-                    if recognizer:
-                        recognizer.stop_continuous_recognition_async()
-                    if push_stream:
-                        push_stream.close()
-                    # call_user_raw_ids.pop(cid, None)
-                    # cm.persist_to_redis(redis_mgr)
-                    logger.info(f"◀ media WS closed – {cid}")
-                except Exception as e:
-                    logger.error(f"Error during cleanup for call {cid}: {e}")
-        except Exception as e:
-            logger.error(f"❌ WebSocket error: {e}", exc_info=True)
+    #         #         cm.append_to_history("wss_media_stream", "assistant", greeting)
+    #         #         cm.update_context("greeted", True)
+    #         #         await cm.persist_to_redis_async(redis_mgr)
+
+    #         #     # Start greeting task and store reference for cleanup
+    #         #     # Option 1: Fire immediately and await it (recommended for greeting)
+    #         #     await send_greeting()
+
+    #         #     # Option 2: If you need it non-blocking but with higher priority scheduling
+    #         #     greeting_task = asyncio.create_task(send_greeting())
+    #         #     await asyncio.sleep(0)  # Yield control to allow task to start immediately
+
+    #         #     # Option 3: If you want to ensure it runs before other tasks
+    #         #     async def send_greeting_immediately():
+    #         #         await send_greeting()
+
+    #         #     greeting_task = asyncio.create_task(send_greeting_immediately())
+    #         #     # Force immediate scheduling
+    #         #     greeting_task.add_done_callback(lambda t: logger.info("Greeting sent successfully") if not t.exception() else logger.error(f"Greeting failed: {t.exception()}"))
+    #         #     # Don't await here to avoid blocking the main loop
+
+    #         # Track user participant ID
+    #         user_raw_id = call_user_raw_ids.get(cid)
+            
+    #         # Main processing loop
+    #         while True:
+    #             # Handle WebSocket messages
+    #             try:
+    #                 raw = await ws.receive_text()
+    #                 data = json.loads(raw)
+    #             except Exception as e:
+    #                 logger.error(f"Unexpected WebSocket error for call {cid}: {e}", exc_info=True)
+    #                 break
+
+    #             # Process different message types
+    #             await ACSHandler._process_websocket_message(
+    #                 data=data,
+    #                 cid=cid,
+    #                 user_raw_id=user_raw_id,
+    #                 call_user_raw_ids=call_user_raw_ids,
+    #                 stt_client=speech_client
+    #             )
+                
+    #             # Update user_raw_id if it was set during message processing
+    #             if cid in call_user_raw_ids:
+    #                 user_raw_id = call_user_raw_ids[cid]
+                    
+    #     except Exception as e:
+    #         logger.error(f"Error in media WebSocket handler for call {cid}: {e}", exc_info=True)
+    #     finally:
+    #         # Clean up resources
+    #         try:
+    #             if recognizer:
+    #                 recognizer.stop_continuous_recognition_async()
+    #             if push_stream:
+    #                 push_stream.close()
+    #             # call_user_raw_ids.pop(cid, None)
+    #             # cm.persist_to_redis(redis_mgr)
+    #             logger.info(f"◀ media WS closed – {cid}")
+    #         except Exception as e:
+    #             logger.error(f"Error during cleanup for call {cid}: {e}")
 
     @staticmethod
     async def _process_speech_queue(queue: asyncio.Queue) -> Optional[str]:
@@ -687,7 +676,7 @@ class ACSHandler:
         cid: str,
         user_raw_id: Optional[str],
         call_user_raw_ids: Dict[str, str],
-        push_stream=None,
+        stt_client=StreamingSpeechRecognizerFromBytes,
     ) -> Optional[str]:
         """
         Process a WebSocket message from ACS.
@@ -716,12 +705,13 @@ class ACSHandler:
                 # Discard bot's own audio
                 return user_raw_id
 
-            # Process audio data if push stream is available
-            if push_stream:
+            # Process audio data if STT client is available
+            if stt_client:
                 try:
                     audio_data = data.get("audioData", {}).get("data", "")
                     if audio_data:
-                        push_stream.write(b64decode(audio_data))
+                        logger.debug(f"First 10 chars of audio data: {str(audio_data[:10])}")
+                        stt_client.write_bytes(audio_data)
                 except Exception as e:
                     # Keep going even if decode glitches
                     logger.debug(f"Audio decode error for call {cid}: {e}")

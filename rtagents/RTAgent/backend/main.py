@@ -74,12 +74,13 @@ async def on_startup() -> None:
     logger.info("🚀 startup…")
 
     # Speech SDK
-    app.state.stt_client = SpeechCoreTranslator()
     app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS)
-    app.state.stt_bytes_client = StreamingSpeechRecognizerFromBytes(
+    app.state.stt_client = StreamingSpeechRecognizerFromBytes(
+        vad_silence_timeout_ms=800,
         candidate_languages=["en-US", "es-ES", "fr-FR", "ko-KR", "it-IT"],
         audio_format="pcm"
     )
+    # app.state.stt_client = SpeechCoreTranslator()
     # Redis connection
     app.state.redis = AzureRedisManager()
 

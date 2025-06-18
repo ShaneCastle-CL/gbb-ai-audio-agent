@@ -187,15 +187,13 @@ class SpeechSynthesizer:
             ##  If you would like to speed up the speech, you can increase the `prosody rate`% accordingly.
 
             ssml = f"""
-                <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-                    <voice name="{speech_config.speech_synthesis_voice_name}">
-                        <mstts:express-as style="chat">
-                            <prosody rate="15%" pitch="default">
-                                {text}
-                            </prosody>
-                        </mstts:express-as>
-                    </voice>
-                </speak>"""
+<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="en-US-AvaMultilingualNeural">
+        <prosody rate="15%" pitch="default">
+            {text}
+        </prosody>
+    </voice>
+</speak>"""
 
             # 4) Synthesize
             logger.debug(f"Starting TTS synthesis for text: {text[:50]}...")
@@ -298,20 +296,35 @@ class SpeechSynthesizer:
             24000: speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm,
         }[sample_rate])
 
-        ssml = f"""<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-            <voice name="{speech_config.speech_synthesis_voice_name}">
-                <mstts:express-as style="chat">
-                    <prosody rate="15%" pitch="default">{text}</prosody>
-                </mstts:express-as>
-            </voice>
-        </speak>"""
+        ssml = f"""
+<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="en-US-AvaMultilingualNeural">
+        <prosody rate="15%" pitch="default">
+            {text}
+        </prosody>
+    </voice>
+</speak>"""
+        # ssml = f"""<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+        #     <voice name="{speech_config.speech_synthesis_voice_name}">
+        #         <mstts:express-as style="chat">
+        #             <prosody rate="15%" pitch="default">{text}</prosody>
+        #         </mstts:express-as>
+        #     </voice>
+        # </speak>"""
+
+        print("TTS SSML:", ssml)
 
         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
         result = synthesizer.speak_ssml_async(ssml).get()
         
+        if result.reason == speechsdk.ResultReason.Canceled:
+            cancellation = result.cancellation_details
+            print("Cancellation reason:", cancellation.reason)
+            print("Error details:", cancellation.error_details)
+
         if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
             raise RuntimeError(f"TTS failed: {result.reason}")
-        
+
         return result.audio_data  # raw PCM bytes
     
     def split_pcm_to_base64_frames(pcm_bytes: bytes, sample_rate: int = 16000) -> list[str]:
