@@ -31,42 +31,6 @@ This document provides a comprehensive visual representation of how the ACS Medi
 │ │ • Can be cancelled by barge-in                          │ │
 │ └─────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
-
-```
-```mermaid
-sequenceDiagram
-    participant User as 👤 User
-    participant ACS as 🔊 ACS
-    participant Handler as 🎛️ Handler
-    participant AI as 🤖 AI Agent
-
-    Note over User,AI: 🚀 Normal Flow
-    
-    User->>ACS: 🗣️ Speaks
-    ACS->>Handler: 📡 Audio Data
-    Handler->>AI: 🤖 Process Speech
-    AI-->>Handler: 📝 Response
-    Handler->>ACS: 🔊 Play Audio
-    ACS->>User: 🎵 AI Response
-
-    Note over User,AI: 🚨 Barge-In Flow
-    
-    rect rgb(250, 240, 240)
-    Note over ACS,User: AI is speaking...
-    ACS->>User: 🎵 Playing Response
-    User->>ACS: 🗣️ Interrupts
-    ACS->>Handler: ⚡ Partial Speech
-    Handler->>ACS: 🛑 Stop Audio
-    Handler->>Handler: ❌ Cancel AI Task
-    end
-    
-    rect rgb(240, 250, 240)
-    User->>ACS: 🗣️ Continues Speaking
-    ACS->>Handler: 📋 Final Speech
-    Handler->>AI: 🤖 New Request
-    AI-->>Handler: 📝 New Response
-    Handler->>ACS: 🔊 Play New Audio
-    end
 ```
 
 ## 🔄 Asynchronous Task Architecture
