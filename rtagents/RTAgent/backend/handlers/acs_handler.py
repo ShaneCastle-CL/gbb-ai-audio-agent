@@ -116,6 +116,25 @@ class ACSHandler:
                         )
                     else:
                         raise HTTPException(400, "Validation code not found in event data")
+                elif event_type == "Microsoft.Communication.IncomingCall":
+                    # Convert CloudEvent to dict for processing
+                    event = dict(event)
+                    event_data = event.get('data', {})
+                    # logger.info("Incoming call received: data=%s", event_data)
+
+                    if event_data['from']['kind'] == "phoneNumber":
+                        caller_id = event_data['from']["phoneNumber"]["value"]
+                    else:
+                        caller_id = event_data['from']['rawId']
+                    logger.info("incoming call handler caller id: %s", caller_id)
+
+                    incoming_call_context = event_data['incomingCallContext']
+                    # query_parameters = urlencode({"callerId": caller_id})
+                    answer_call_result = await acs_caller.answer_incoming_call(
+                        incoming_call_context=incoming_call_context,
+                        stream_mode=ACS_STREAMING_MODE
+                    )
+                    logger.info("Call answered: %s", answer_call_result.call_connection_id)
                 else:
                     logger.info(f"Received event of type {event_type}: {event}")
 
@@ -225,9 +244,9 @@ class ACSHandler:
         participants = event.data.get("participants", [])
         target_number = cm.get_context("target_number")
         target_joined = any(
-            p.get("identifier", {}).get("rawId", "").endswith(target_number)
+            p.get("identifier", {}).get("rawId", "").endswith(target_number or "")
             for p in participants
-        )
+        ) if target_number else False
         cm.update_context("target_participant_joined", target_joined)
         cm.persist_to_redis(redis_mgr)
         

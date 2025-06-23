@@ -197,6 +197,63 @@ class AcsCaller:
             logger.exception("Unexpected error in initiate_call")
             raise
 
+    async def answer_incoming_call(self, incoming_call_context: str, redis_mgr=None,  stream_mode: StreamMode = StreamMode.MEDIA) -> object:
+        """
+        Answer an incoming call and set up live transcription.
+        
+        Args:
+            call_id: The incoming call ID from the event
+            redis_mgr: Optional Redis manager for caching call state
+            
+        Returns:
+            Call connection result object
+        """
+        try:
+            logger.info(f"Answering incoming call: {incoming_call_context}")
+            transcription = None
+            cognitive_services_endpoint = None
+            media_streaming = None
+
+            if stream_mode == StreamMode.TRANSCRIPTION:
+                transcription = self.transcription_opts
+                cognitive_services_endpoint = self.cognitive_services_endpoint
+
+            if stream_mode == StreamMode.MEDIA:
+                media_streaming = self.media_streaming_options
+                
+            # Default to transcription if no valid mode specified
+            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA]:
+                logger.warning(f"Invalid stream_mode '{stream_mode}', defaulting to transcription")
+                transcription = self.transcription_opts
+
+            # Answer the call with transcription enabled
+            result = self.client.answer_call(
+                incoming_call_context=incoming_call_context,
+                callback_url=self.callback_url,
+                cognitive_services_endpoint=cognitive_services_endpoint,
+                transcription=transcription,
+                media_streaming=media_streaming
+            )
+            
+            logger.info(f"Incoming call answered: {result.call_connection_id}")
+            
+            # Cache call state if Redis manager is available
+            if redis_mgr:
+                await redis_mgr.set_call_state(
+                    call_connection_id=result.call_connection_id,
+                    state="answered",
+                    call_id=call_id
+                )
+            
+            return result
+            
+        except HttpResponseError as e:
+            logger.error(f"Failed to answer call {call_id} [status: {e.status_code}]: {e.message}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error answering call {call_id}: {e}", exc_info=True)
+            raise
+
     def get_call_connection(self, call_connection_id: str) -> CallConnectionClient:
         """
         Retrieve the CallConnectionClient for the given call_connection_id.
