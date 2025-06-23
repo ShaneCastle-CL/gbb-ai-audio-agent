@@ -1,265 +1,135 @@
 """
 tools.py
 
-This module defines the available function-calling tools for the Healthcare Voice Agent.
+This module defines the available function-calling tools for the Insurance Voice Agent.
 
 Tools:
-- schedule_appointment
-- refill_prescription
-- lookup_medication_info
-- evaluate_prior_authorization
+- record_fnol_schema
+- authenticate_caller
 - escalate_emergency
-- authenticate_user
-- fill_new_prescription
-- lookup_side_effects
-- get_current_prescriptions
-- check_drug_interactions
 """
 
 from typing import Any, Dict, List
 
-schedule_appointment_schema: Dict[str, Any] = {
-    "name": "schedule_appointment",
-    "description": "Schedule or modify a healthcare appointment based on patient preferences and availability.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patient_name": {
-                "type": "string",
-                "description": "Full name of the patient.",
-            },
-            "dob": {"type": "string", "description": "Date of birth (YYYY-MM-DD)."},
-            "appointment_type": {
-                "type": "string",
-                "description": "Type of appointment (consultation, follow-up, etc.).",
-            },
-            "preferred_date": {
-                "type": "string",
-                "description": "Preferred appointment date (YYYY-MM-DD).",
-            },
-            "preferred_time": {
-                "type": "string",
-                "description": "Preferred appointment time (e.g., '10:00 AM').",
-            },
-        },
-        "required": ["patient_name", "dob", "appointment_type"],
-        "additionalProperties": False,
-    },
-}
+# -----------------------------  FNOL tools  -----------------------------
 
-refill_prescription_schema: Dict[str, Any] = {
-    "name": "refill_prescription",
-    "description": "Refill an existing prescription for a patient's medication.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patient_name": {
-                "type": "string",
-                "description": "Full name of the patient.",
-            },
-            "medication_name": {
-                "type": "string",
-                "description": "Name of the medication to refill.",
-            },
-            "pharmacy": {
-                "type": "string",
-                "description": "Preferred pharmacy name or location (optional).",
-            },
-        },
-        "required": ["patient_name", "medication_name"],
-        "additionalProperties": False,
-    },
-}
+from typing import Any, Dict
 
-lookup_medication_info_schema: Dict[str, Any] = {
-    "name": "lookup_medication_info",
-    "description": "Retrieve basic usage, warnings, and side effects information about a medication.",
+# 1) Create / record a First-Notice-of-Loss claim
+record_fnol_schema: Dict[str, Any] = {
+    "name": "record_fnol",
+    "description": (
+        "Create a First-Notice-of-Loss (FNOL) claim in XYMZ’s system using the "
+        "minimal 12-field schema. Returns {claim_success: bool, claim_id?: str, "
+        "missing_data?: str}."
+    ),
     "parameters": {
         "type": "object",
         "properties": {
-            "medication_name": {
+            "caller_name":        {"type": "string",  "description": "Full name of the caller."},
+            "caller_role":        {
                 "type": "string",
-                "description": "Medication name to look up.",
-            }
-        },
-        "required": ["medication_name"],
-        "additionalProperties": False,
-    },
-}
-
-evaluate_prior_authorization_schema: Dict[str, Any] = {
-    "name": "evaluate_prior_authorization",
-    "description": "Analyze a prior authorization request based on patient information, clinical history, and policy text.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patient_info": {
-                "type": "object",
-                "description": "Patient demographics and identifiers.",
+                "enum": ["insured", "claimant", "provider"],
+                "description": "Relationship of the caller to the claim."
             },
-            "physician_info": {
-                "type": "object",
-                "description": "Physician specialty and contact details.",
-            },
-            "clinical_info": {
-                "type": "object",
-                "description": "Clinical diagnosis, lab results, prior treatments.",
-            },
-            "treatment_plan": {
-                "type": "object",
-                "description": "Requested treatment or medication plan.",
-            },
-            "policy_text": {
+            "policy_id":          {"type": "string",  "description": "Policy identifier (e.g., ‘POL-A10001’)."},
+            "date_reported":      {
                 "type": "string",
-                "description": "Insurance or payer policy text to evaluate against.",
+                "description": "Date the claim is reported (YYYY-MM-DD). "
+                               "Optional—backend will auto-stamp UTC today if omitted."
+            },
+            "date_of_loss":       {"type": "string",  "description": "Date the loss occurred (YYYY-MM-DD)."},
+            "time_of_loss":       {"type": "string",  "description": "Approx. time of loss (HH:MM 24-h) or blank."},
+            "collision":          {"type": "boolean", "description": "Was the vehicle moving when damage occurred?"},
+            "bodily_injury":      {"type": "boolean", "description": "Were any injuries sustained?"},
+            "property_damage":    {"type": "boolean", "description": "Any property damage beyond the insured vehicle?"},
+            "glass_damage":       {"type": "boolean", "description": "Was any glass broken?"},
+            "comprehensive_loss": {"type": "boolean", "description": "Non-collision or parked-vehicle loss?"},
+            "narrative":          {
+                "type": "string",
+                "description": "≤400-character incident description in the caller’s own words."
+            },
+            "loss_location": {
+                "type": "object",
+                "description": "Structured street-level location of the loss.",
+                "properties": {
+                    "street":  {"type": "string"},
+                    "city":    {"type": "string"},
+                    "state":   {"type": "string"},
+                    "zipcode": {"type": "string"}
+                },
+                "required": ["street", "city", "state", "zipcode"],
+                "additionalProperties": False
+            },
+            "location_description": {
+                "type": "string",
+                "description": "Free-text notes about the loss location "
+                               "(e.g., ‘same as policy address’, landmark details)."
             },
         },
+        # Minimal set needed for backend success (matches _REQUIRED_SLOTS):
         "required": [
-            "patient_info",
-            "physician_info",
-            "clinical_info",
-            "treatment_plan",
-            "policy_text",
+            "caller_name", "caller_role", "policy_id", "date_of_loss",
+            "collision", "bodily_injury", "property_damage",
+            "glass_damage", "comprehensive_loss",
+            "narrative", "loss_location"
         ],
         "additionalProperties": False,
     },
 }
 
-escalate_emergency_schema: Dict[str, Any] = {
+authenticate_caller_schema: Dict[str, Any] = {
+    "name": "authenticate_caller",
+    "description": (
+        "Verify a caller’s identity for FNOL by matching (full name + ZIP code + "
+        "last-4 digits of one identifier). The last-4 may be SSN, policy, claim, "
+        "or phone number. Returns {authenticated: bool, message: str, "
+        "policy_id?: str, caller_name?: str}."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "full_name": {
+                "type": "string",
+                "description": "Caller’s full name, e.g., 'Alice Brown'."
+            },
+            "zip_code": {
+                "type": "string",
+                "description": "Caller’s 5-digit ZIP code."
+            },
+            "last4_id": {
+                "type": "string",
+                "description": (
+                    "Caller-supplied last 4 digits of SSN, policy number, "
+                    "claim number, **or** phone number."
+                )
+            },
+        },
+        "required": ["full_name", "zip_code", "last4_id"],
+        "additionalProperties": False,
+    },
+}
+
+# 2) Escalate an emergency discovered during intake
+escalate_emergency_schema_fnol: Dict[str, Any] = {
     "name": "escalate_emergency",
-    "description": "Immediately escalate an urgent healthcare concern to a human agent.",
+    "description": "Immediately escalate an urgent situation (injury, fire, medical crisis) to human dispatch.",
     "parameters": {
         "type": "object",
         "properties": {
-            "reason": {
-                "type": "string",
-                "description": "Reason for the escalation (e.g., chest pain, severe symptoms).",
-            }
+            "reason":      {"type": "string", "description": "Brief reason for escalation."},
+            "caller_name": {"type": "string", "description": "Full name of the caller."},
+            "policy_id":   {"type": "string", "description": "Policy identifier."},
         },
-        "required": ["reason"],
+        "required": ["reason", "caller_name", "policy_id"],
         "additionalProperties": False,
     },
 }
-
-authentication_schema: Dict[str, Any] = {
-    "name": "authenticate_user",
-    "description": "Authenticate a user by verifying first name, last name, and phone number.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "first_name": {"type": "string", "description": "User's first name."},
-            "last_name": {"type": "string", "description": "User's last name."},
-            "phone_number": {
-                "type": "string",
-                "description": "User's phone number (digits only, no spaces).",
-            },
-        },
-        "required": ["first_name", "last_name", "phone_number"],
-        "additionalProperties": False,
-    },
-}
-
-# -------------------------------------------------------
-# Assemble all tools wrapped as GPT-4o-compatible entries
-# -------------------------------------------------------
-
-fill_new_prescription_schema: Dict[str, Any] = {
-    "name": "fill_new_prescription",
-    "description": "Add a new prescription for the patient in the system.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patient_name": {
-                "type": "string",
-                "description": "Full name of the patient.",
-            },
-            "medication_name": {
-                "type": "string",
-                "description": "Name of the new medication to add.",
-            },
-            "dosage": {
-                "type": "string",
-                "description": "Dosage information (e.g., '500 mg twice daily').",
-            },
-            "pharmacy": {
-                "type": "string",
-                "description": "Pharmacy where medication will be filled.",
-            },
-        },
-        "required": ["patient_name", "medication_name", "dosage", "pharmacy"],
-        "additionalProperties": False,
-    },
-}
-
-lookup_side_effects_schema: Dict[str, Any] = {
-    "name": "lookup_side_effects",
-    "description": "Retrieve initial and long-term side effects for a given medication.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "medication_name": {
-                "type": "string",
-                "description": "Name of medication to query.",
-            }
-        },
-        "required": ["medication_name"],
-        "additionalProperties": False,
-    },
-}
-
-get_current_prescriptions_schema: Dict[str, Any] = {
-    "name": "get_current_prescriptions",
-    "description": "Fetch all active prescriptions for the patient.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "patient_name": {
-                "type": "string",
-                "description": "Full name of the patient.",
-            }
-        },
-        "required": ["patient_name"],
-        "additionalProperties": False,
-    },
-}
-
-check_drug_interactions_schema: Dict[str, Any] = {
-    "name": "check_drug_interactions",
-    "description": "Check for known interactions between a new medication and the patient's current medications.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "new_medication": {
-                "type": "string",
-                "description": "Name of the new medication.",
-            },
-            "current_medications": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of patient's current medication names.",
-            },
-        },
-        "required": ["new_medication", "current_medications"],
-        "additionalProperties": False,
-    },
-}
-
-# -------------------------------------------------------
-# Assemble all tools wrapped as GPT-4o-compatible entries
-# -------------------------------------------------------
 
 available_tools: List[Dict[str, Any]] = [
-    {"type": "function", "function": schedule_appointment_schema},
-    {"type": "function", "function": refill_prescription_schema},
-    {"type": "function", "function": lookup_medication_info_schema},
-    {"type": "function", "function": evaluate_prior_authorization_schema},
-    {"type": "function", "function": escalate_emergency_schema},
-    {"type": "function", "function": authentication_schema},
-    {"type": "function", "function": fill_new_prescription_schema},
-    {"type": "function", "function": lookup_side_effects_schema},
-    {"type": "function", "function": get_current_prescriptions_schema},
-    {"type": "function", "function": check_drug_interactions_schema},
+    {"type": "function", "function": record_fnol_schema},
+    {"type": "function", "function": escalate_emergency_schema_fnol},
+    {"type": "function", "function": authenticate_caller_schema},
 ]
-
 
 TOOL_REGISTRY: dict[str, dict] = {t["function"]["name"]: t for t in available_tools}

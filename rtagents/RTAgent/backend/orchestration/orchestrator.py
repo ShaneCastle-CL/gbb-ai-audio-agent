@@ -1,49 +1,57 @@
+# routes/fnol_route.py
+from __future__ import annotations
+
+import json, time
 from fastapi import WebSocket
 from utils.ml_logging import get_logger
 
-
-logger = get_logger("route_turn")
+logger = get_logger("fnol_route")
 
 
 async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> None:
     """
-    Routes a single user utterance through authentication or main dialog,
-    then persists the conversation state.
-
-    Adds latency tracking for each step.
+    Two-stage FNOL flow:
+        1) authenticate_caller  (AuthAgent)
+        2) record_fnol          (FNOLIntakeAgent)
+    After a successful FNOL record the websocket is closed by the caller.
     """
-    redis_mgr = ws.app.state.redis
-    latency_tool = ws.state.lt
+    redis_mgr     = ws.app.state.redis
+    latency_tool  = ws.state.lt
 
     if not cm.get_context("authenticated", False):
-        # Processing step for authentication
-        latency_tool.start("processing")
-        auth_agent = getattr(ws.app.state, "auth_agent", None)
-        result = await auth_agent.respond(cm, transcript, ws, is_acs=is_acs)
-        latency_tool.stop("processing", redis_mgr)
+        latency_tool.start("auth_agent")
+        auth_agent = getattr(ws.app.state, "auth_agent")
+        result     = await auth_agent.respond(cm, transcript, ws, is_acs=is_acs)
+        latency_tool.stop("auth_agent", redis_mgr)
 
-        if result and result.get("authenticated"):
+        if isinstance(result, dict) and result.get("authenticated"):
             cm.update_context("authenticated", True)
-            # If authentication is successful, update context and system prompt
-            phone_number = result.get("phone_number", None)
-            patient_dob = result.get("patient_dob", None)
-            patient_id = result.get("patient_id", None)
-            first_name = result.get("first_name", None)
-            last_name = result.get("last_name", None)
-            patient_name = (
-                f"{first_name} {last_name}" if first_name and last_name else None
-            )
-            cm.update_context("phone_number", phone_number)
-            cm.update_context("patient_dob", patient_dob)
-            cm.update_context("patient_id", patient_id)
-            cm.update_context("patient_name", patient_name)
-            cm.upsert_system_prompt()
-            logger.info(f"Session {cm.session_id} authenticated successfully.")
+            cm.update_context("caller_name", result["caller_name"])
+            cm.update_context("policy_id",  result["policy_id"])
+            logger.info(f"✅ Session {cm.session_id} authenticated for "
+                        f"{result['caller_name']} / {result['policy_id']}")
+        else:
+            # AuthAgent handles retry messaging itself; just persist state.
+            cm.persist_to_redis(redis_mgr)
+            return
     else:
-        # Processing step for main dialog
-        latency_tool.start("processing")
-        task_agent = getattr(ws.app.state, "task_agent", None)
-        await task_agent.respond(cm, transcript, ws, is_acs=is_acs)
-        latency_tool.stop("processing", redis_mgr)
+        fnol_agent = getattr(ws.app.state, "claim_intake_agent")
+        latency_tool.start("fnol_agent")
+        result     = await fnol_agent.respond(cm, transcript, ws, is_acs=is_acs)
+        latency_tool.stop("fnol_agent", redis_mgr)
+
+        if isinstance(result, dict) and result.get("claim_success"):
+            # Intake finished → mark and log
+            cm.update_context("intake_completed", True)
+            claim_id = result["claim_id"]
+            logger.info(f"📄 FNOL completed – {claim_id} – "
+                        f"session {cm.session_id}")
+            await ws.send_text(json.dumps({
+                "type": "claim_submitted",
+                "claim_id": claim_id,
+                
+            }))
+            # Up to you: close socket now or let caller hang up
+            # await ws.close(code=1000)
 
     cm.persist_to_redis(redis_mgr)
