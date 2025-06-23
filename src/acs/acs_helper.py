@@ -23,6 +23,7 @@ from azure.communication.callautomation import (
 from azure.core.exceptions import HttpResponseError
 from azure.core.messaging import CloudEvent
 from azure.identity import DefaultAzureCredential
+from src.enums.stream_modes import StreamMode
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class AcsCaller:
             websocket_url='wss://myapp.azurewebsites.net/ws/transcription'
         )
         
-        # Using managed identity
+        # Using ACS's managed identity (on ACS service, integrating with Azure Speech)
         caller = AcsCaller(
             source_number='+1234567890',
             callback_url='https://myapp.azurewebsites.net/api/acs-callback',
@@ -108,6 +109,7 @@ class AcsCaller:
             else None
         )
 
+
         self.media_streaming_options = MediaStreamingOptions(
             transport_url=websocket_url,
             transport_type=StreamingTransportType.WEBSOCKET,
@@ -152,7 +154,7 @@ class AcsCaller:
         if not self.recording_storage_container_url:
             logger.warning("No recording_storage_container_url provided (recordings may not be saved)")
 
-    async def initiate_call(self, target_number: str, stream_mode: str = "media") -> dict:
+    async def initiate_call(self, target_number: str, stream_mode: StreamMode = StreamMode.MEDIA) -> dict:
         """Start a new call with live transcription over websocket."""
         call = self.client
         src = PhoneNumberIdentifier(self.source_number)
@@ -164,15 +166,15 @@ class AcsCaller:
             cognitive_services_endpoint = None
             media_streaming = None
 
-            if stream_mode == "transcription" or stream_mode == "both":
+            if stream_mode == StreamMode.TRANSCRIPTION:
                 transcription = self.transcription_opts
                 cognitive_services_endpoint = self.cognitive_services_endpoint
 
-            if stream_mode == "media" or stream_mode == "both":
+            if stream_mode == StreamMode.MEDIA:
                 media_streaming = self.media_streaming_options
                 
             # Default to transcription if no valid mode specified
-            if stream_mode not in ["transcription", "media", "both"]:
+            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA]:
                 logger.warning(f"Invalid stream_mode '{stream_mode}', defaulting to transcription")
                 transcription = self.transcription_opts
 

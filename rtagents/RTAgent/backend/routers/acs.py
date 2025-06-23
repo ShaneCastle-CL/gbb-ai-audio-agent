@@ -3,9 +3,11 @@ routers/acs.py
 ==============
 Outbound phone-call flow via Azure Communication Services.
 
-• POST  /call             – start a phone call
-• POST  /call/callbacks   – receive ACS events
-• WS    /call/stream      – bidirectional PCM audio stream
+• POST  /call                   – start a phone call
+• POST  /call/callbacks         – receive ACS events
+• WS    /call/stream            – bidirectional PCM audio stream
+• WS    /call/transcription     – real-time transcription from ACS <> AI Speech integration
+
 """
 
 from __future__ import annotations
@@ -23,11 +25,15 @@ from pydantic import BaseModel
 
 from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
 from rtagents.RTAgent.backend.handlers.acs_handler import ACSHandler
+from rtagents.RTAgent.backend.handlers.acs_media_handler import ACSMediaHandler
+from rtagents.RTAgent.backend.handlers.acs_transcript_handler import TranscriptionHandler
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTAgent.backend.settings import (
     ACS_CALLBACK_PATH,
     ACS_WEBSOCKET_PATH,
+    ACS_STREAMING_MODE
 )
+from src.enums.stream_modes import StreamMode
 from utils.ml_logging import get_logger
 
 logger = get_logger("routers.acs")
@@ -178,14 +184,7 @@ async def media_callbacks(request: Request):
 #             logger.error(f"Error processing media data: {e}", exc_info=True)
 #             continue
 
-from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
-from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
-from src.redis.manager import AzureRedisManager
-from rtagents.RTAgent.backend.handlers.acs_media_handler import ACSMediaHandler
-from base64 import b64decode
 # @router.websocket(ACS_WEBSOCKET_PATH)
-
-@router.websocket("/call/stream")
 async def acs_media_ws(ws: WebSocket):
     """
     Handle WebSocket media streaming for ACS calls.
@@ -201,31 +200,59 @@ async def acs_media_ws(ws: WebSocket):
     try:
         await ws.accept()
         # Retrieve session and check call state to avoid reconnect loops
-        cid = ws.headers.get("x-ms-call-connection-id")
-        acs_caller = ws.app.state.acs_caller
-        # Get call connection; close if not active
-        call_conn = acs_caller.get_call_connection(cid)
+        acs = ws.app.state.acs_caller
+        redis_mgr = ws.app.state.redis
+
+        cid = ws.headers["x-ms-call-connection-id"]
+        cm = ConversationManager.from_redis(cid, redis_mgr)
+        target_phone_number = cm.get_context("target_number")
+
+        if not target_phone_number:
+            logger.debug(f"No target phone number found for session {cm.session_id}")
+
+        ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
+        ws.app.state.cm = cm
+        ws.state.lt = LatencyTool(cm)  # Initialize latency tool
+
+        call_conn = acs.get_call_connection(cid)
         if not call_conn:
             logger.info(f"Call connection {cid} not found, closing WebSocket")
             await ws.close(code=1000)
             return
-        
+
+        ws.app.state.call_conn = call_conn  # Store call connection in WebSocket state
+
         # Log call connection state for debugging
         call_state = getattr(call_conn, 'call_connection_state', 'unknown')
         logger.info(f"Call {cid} connection state: {call_state}")
 
-        cm = ConversationManager.from_redis(cid, ws.app.state.redis)
-        ws.state.lt = LatencyTool(cm)  # Initialize latency tool
-        handler = ACSMediaHandler(ws, recognizer=ws.app.state.stt_client, cm=cm)
-        # Assume you have a method to get an audio stream (from ACS, etc.)
+        handler = None
 
+        if ACS_STREAMING_MODE == StreamMode.MEDIA:
+            # Use transcription handler for ACS streaming mode
+            handler = ACSMediaHandler(
+                ws,
+                recognizer=ws.app.state.stt_client,
+                cm=cm
+            )
+            # Start recognizer in background, don't block WebSocket setup
+            asyncio.create_task(handler.start_recognizer())
 
-        clients = ws.app.state.clients
-        # Start recognizer in background, don't block WebSocket setup
-        asyncio.create_task(handler.start_recognizer())
+        elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
+            # Use media handler for ACS media streaming
+            handler = TranscriptionHandler(
+                ws, 
+                cm=cm, 
+            )
+
+        if not handler:
+            logger.error("No handler initialized for ACS streaming mode")
+            await ws.close(code=1000)
+            return
+
 
         greeted: set[str] = ws.app.state.greeted_call_ids
-        if cid not in greeted:
+        if cid not in greeted and ACS_STREAMING_MODE == StreamMode.MEDIA:
             greeting = (
                 "Hello from XYMZ Insurance! Before I can assist you, "
                 "I need to verify your identity. "
@@ -244,7 +271,10 @@ async def acs_media_ws(ws: WebSocket):
                 
                 msg = await ws.receive_text()
                 if msg:
-                    await handler.process_websocket_message(msg)
+                    if ACS_STREAMING_MODE == StreamMode.MEDIA:
+                        await handler.handle_media_message(msg)
+                    elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
+                        await handler.handle_transcription_message(msg)
 
         except WebSocketDisconnect as e:
             # Handle normal disconnect (code 1000 is normal closure)
@@ -263,7 +293,8 @@ async def acs_media_ws(ws: WebSocket):
         logger.info("WebSocket connection ended, cleaning up resources")
         if 'handler' in locals():
             try:
-                handler.recognizer.stop()
+                if ACS_STREAMING_MODE == StreamMode.MEDIA:
+                    handler.recognizer.stop()
                 logger.info("Speech recognizer stopped successfully")
             except Exception as e:
                 logger.error(f"Error stopping speech recognizer: {e}", exc_info=True)
@@ -275,7 +306,8 @@ async def acs_media_ws(ws: WebSocket):
         except Exception as e:
             logger.error(f"Error closing WebSocket: {e}", exc_info=True)
 
-@router.websocket("/call/transcription")
+# @router.websocket("/call/transcription")
+@router.websocket(ACS_WEBSOCKET_PATH)
 async def acs_transcription_ws(ws: WebSocket):
     """Handle ACS WebSocket transcription stream."""
     await ws.accept()

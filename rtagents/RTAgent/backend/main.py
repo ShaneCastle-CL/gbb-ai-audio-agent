@@ -34,7 +34,6 @@ from rtagents.RTAgent.backend.settings import (
 )
 from services import (
     SpeechSynthesizer,
-    SpeechCoreTranslator,
     CosmosDBMongoCoreManager,
     AzureRedisManager,
     StreamingSpeechRecognizerFromBytes
@@ -80,7 +79,6 @@ async def on_startup() -> None:
         candidate_languages=["en-US", "es-ES", "fr-FR", "ko-KR", "it-IT"],
         audio_format="pcm"
     )
-    # app.state.stt_client = SpeechCoreTranslator()
     # Redis connection
     app.state.redis = AzureRedisManager()
 

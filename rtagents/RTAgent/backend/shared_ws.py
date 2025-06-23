@@ -19,13 +19,15 @@ from fastapi.websockets import WebSocketState
 from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
 from rtagents.RTAgent.backend.services.speech_services import SpeechSynthesizer
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
+from rtagents.RTAgent.backend.settings import ACS_STREAMING_MODE
 from rtagents.RTAgent.backend.services.acs.acs_helpers import (
     broadcast_message,
-    send_pcm_frames,
     play_response_with_queue,
 )
 from typing import Optional, Set
 from utils.ml_logging import get_logger
+from src.enums.stream_modes import StreamMode
+
 
 logger = get_logger("shared_ws")
 
@@ -52,7 +54,7 @@ async def send_response_to_acs(
     *,
     blocking: bool = False,
     latency_tool: Optional[LatencyTool] = None,
-    stream_mode: str = "media"
+    stream_mode: StreamMode = ACS_STREAMING_MODE
 ) -> Optional[asyncio.Task]:
     """
     Synthesizes speech and sends it as audio data to the ACS WebSocket.
@@ -78,7 +80,7 @@ async def send_response_to_acs(
             latency_tool.stop("tts", ws.app.state.redis)
         ws.app.state.tts_tasks.discard(task)
 
-    if stream_mode == "media":
+    if stream_mode == StreamMode.MEDIA:
         synth: SpeechSynthesizer = ws.app.state.tts_client
 
         try:
@@ -89,7 +91,7 @@ async def send_response_to_acs(
 
 
         except asyncio.TimeoutError:
-            logger.error(f"TTS synthesis timed out for text: {text[:50]}...")
+            logger.error(f"TTS synthesis timed out for texphat: {text[:50]}...")
             raise RuntimeError("TTS synthesis timed out")
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
@@ -114,54 +116,7 @@ async def send_response_to_acs(
         if latency_tool:
             latency_tool.stop("tts", ws.app.state.redis)
 
-        # # frame_size = 320  # 10ms @ 16kHz PCM mono for smoother streaming
-
-        # # for i in range(0, len(pcm_bytes), frame_size):
-        # #     frame = pcm_bytes[i:i + frame_size]
-        # #     if len(frame) < frame_size:
-        # #         frame = frame + b'\x00' * (frame_size - len(frame))
-
-        # #     try:
-        # #         if ws.client_state != WebSocketState.CONNECTED or ws.application_state != WebSocketState.CONNECTED:
-        # #             logger.warning(f"WebSocket disconnected during TTS streaming at frame {i//frame_size}")
-        # #             break
-
-        # #         # Check the in-memory flag instead of querying Redis
-        # #         # interrupted = ws.state.cm.is_tts_interrupted()
-        # #         # if interrupted and interrupted != "false":  # Handle both boolean True and truthy strings
-        # #         #     logger.info("TTS interrupted, stopping media streaming.")
-        # #         #     await ws.send_json({
-        # #         #         "Kind": "StopAudio",
-        # #         #         "AudioData": None,
-        # #         #         "StopAudio": {}
-        # #         #     })
-        # #         #     break
-
-        # #         b64 = base64.b64encode(frame).decode("utf-8")
-        # #         await ws.send_json({
-        # #             "kind": "AudioData",
-        # #             "AudioData": {"data": b64}
-        # #         })
-        # #         # Small yield to allow barge-in detection and other tasks
-        # #         # await asyncio.sleep(0.005)  # 5ms - balance between streaming speed and responsiveness
-        # #     except Exception as e:
-        # #         if ws.application_state != WebSocketState.CONNECTED:
-        # #             logger.warning(f"WebSocket disconnected during TTS streaming: {e}")
-        # #             break
-        # #         continue
-        # # try:
-        # #     if ws.client_state != WebSocketState.CONNECTED:
-        # #         logger.warning("WebSocket no longer connected, stopping TTS.")
-        # #         return
-        # #     await task
-        # # except asyncio.CancelledError:
-        # #     logger.info("TTS task was cancelled cleanly.")
-        # # except Exception as e:
-        # #     logger.warning(f"TTS task failed: {e}")
-        # # pcm_bytes_array = synth.synthesize_to_base64_frames(text, sample_rate=16000)
-        # # await send_pcm_frames(ws, b64_frames=pcm_bytes_array, sample_rate=16000)
-
-    if stream_mode == "transcription":
+    elif stream_mode == StreamMode.TRANSCRIPTION:
         acs_caller = ws.app.state.acs_caller
         if not acs_caller:
             raise RuntimeError("ACS caller is not initialized in WebSocket state.")
@@ -172,14 +127,14 @@ async def send_response_to_acs(
             participants=[ws.app.state.target_participant]
         )
 
-    #     if not hasattr(ws.app.state, "tts_tasks"):
-    #         ws.app.state.tts_tasks = set()
+        if not hasattr(ws.app.state, "tts_tasks"):
+            ws.app.state.tts_tasks = set()
 
-    # task = asyncio.create_task(coro)
-    # ws.app.state.tts_tasks.add(task)
-    # task.add_done_callback(stop_latency)
+        task = asyncio.create_task(coro)
+        ws.app.state.tts_tasks.add(task)
+        task.add_done_callback(stop_latency)
 
-    # return task
+        return task
 
 
 async def push_final(

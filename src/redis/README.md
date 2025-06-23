@@ -1,5 +1,7 @@
 # Redis Implementation Documentation
 
+> DEPRECATED: This documentation is for the legacy Redis implementation. Please refer to the new RTAgent Voice AI Backend documentation for the latest architecture and usage patterns.
+
 ## Overview
 
 The RTAgent Voice AI Backend uses a sophisticated Redis-based session management system that provides hierarchical key organization, automatic TTL management, and seamless data persistence for Azure Communication Services (ACS) calls and conversation sessions.

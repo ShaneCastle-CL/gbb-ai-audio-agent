@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import WebSocket
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
+from src.enums.stream_modes import StreamMode
 from utils.ml_logging import get_logger
 from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
 from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
@@ -18,6 +19,7 @@ class ACSMediaHandler:
                  ws: WebSocket, 
                  recognizer: StreamingSpeechRecognizerFromBytes = None, 
                  cm: ConversationManager = None):
+        
         self.recognizer = recognizer or StreamingSpeechRecognizerFromBytes(
             candidate_languages=["en-US", "fr-FR", "de-DE", "es-ES", "it-IT"],
             vad_silence_timeout_ms=800,
@@ -73,7 +75,7 @@ class ACSMediaHandler:
             logger.error(f"❌ Failed to start recognizer: {e}", exc_info=True)
             raise
 
-    async def process_websocket_message(self, stream_data):
+    async def handle_media_message(self, stream_data):
         """
         Process incoming WebSocket message from ACS.
         Expects JSON with kind == "AudioData" and base64-encoded audio bytes.
@@ -108,7 +110,7 @@ class ACSMediaHandler:
                     text=greeting_text,
                     blocking=False,
                     latency_tool=self.latency_tool,
-                    stream_mode="media"
+                    stream_mode=StreamMode.MEDIA
                 )
             )
 
@@ -127,6 +129,7 @@ class ACSMediaHandler:
         latency_tool.start("barge_in")
         # Set the barge-in event flag immediately
         # Only proceed with barge-in handling if this is a new event
+
         if self._barge_in_event.is_set():
             logger.info("⏭️ Barge-in already detected, ignoring partial result")
             return
@@ -181,7 +184,11 @@ class ACSMediaHandler:
         """
         try:
             logger.info("🚫 User barge-in detected, stopping playback")
-            
+            await broadcast_message(
+                connected_clients=self.incoming_websocket.app.state.clients,
+                message="User has barged in, stopping playback.",
+                sender="System"
+            )
             # Cancel current playback task if running
             if self.playback_task and not self.playback_task.done():
                 logger.info("Cancelling playback task due to barge-in")
@@ -233,6 +240,13 @@ class ACSMediaHandler:
                     
                     logger.info(f"🎯 Processing {kind} turn: {text}")
                     
+
+                    await broadcast_message(
+                        connected_clients=self.incoming_websocket.app.state.clients,
+                        message=text,
+                        sender="User"
+                    )
+
                     # Cancel any current playback before starting new one
                     if self.playback_task and not self.playback_task.done():
                         logger.info("Cancelling previous playback task")

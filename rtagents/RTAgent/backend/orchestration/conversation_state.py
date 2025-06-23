@@ -18,6 +18,7 @@ class ConversationManager:
         session_id: Optional[str] = None,
         active_agent: str = None,
         auto_refresh_interval: Optional[float] = None,  # seconds
+        redis_mgr: Optional[AzureRedisManager] = None
     ) -> None:
         self.session_id: str = session_id or str(uuid.uuid4())[:8]
         self.histories: Dict[str, List[Dict[str, Any]]] = {}
@@ -30,12 +31,16 @@ class ConversationManager:
         self.is_processing_queue = False
         self.media_cancelled = False  # Flag to indicate if media was cancelled due to interrupt
         
+        self._is_tts_interrupted = False  # In-memory flag
+
         # Auto-refresh configuration
         self.auto_refresh_interval = auto_refresh_interval
         self.last_refresh_time = 0
         self._refresh_task: Optional[asyncio.Task] = None
         self._redis_manager: Optional[AzureRedisManager] = None
 
+
+    
     @staticmethod
     def build_redis_key(session_id: str) -> str:
         return f"session:{session_id}"
@@ -62,7 +67,20 @@ class ConversationManager:
             f"{sum(len(h) for h in cm.histories.values())} msgs total, ctx keys={list(cm.context.keys())}"
         )
         return cm
-
+    @classmethod
+    def from_redis_with_manager(cls, session_id: str, redis_mgr: AzureRedisManager) -> "ConversationManager":
+        # Alternative constructor that stores the manager
+        cm = cls(session_id=session_id, redis_mgr=redis_mgr)
+        # ... existing logic ...
+        return cm
+    
+    async def persist(self, redis_mgr: Optional[AzureRedisManager] = None):
+        """Persist using provided or stored redis manager"""
+        mgr = redis_mgr or self._redis_mgr
+        if not mgr:
+            raise ValueError("No Redis manager available")
+        await self.persist_to_redis_async(mgr)
+        
     def persist_to_redis(
         self, redis_mgr: AzureRedisManager, ttl_seconds: Optional[int] = None
     ) -> None:
@@ -91,22 +109,32 @@ class ConversationManager:
         )
 
     # -- VAD ------------------------------------------------------
-    async def set_tts_interrupted(self, redis_mgr: Optional[AzureRedisManager], value: bool) -> None:
+
+    def is_tts_interrupted(self):
+        """Return the in-memory flag."""
+        return self._is_tts_interrupted
+    
+    def set_tts_interrupted(self, value: bool) -> None:
+        """Set the TTS interrupted flag in local context and optionally in Redis."""
+        self.set_context("tts_interrupted", value)
+        self._is_tts_interrupted = value
+
+    async def set_tts_interrupted_live(self, redis_mgr: Optional[AzureRedisManager], session_id, value: bool) -> None:
         """Set the TTS interrupted flag."""
         await self.set_live_context_value(
-            redis_mgr or self._redis_manager, 
-            "tts_interrupted", 
+            redis_mgr or self._redis_manager,
+            f"tts_interrupted:{session_id}",
             value
         )
 
-    async def is_tts_interrupted(self, redis_mgr: Optional[AzureRedisManager] = None) -> bool:
+    async def is_tts_interrupted_live(self, redis_mgr: Optional[AzureRedisManager] = None, session_id: str = None) -> bool:
         """Check if TTS is interrupted, optionally checking live Redis data."""
         if redis_mgr:
             # Get live value from Redis
-            live_value = await self.get_live_context_value(redis_mgr, "tts_interrupted", False)
-            return live_value
+            self._is_tts_interrupted = await self.get_live_context_value(redis_mgr, f"tts_interrupted:{session_id}", False)
+            return self._is_tts_interrupted
         # Fallback to local context
-        return self.get_context("tts_interrupted", False)
+        return self.get_context(f"tts_interrupted:{session_id}", False)
 
     # --- SLOTS & TOOL OUTPUTS -----------------------------------------
     def update_slots(self, slots: dict) -> None:

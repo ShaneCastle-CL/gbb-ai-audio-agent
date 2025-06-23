@@ -16,28 +16,21 @@ from typing import Dict, Optional, Any
 
 from azure.core.exceptions import HttpResponseError
 from azure.core.messaging import CloudEvent
-from azure.communication.callautomation import TextSource, PhoneNumberIdentifier
+from azure.communication.callautomation import TextSource
 from fastapi import HTTPException, WebSocket
-from fastapi.websockets import WebSocketDisconnect
 from fastapi.responses import JSONResponse
-import websocket
 
 from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
-from rtagents.RTAgent.backend.services.acs.acs_helpers import play_response
-from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
-from shared_ws import broadcast_message
-from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
+from rtagents.RTAgent.backend.settings import ACS_STREAMING_MODE
 from utils.ml_logging import get_logger
+from shared_ws import broadcast_message
+from src.enums.stream_modes import StreamMode
 
 logger = get_logger("handlers.acs_handler")
 
-from azure.cognitiveservices.speech.audio import AudioStreamFormat, PushAudioInputStream
-from base64 import b64decode
-from fastapi.websockets import WebSocketState
-from rtagents.RTAgent.backend.helpers import check_for_stopwords
-from shared_ws import broadcast_message, send_response_to_acs
-from rtagents.RTAgent.backend.services.speech_services import SpeechSynthesizer
+
+
 class ACSHandler:
     """
     Handles Azure Communication Services business logic operations.
@@ -71,7 +64,10 @@ class ACSHandler:
 
         try:
             # TODO: Add logic to reject multiple requests for the same target number
-            result = await acs_caller.initiate_call(target_number)
+            result = await acs_caller.initiate_call(
+                target_number,
+                stream_mode=ACS_STREAMING_MODE
+                )
             if result.get("status") != "created":
                 return {"status": "failed", "message": "Call initiation failed"}
                 
@@ -244,7 +240,6 @@ class ACSHandler:
             f"\tParticipants updated for call {cid}: {participants_info}",
             "System",
         )
-                
 
     @staticmethod
     async def _handle_call_connected(
@@ -255,18 +250,18 @@ class ACSHandler:
         cid: str, 
         acs_caller,
         stt_client,
-        stream_mode: str = "media"
+        stream_mode: StreamMode = ACS_STREAMING_MODE
     ) -> None:
         """Handle call connected event and play greeting."""
         await broadcast_message(clients, f"Call Connected: {cid}", "System")
 
         # # If using real-time bidirectional media streaming, start speech recognition
-        # if stream_mode == "media":
+        # if stream_mode == StreamMode.MEDIA:
 
         #     stt_client.start()
 
         # If using real-time transcription, play greeting
-        if stream_mode == "transcription":
+        if stream_mode == StreamMode.TRANSCRIPTION:
             greeting = (
                 "Hello, thank you for calling XMYX Insurance Company. "
                 "Before I can assist you, let's verify your identity. "
@@ -284,7 +279,7 @@ class ACSHandler:
                 call_conn.play_media(play_source=text_source)
                 await cm.set_live_context_value(redis_mgr, "greeted", True)
                 logger.info(f"Greeting played for call {cid}")
-            # if stream_mode == "media":
+            # if stream_mode == StreamMode.MEDIA:
             #     call_conn.start_media_streaming(
             #         operation_context="startMediaStreamingContext"
             #     )
@@ -360,7 +355,7 @@ class ACSHandler:
         except Exception as e:
             logger.error(f"Failed to persist conversation state after disconnect for call {cid}: {e}")
 
-    @staticmethod
+    # @staticmethod
     # async def _handle_media_events(
     #     event: CloudEvent, 
     #     cm: ConversationManager, 
@@ -650,182 +645,3 @@ class ACSHandler:
     #             logger.info(f"◀ media WS closed – {cid}")
     #         except Exception as e:
     #             logger.error(f"Error during cleanup for call {cid}: {e}")
-
-    @staticmethod
-    async def _process_speech_queue(queue: asyncio.Queue) -> Optional[str]:
-        """
-        Process items from the speech recognition queue.
-        
-        Args:
-            queue: Speech recognition queue
-            
-        Returns:
-            Combined spoken text or None if queue is empty
-        """
-        spoken_text = None
-        try:
-            while True:
-                item = queue.get_nowait()
-                spoken_text = f"{spoken_text} {item}".strip() if spoken_text else item
-                queue.task_done()
-        except asyncio.QueueEmpty:
-            pass
-        return spoken_text
-
-    @staticmethod
-    async def _process_websocket_message(
-        data: Dict[str, Any],
-        cid: str,
-        user_raw_id: Optional[str],
-        call_user_raw_ids: Dict[str, str],
-        stt_client=StreamingSpeechRecognizerFromBytes,
-    ) -> Optional[str]:
-        """
-        Process a WebSocket message from ACS.
-        
-        Args:
-            data: Message data from WebSocket
-            cid: Call connection ID
-            user_raw_id: Current user's raw participant ID
-            call_user_raw_ids: Global mapping of call IDs to user raw IDs
-            push_stream: Audio stream for processing
-            
-        Returns:
-            Updated user_raw_id if changed
-        """
-        from base64 import b64decode
-        
-        kind = data.get("kind")
-        
-        if kind == "AudioData":
-            # dynamically learn / confirm the caller's participantRawID
-            if not user_raw_id and cid in call_user_raw_ids:
-                user_raw_id = call_user_raw_ids[cid]
-
-            participant_id = data.get("audioData", {}).get("participantRawID")
-            if user_raw_id and participant_id != user_raw_id:
-                # Discard bot's own audio
-                return user_raw_id
-
-            # Process audio data if STT client is available
-            if stt_client:
-                try:
-                    audio_data = data.get("audioData", {}).get("data", "")
-                    if audio_data:
-                        logger.debug(f"First 10 chars of audio data: {str(audio_data[:10])}")
-                        stt_client.write_bytes(audio_data)
-                except Exception as e:
-                    # Keep going even if decode glitches
-                    logger.debug(f"Audio decode error for call {cid}: {e}")
-
-        elif kind == "CallConnected":
-            # Extract and store the user's participant ID
-            participant_info = data.get("callConnected", {}).get("participant", {})
-            participant_id = participant_info.get("rawID")
-            if participant_id:
-                call_user_raw_ids[cid] = participant_id
-                user_raw_id = participant_id
-                logger.info(f"Call connected - User participant ID: {participant_id}")
-        else:
-            logger.debug(f"Unhandled message kind: {kind} for call {cid}")
-            
-        return user_raw_id
-
-    @staticmethod
-    async def _send_response_to_acs(ws: WebSocket, text: str, blocking: bool = False) -> None:
-        """
-        Send a response to ACS via WebSocket.
-        
-        Args:
-            ws: WebSocket connection
-            text: Text to send
-            blocking: Whether to wait for completion
-        """
-        try:
-            from shared_ws import send_response_to_acs
-            await send_response_to_acs(ws, text, blocking=blocking)
-        except Exception as e:
-            logger.error(f"Error sending response to ACS: {e}", exc_info=True)
-
-    @staticmethod
-    async def handle_speech_recognition_queue(
-        queue: asyncio.Queue,
-        ws: WebSocket,
-        cm: ConversationManager,
-        acs_caller,
-        cid: str,
-        clients: list
-    ) -> None:
-        """
-        Handle speech recognition results from a queue.
-        
-        Args:
-            queue: Queue containing speech recognition results
-            ws: WebSocket connection
-            cm: ConversationManager instance
-            acs_caller: ACS caller instance
-            cid: Call connection ID
-            clients: List of connected WebSocket clients
-        """
-        try:
-            spoken_text = None
-            
-            # Collect all available speech recognition results
-            try:
-                while True:
-                    item = queue.get_nowait()
-                    spoken_text = f"{spoken_text} {item}".strip() if spoken_text else item
-                    queue.task_done()
-            except asyncio.QueueEmpty:
-                pass
-
-            if spoken_text:
-                # Stop any ongoing TTS
-                tts_client = getattr(ws.app.state, 'tts_client', None)
-                if tts_client and hasattr(tts_client, 'stop_speaking'):
-                    tts_client.stop_speaking()
-
-                # Cancel any pending TTS tasks
-                tts_tasks = getattr(ws.app.state, 'tts_tasks', [])
-                for task in list(tts_tasks):
-                    task.cancel()
-
-                # Broadcast the spoken text
-                await broadcast_message(clients, spoken_text, "User")
-
-                # Check for stop words
-                if ACSHandler._check_for_stopwords(spoken_text):
-                    goodbye_msg = "Goodbye!"
-                    await broadcast_message(clients, goodbye_msg, "Assistant")
-                    await ACSHandler._send_response_to_acs(ws, goodbye_msg)
-                    await asyncio.sleep(1)
-                    if acs_caller:
-                        await acs_caller.disconnect_call(cid)
-                    return
-
-                # Route the turn to the orchestrator
-                from rtagents.RTAgent.backend.orchestration.orchestrator import route_turn
-                await route_turn(cm, spoken_text, ws, is_acs=True)
-                
-        except Exception as e:
-            logger.error(f"Error handling speech recognition for call {cid}: {e}", exc_info=True)
-
-    @staticmethod
-    def _check_for_stopwords(text: str) -> bool:
-        """
-        Check if the text contains stop words indicating end of conversation.
-        
-        Args:
-            text: Text to check
-            
-        Returns:
-            True if stop words are found
-        """
-        try:
-            # Try to import the helper function
-            from helpers import check_for_stopwords
-            return check_for_stopwords(text)
-        except ImportError:
-            # Fallback implementation
-            stopwords = {"goodbye", "bye", "stop", "end call", "hang up", "disconnect"}
-            return any(word in text.lower() for word in stopwords)

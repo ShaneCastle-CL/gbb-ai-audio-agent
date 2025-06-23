@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List
 from dotenv import load_dotenv
-
+from src.enums.stream_modes import StreamMode
 # Load environment variables from .env file
 load_dotenv(override=True)
 
@@ -37,7 +37,8 @@ BASE_URL: str = os.getenv("BASE_URL", "")
 # Blob Container URL for recording storage
 AZURE_STORAGE_CONTAINER_URL: str = os.getenv("AZURE_STORAGE_CONTAINER_URL", "")
 
-STREAMING_MODE: str = "media"
+# ACS_STREAMING_MODE: StreamMode = StreamMode.MEDIA
+ACS_STREAMING_MODE: StreamMode = StreamMode.TRANSCRIPTION
 # API route fragments (keep them in one place so routers can import)
 ACS_CALL_PATH = "/api/call"
 ACS_CALLBACK_PATH: str = "/call/callbacks"
