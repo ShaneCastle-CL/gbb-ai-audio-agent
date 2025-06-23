@@ -29,6 +29,7 @@ from rtagents.RTAgent.backend.handlers.acs_media_handler import ACSMediaHandler
 from rtagents.RTAgent.backend.handlers.acs_transcript_handler import TranscriptionHandler
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
 from rtagents.RTAgent.backend.settings import (
+    ACS_CALL_PATH,
     ACS_CALLBACK_PATH,
     ACS_WEBSOCKET_PATH,
     ACS_STREAMING_MODE
@@ -45,7 +46,7 @@ class CallRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 #  1. Make Call  (POST /api/call)
 # --------------------------------------------------------------------------- #
-@router.post("/api/call")
+@router.post(ACS_CALL_PATH)
 async def initiate_call(call: CallRequest, request: Request):
     """Initiate an outbound call through ACS."""
     logger.info(f"Initiating call to {call.target_number}")
