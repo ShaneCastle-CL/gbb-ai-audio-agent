@@ -202,7 +202,7 @@ class AcsCaller:
         Answer an incoming call and set up live transcription.
         
         Args:
-            call_id: The incoming call ID from the event
+            incoming_call_context: The incoming call context from the event
             redis_mgr: Optional Redis manager for caching call state
             
         Returns:
@@ -237,21 +237,21 @@ class AcsCaller:
             
             logger.info(f"Incoming call answered: {result.call_connection_id}")
             
-            # Cache call state if Redis manager is available
-            if redis_mgr:
-                await redis_mgr.set_call_state(
-                    call_connection_id=result.call_connection_id,
-                    state="answered",
-                    call_id=call_id
-                )
+            # # Cache call state if Redis manager is available
+            # if redis_mgr:
+            #     await redis_mgr.set_call_state(
+            #         call_connection_id=result.call_connection_id,
+            #         state="answered",
+            #         call_id=result.call_connection_id
+            #     )
             
-            return result
+            # return result
             
         except HttpResponseError as e:
-            logger.error(f"Failed to answer call {call_id} [status: {e.status_code}]: {e.message}")
+            logger.error(f"Failed to answer call [status: {e.status_code}]: {e.message}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error answering call {call_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error answering call: {e}", exc_info=True)
             raise
 
     def get_call_connection(self, call_connection_id: str) -> CallConnectionClient:
