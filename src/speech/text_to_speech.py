@@ -32,9 +32,9 @@ def split_sentences(text: str) -> List[str]:
 def auto_style(lang_code: str) -> Dict[str, str]:
     """Return style / rate tweaks per language family."""
     if lang_code.startswith(("es", "fr", "it")):
-        return {"style": "chat", "rate": "-10%"}
+        return {"style": "chat", "rate": "+3%"}
     if lang_code.startswith("en"):
-        return {"style": "chat"}
+        return {"style": "chat", "rate": "+3%"}
     return {}
 
 def ssml_voice_wrap(voice: str,
