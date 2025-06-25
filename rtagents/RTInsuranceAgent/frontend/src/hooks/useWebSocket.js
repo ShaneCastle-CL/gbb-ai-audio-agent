@@ -101,6 +101,17 @@ export default function useWebSocket({
           appendLog?.("🤖 Assistant responded");
           break;
 
+        case "user":
+          append({ speaker: "User", text: txt });
+          addMindMapNode?.({
+            speaker: "User",
+            text: txt,
+            parentId: lastAssistantId.current,
+          });
+          setActiveSpeaker?.("User");
+          appendLog?.("👤 User message from backend");
+          break;
+
         case "tool_start":
           addMindMapNode?.({
             speaker: "Assistant",

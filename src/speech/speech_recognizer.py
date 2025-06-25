@@ -234,6 +234,7 @@ class StreamingSpeechRecognizerFromBytes:
 
     def __init__(
         self,
+        *,
         key: Optional[str] = None,
         region: Optional[str] = None,
         candidate_languages: Optional[List[str]] = None,
@@ -426,6 +427,28 @@ class StreamingSpeechRecognizerFromBytes:
         if self.push_stream:
             self.push_stream.close()
 
+    @staticmethod
+    def _extract_lang(evt) -> str:
+        """
+        Return detected language code regardless of LID mode.
+
+        Priority:
+        1. evt.result.language   (direct field, works in Continuous)
+        2. AutoDetectSourceLanguageResult property
+        3. fallback ''  (caller will switch to default)
+        """
+        if getattr(evt.result, "language", None):
+            return evt.result.language
+
+        prop = evt.result.properties.get(
+            speechsdk.PropertyId.SpeechServiceConnection_AutoDetectSourceLanguageResult,
+            "")
+        if prop:
+            return prop
+
+        return ""
+
+    # callbacks → wrap user callbacks
     def _on_recognizing(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         txt = evt.result.text
         if txt and self.partial_callback:
