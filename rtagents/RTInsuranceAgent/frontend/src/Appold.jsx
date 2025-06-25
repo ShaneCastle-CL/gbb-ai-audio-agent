@@ -1,10 +1,4 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  AudioConfig,
-  SpeechConfig,
-  SpeechRecognizer,
-  PropertyId,
-} from "microsoft-cognitiveservices-speech-sdk";
 import ReactFlow, { ReactFlowProvider, MiniMap, Controls } from "reactflow";
 import "reactflow/dist/style.css";
 
@@ -176,6 +170,10 @@ export default function RealTimeVoiceApp() {
   const [targetPhoneNumber, setTargetPhoneNumber] = useState("");
   const [callActive, setCallActive] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
+  const mediaRecorderRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const processorRef    = useRef(null);
+  const socketRef       = useRef(null);
 
 
   /* ---------- mind‑map state ---------- */
@@ -195,8 +193,6 @@ export default function RealTimeVoiceApp() {
 
   /* ---------- refs ---------- */
   const chatRef = useRef(null);
-  const socketRef = useRef(null);
-  const recognizerRef = useRef(null);
 
   /* ---------- helpers ---------- */
   const appendLog = (m) =>
@@ -372,79 +368,93 @@ export default function RealTimeVoiceApp() {
   /* ------------------------------------------------------------------ *
    *  VOICE RECOGNITION & WEBSOCKET
    * ------------------------------------------------------------------ */
-  const sendToBackend = (text) => {
-    socketRef.current?.readyState === WebSocket.OPEN &&
-      socketRef.current.send(JSON.stringify({ text }));
-  };
-
-  const handleUserSpeech = (text) =>{
-    setMessages(m=>[...m,{ speaker:"User", text }]);
-    addMindMapNode({ speaker:"User", text });
-    setActiveSpeaker("User");
-    appendLog(`User: ${text}`);
-    sendToBackend(text);
-  };
-
-  const startRecognition = () => {
-    /* reset mind‑map & chat */
+  const startRecognition = async () => {
     resetMindMap();
     setMessages([]);
+    appendLog("🎤 PCM streaming started");
 
-    /* Speech recognizer */
-    const cfg = SpeechConfig.fromSubscription(AZURE_SPEECH_KEY, AZURE_REGION);
-    cfg.speechRecognitionLanguage = "en-US";
-    //cfg.speechRecognitionLanguage = "es-ES";
+    // 1) open WS
+    const socket = new WebSocket(`${WS_URL}/realtime`);
+    socket.binaryType = "arraybuffer";
 
-    const rec = new SpeechRecognizer(
-      cfg,
-      AudioConfig.fromDefaultMicrophoneInput(),
-    );
-    rec.properties.setProperty(
-      PropertyId.Speech_SegmentationSilenceTimeoutMs,
-      "800",
-    );
-    rec.properties.setProperty(
-      PropertyId.Speech_SegmentationStrategy,
-      "Semantic",
-    );
-    recognizerRef.current = rec;
+    socket.onopen = () => {
+      appendLog("🔌 WS open");
+      console.log("WebSocket connection OPENED to backend!");
+    };
+    socket.onclose = () => {
+      console.log("WebSocket connection CLOSED.");
+    };
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+    socket.onmessage = handleSocketMessage;
+    socketRef.current = socket;
 
-    let lastInterrupt = Date.now();
-    rec.recognizing = (_, e) => {
-      if (
-        e.result.text.trim() &&
-        socketRef.current?.readyState === WebSocket.OPEN &&
-        Date.now() - lastInterrupt > 1000
-      ) {
-        socketRef.current.send(JSON.stringify({ type: "interrupt" }));
-        appendLog("→ Sent interrupt");
-        lastInterrupt = Date.now();
+    // 2) setup Web Audio for raw PCM @16 kHz
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 16000
+    });
+    audioContextRef.current = audioCtx;
+
+    const source = audioCtx.createMediaStreamSource(stream);
+
+    // 3) ScriptProcessor with small buffer for low latency (256 or 512 samples)
+    const bufferSize = 512; 
+    const processor  = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+    processorRef.current = processor;
+
+    processor.onaudioprocess = (evt) => {
+      const float32 = evt.inputBuffer.getChannelData(0);
+      // Debug: Log a sample of mic data
+      console.log("Mic data sample:", float32.slice(0, 10)); // Should show non-zero values if your mic is hot
+
+      const int16 = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        int16[i] = Math.max(-1, Math.min(1, float32[i])) * 0x7fff;
+      }
+
+      // Debug: Show size before send
+      console.log("Sending int16 PCM buffer, length:", int16.length);
+
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(int16.buffer);
+        // Debug: Confirm data sent
+        console.log("PCM audio chunk sent to backend!");
+      } else {
+        console.log("WebSocket not open, did not send audio.");
       }
     };
 
-    rec.recognized = (_, e) => {
-      const text = e.result.text.trim();
-      if (text) handleUserSpeech(text);
-    };
-
-    rec.startContinuousRecognitionAsync();
+    source.connect(processor);
+    processor.connect(audioCtx.destination);
     setRecording(true);
-    appendLog("🎤 Recognition started");
-
-    /* WebSocket to backend */
-    const socket = new WebSocket(`${WS_URL}/realtime`);
-    socket.binaryType = "arraybuffer";
-    socketRef.current = socket;
-    socket.onopen = () => appendLog("🔌 WS open");
-    socket.onclose = () => appendLog("🔌 WS closed");
-    socket.onmessage = handleSocketMessage;
   };
 
   const stopRecognition = () => {
-    recognizerRef.current?.stopContinuousRecognitionAsync();
-    socketRef.current?.readyState === WebSocket.OPEN && socketRef.current.close();
+    if (processorRef.current) {
+      try { processorRef.current.disconnect(); } catch {}
+      processorRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch {}
+      audioContextRef.current = null;
+    }
+    if (socketRef.current) {
+      try { socketRef.current.close(); } catch {}
+      socketRef.current = null;
+    }
     setRecording(false);
-    appendLog("🛑 Recognition stopped");
+    appendLog("🛑 PCM streaming stopped");
+  };
+
+  // Helper to dedupe consecutive identical messages
+  const pushIfChanged = (arr, msg) => {
+    // Only dedupe if the last message is from the same speaker and has the same text
+    if (arr.length === 0) return [...arr, msg];
+    const last = arr[arr.length - 1];
+    if (last.speaker === msg.speaker && last.text === msg.text) return arr;
+    return [...arr, msg];
   };
 
   const handleSocketMessage = async (event) => {
@@ -467,34 +477,49 @@ export default function RealTimeVoiceApp() {
       appendLog("Ignored non‑JSON frame");
       return;
     }
-    const { type, content = "", message = "", function_call } = payload;
+    // --- Handle relay/broadcast messages with {sender, message} ---
+    if (payload.sender && payload.message) {
+      // Route all relay messages through the same logic
+      payload.speaker = payload.sender;
+      payload.content = payload.message;
+      // fall through to unified logic below
+    }
+    const { type, content = "", message = "", function_call, speaker } = payload;
     const txt = content || message;
-  
+    const msgType = (type || "").toLowerCase();
+
+    /* ---------- USER BRANCH ---------- */
+    if (msgType === "user" || speaker === "User") {
+      setActiveSpeaker("User");
+      // Always append user message immediately, do not dedupe
+      setMessages(prev => [...prev, { speaker: "User", text: txt }]);
+      addMindMapNode({ speaker: "User", text: txt, parentId: lastAssistantId.current });
+      appendLog(`User: ${txt}`);
+      return;
+    }
+
+    /* ---------- ASSISTANT STREAM ---------- */
     if (type === "assistant_streaming") {
       setActiveSpeaker("Assistant");
-      setMessages((prev) => {
+      setMessages(prev => {
         if (prev.at(-1)?.streaming) {
-          return prev.map((m, i) => i === prev.length - 1 ? { ...m, text: txt } : m);
+          return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt} : m);
         }
-        return [...prev, { speaker: "Assistant", text: txt, streaming: true }];
+        return [...prev, { speaker:"Assistant", text:txt, streaming:true }];
       });
       return;
     }
-  
-    if (type === "assistant" || type === "status") {
-      addMindMapNode({
-        speaker: "Assistant",
-        text: txt,
-        parentId: lastUserId.current,
-      });
-  
+
+    /* ---------- ASSISTANT FINAL ---------- */
+    if (msgType === "assistant" || msgType === "status" || speaker === "Assistant") {
       setActiveSpeaker("Assistant");
-      setMessages((prev) => {
+      setMessages(prev => {
         if (prev.at(-1)?.streaming) {
-          return prev.map((m, i) => i === prev.length - 1 ? { speaker: "Assistant", text: txt } : m);
+          return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt, streaming:false} : m);
         }
-        return [...prev, { speaker: "Assistant", text: txt }];
+        return pushIfChanged(prev, { speaker:"Assistant", text:txt });
       });
+      addMindMapNode({ speaker:"Assistant", text:txt, parentId:lastUserId.current });
       appendLog("🤖 Assistant responded");
       return;
     }
@@ -635,29 +660,7 @@ export default function RealTimeVoiceApp() {
         setActiveSpeaker("Assistant");
       };
 
-      relay.onmessage = ({ data }) => {
-        try {
-          const obj = JSON.parse(data);
-          if (obj.type?.startsWith("tool_")) {
-            handleSocketMessage({ data: JSON.stringify(obj) });
-            return;                              // already handled
-          }
-        } catch { /* not JSON – fall through */ }
-
-        try {
-          const { sender, message } = JSON.parse(data);
-          setMessages((m)=>[ ...m, { speaker: sender, text: message } ]);
-          addMindMapNode({
-            speaker:  sender,
-            text:     message,
-            parentId: sender==="User" ? lastUserId.current : lastAssistantId.current,
-          });
-          setActiveSpeaker(sender);
-          appendLog(`[Relay] ${sender}: ${message}`);
-        } catch {
-          appendLog("Relay message parse error");
-        }
-      };
+      relay.onmessage = handleSocketMessage;
 
       relay.onclose = () => {
         appendLog("Relay WS disconnected");

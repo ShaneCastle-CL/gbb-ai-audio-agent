@@ -4,9 +4,13 @@ from __future__ import annotations
 import json, time
 from fastapi import WebSocket
 from utils.ml_logging import get_logger
+from pathlib import Path
+from rtagents.RTInsuranceAgent.backend.agents.tool_store.report_builder import generate_claim_report    
+       # builds .docx
+from rtagents.RTInsuranceAgent.backend.postcall.push_claims import persist_claim_record, fetch_claim_record
+from rtagents.RTInsuranceAgent.backend.agents.tool_store.fnol import claims_db
 
 logger = get_logger("fnol_route")
-
 
 async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> None:
     """
@@ -41,9 +45,21 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
         latency_tool.stop("fnol_agent", redis_mgr)
 
         if isinstance(result, dict) and result.get("claim_success"):
-            # Intake finished → mark and log
+            # Intake finished → mark and logger
             cm.update_context("intake_completed", True)
             claim_id = result["claim_id"]
+            # Build Word report
+            claim_record = claims_db[-1]
+            claim_record.update({
+                "session_id": cm.session_id,
+            })
+            report_path: Path = generate_claim_report(claim_record)
+            logger.info("📄 FNOL recorded (%s); report at %s",
+                    claim_id, report_path)
+            cosmos_mgr = getattr(ws.app.state, "cosmos", None)
+            # Push to Cosmos DB if manager provided
+            if cosmos_mgr:
+                persist_claim_record(cosmos_mgr, claim_record, report_path)
             logger.info(f"📄 FNOL completed – {claim_id} – "
                         f"session {cm.session_id}")
             await ws.send_text(json.dumps({
@@ -51,7 +67,6 @@ async def route_turn(cm, transcript: str, ws: WebSocket, *, is_acs: bool) -> Non
                 "claim_id": claim_id,
                 
             }))
-            # Up to you: close socket now or let caller hang up
             # await ws.close(code=1000)
 
     cm.persist_to_redis(redis_mgr)
