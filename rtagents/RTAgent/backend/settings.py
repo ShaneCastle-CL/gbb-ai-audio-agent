@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List
 from dotenv import load_dotenv
-
+from src.enums.stream_modes import StreamMode
 # Load environment variables from .env file
 load_dotenv(override=True)
 
@@ -22,20 +22,23 @@ load_dotenv(override=True)
 AZURE_OPENAI_ENDPOINT: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_KEY: str = os.getenv("AZURE_OPENAI_KEY", "")
 AZURE_OPENAI_CHAT_DEPLOYMENT_ID: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT_ID", "")
-AOAI_STT_KEY = os.environ["AZURE_OPENAI_STT_TTS_KEY"]
-AOAI_STT_ENDPOINT = os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
-
+AZURE_SPEECH_REGION: str = os.getenv("AZURE_SPEECH_REGION", "")
+AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT") or os.environ.get("AZURE_OPENAI_STT_TTS_ENDPOINT", "")
+AZURE_SPEECH_KEY: str = os.getenv("AZURE_SPEECH_KEY") or os.environ.get("AZURE_OPENAI_STT_TTS_KEY", "")
+AZURE_SPEECH_RESOURCE_ID: str = os.getenv("AZURE_SPEECH_RESOURCE_ID", "")
 # ------------------------------------------------------------------------------
 # Azure Communication Services (ACS)
 # ------------------------------------------------------------------------------
+ACS_ENDPOINT: str = os.getenv("ACS_ENDPOINT", "")
 ACS_CONNECTION_STRING: str = os.getenv("ACS_CONNECTION_STRING", "")
 ACS_SOURCE_PHONE_NUMBER: str = os.getenv("ACS_SOURCE_PHONE_NUMBER", "")
 BASE_URL: str = os.getenv("BASE_URL", "")
-AZURE_SPEECH_ENDPOINT: str = os.getenv("AZURE_SPEECH_ENDPOINT", "")
 
 # Blob Container URL for recording storage
 AZURE_STORAGE_CONTAINER_URL: str = os.getenv("AZURE_STORAGE_CONTAINER_URL", "")
 
+# ACS_STREAMING_MODE: StreamMode = StreamMode.MEDIA
+ACS_STREAMING_MODE: StreamMode = StreamMode.TRANSCRIPTION
 # API route fragments (keep them in one place so routers can import)
 ACS_CALL_PATH = "/api/call"
 ACS_CALLBACK_PATH: str = "/call/callbacks"
@@ -72,7 +75,7 @@ VOICE_TTS = "en-US-JennyMultilingualNeural"
 # ------------------------------------------------------------------------------
 STOP_WORDS: List[str] = ["goodbye", "exit", "see you later", "bye"]
 # Character(s) that mark a chunk boundary for TTS streaming:
-TTS_END: set[str] = {".", "!", "?", ";"}
+TTS_END: set[str] = { ";" }
 
 # Allowed CORS origins for the FastAPI app:
 ALLOWED_ORIGINS: list[str] = [

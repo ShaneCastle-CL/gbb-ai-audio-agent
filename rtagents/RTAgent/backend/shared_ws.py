@@ -10,18 +10,26 @@ Helpers that BOTH realtime and ACS routers rely on:
 """
 
 from __future__ import annotations
-
+import base64
 import asyncio
 import json
 from fastapi import WebSocket
+from fastapi.websockets import WebSocketState
+
+from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
 from rtagents.RTAgent.backend.services.speech_services import SpeechSynthesizer
 from rtagents.RTAgent.backend.latency.latency_tool import LatencyTool
+from rtagents.RTAgent.backend.settings import ACS_STREAMING_MODE
 from rtagents.RTAgent.backend.services.acs.acs_helpers import (
     broadcast_message,
     play_response_with_queue,
 )
-from typing import Optional
+from typing import Optional, Set
+from utils.ml_logging import get_logger
+from src.enums.stream_modes import StreamMode
 
+
+logger = get_logger("shared_ws")
 
 async def send_tts_audio(
     text: str, ws: WebSocket, latency_tool: Optional[LatencyTool] = None
@@ -46,38 +54,87 @@ async def send_response_to_acs(
     *,
     blocking: bool = False,
     latency_tool: Optional[LatencyTool] = None,
+    stream_mode: StreamMode = ACS_STREAMING_MODE
 ) -> Optional[asyncio.Task]:
     """
     Synthesizes speech and sends it as audio data to the ACS WebSocket.
 
     Adds latency tracking for TTS step.
     """
+
+
     if latency_tool:
         latency_tool.start("tts")
+        latency_tool.start("tts:synthesis")
+    # synth: SpeechSynthesizer = ws.app.state.tts_client
+    # pcm = synth.synthesize_to_base64_frames(text, sample_rate=16000)
+    # coro = send_pcm_frames(ws, pcm_bytes=pcm, sample_rate=16000)
 
-    acs_caller = ws.app.state.acs_caller
-    if not acs_caller:
-        raise RuntimeError("ACS caller is not initialized in WebSocket state.")
-    
-    coro = play_response_with_queue(
-        ws=ws,
-        response_text=text,
-        participants=[ws.app.state.target_participant]
-    )
-
-    if not hasattr(ws.app.state, "tts_tasks"):
-        ws.app.state.tts_tasks = set()
-
-    task = asyncio.create_task(coro)
-    ws.app.state.tts_tasks.add(task)
-
-    async def stop_latency(_):
+    # if blocking:
+    #     await coro
+    #     if latency_tool:
+    #         latency_tool.stop("tts", ws.app.state.redis)
+    #     return None
+    async def stop_latency(task):
         if latency_tool:
             latency_tool.stop("tts", ws.app.state.redis)
         ws.app.state.tts_tasks.discard(task)
 
-    task.add_done_callback(stop_latency)
-    return task
+    if stream_mode == StreamMode.MEDIA:
+        synth: SpeechSynthesizer = ws.app.state.tts_client
+
+        try:
+            
+            # Add timeout and retry logic for TTS synthesis
+            pcm_bytes = synth.synthesize_to_pcm(text)
+            latency_tool.stop("tts:synthesis", ws.app.state.redis)
+
+
+        except asyncio.TimeoutError:
+            logger.error(f"TTS synthesis timed out for texphat: {text[:50]}...")
+            raise RuntimeError("TTS synthesis timed out")
+        except Exception as e:
+            logger.error(f"TTS synthesis failed: {e}")
+            # Try to reinitialize the synthesizer if it failed
+            # # try:
+            # #     synth = SpeechSynthesizer()
+            # #     ws.app.state.tts_client = synth
+            # #     pcm_bytes = synth.synthesize_to_pcm(text)
+
+            # # except Exception as retry_error:
+            # #     logger.error(f"TTS retry also failed: {retry_error}")
+            # #     raise RuntimeError(f"TTS failed after retry: {retry_error}")
+        frames = SpeechSynthesizer.split_pcm_to_base64_frames(pcm_bytes, sample_rate=16000)
+
+        for frame in frames:
+            await ws.send_json({
+                "kind": "AudioData",
+                "AudioData": {"data": frame},
+                "StopAudio": None
+            })
+        
+        if latency_tool:
+            latency_tool.stop("tts", ws.app.state.redis)
+
+    elif stream_mode == StreamMode.TRANSCRIPTION:
+        acs_caller = ws.app.state.acs_caller
+        if not acs_caller:
+            raise RuntimeError("ACS caller is not initialized in WebSocket state.")
+        
+        coro = play_response_with_queue(
+            ws=ws,
+            response_text=text,
+            participants=[ws.app.state.target_participant]
+        )
+
+        if not hasattr(ws.app.state, "tts_tasks"):
+            ws.app.state.tts_tasks = set()
+
+        task = asyncio.create_task(coro)
+        ws.app.state.tts_tasks.add(task)
+        task.add_done_callback(stop_latency)
+
+        return task
 
 
 async def push_final(
