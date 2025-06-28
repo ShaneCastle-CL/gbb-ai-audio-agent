@@ -7,9 +7,9 @@ the app from the direct SDK dependency.
 """
 
 from src.speech.text_to_speech import SpeechSynthesizer
-from src.speech.speech_to_text import SpeechCoreTranslator
+from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 
 __all__ = [
     "SpeechSynthesizer",
-    "SpeechCoreTranslator",
+    "StreamingSpeechRecognizerFromBytes"
 ]

@@ -37,6 +37,7 @@ from services import (
     SpeechCoreTranslator,
     CosmosDBMongoCoreManager,
     AzureRedisManager,
+    StreamingSpeechRecognizerFromBytes
 )
 from rtagents.RTInsuranceAgent.backend.services.acs.acs_caller import (
     initialize_acs_caller_instance,
@@ -74,7 +75,10 @@ async def on_startup() -> None:
     # Speech SDK
     app.state.stt_client = SpeechCoreTranslator()
     app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS)
-
+    app.state.stt_bytes_client = StreamingSpeechRecognizerFromBytes(
+        candidate_languages=["en-US", "es-ES", "fr-FR", "ko-KR", "it-IT"],
+        audio_format="pcm"
+    )
     # Redis connection
     app.state.redis = AzureRedisManager()
 

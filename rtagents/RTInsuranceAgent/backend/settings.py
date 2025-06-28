@@ -28,6 +28,7 @@ AOAI_STT_ENDPOINT = os.environ["AZURE_OPENAI_STT_TTS_ENDPOINT"]
 # ------------------------------------------------------------------------------
 # Azure Communication Services (ACS)
 # ------------------------------------------------------------------------------
+ACS_ENDPOINT: str = os.getenv("ACS_ENDPOINT", "")
 ACS_CONNECTION_STRING: str = os.getenv("ACS_CONNECTION_STRING", "")
 ACS_SOURCE_PHONE_NUMBER: str = os.getenv("ACS_SOURCE_PHONE_NUMBER", "")
 BASE_URL: str = os.getenv("BASE_URL", "")
@@ -70,9 +71,9 @@ SILENCE_DURATION_MS: int = 1300  # Duration of silence to end speech detection
 VOICE_TTS = "en-US-JennyMultilingualNeural"
 
 # ------------------------------------------------------------------------------
-STOP_WORDS: List[str] = ["goodbye", "exit", "see you later", "bye"]
+STOP_WORDS: List[str] = ["goodbye", "see you later", "bye"]
 # Character(s) that mark a chunk boundary for TTS streaming:
-TTS_END: set[str] = { ";" }
+TTS_END: set[str] = { }
 
 # Allowed CORS origins for the FastAPI app:
 ALLOWED_ORIGINS: list[str] = [
@@ -85,3 +86,8 @@ ALLOWED_ORIGINS: list[str] = [
     "https://localhost:5173",
     "https://127.0.0.1:5173",
 ]
+
+
+GREETING = """Hi, thanks for calling XYMZ Insurance! To help you right away, 
+     may I have your full name and either your ZIP code or just the last four of your Social?"""
+     

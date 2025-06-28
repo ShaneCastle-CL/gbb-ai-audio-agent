@@ -34,10 +34,10 @@ def build_and_flush(cm: ConversationManager, cosmos: CosmosDBMongoCoreManager):
         "session_id": session_id,
         "timestamp": datetime.datetime.utcnow().replace(microsecond=0).isoformat()
         + "Z",
-        "histories": histories,  # store the whole agent->history map
+        "histories": histories,
         "context": context,
         "latency_summary": summary,
-        "agents": list(histories.keys()),  # optional: debug/analytics aid
+        "agents": list(histories.keys()),
     }
 
     try:
