@@ -32,12 +32,16 @@ import { SubnetConfig, BackendConfigItem } from './modules/types.bicep'
 // APPLICATION CONFIGURATION
 // ============================================================================
 
-@description('Flag indicating if the real-time audio client application exists and should be deployed')
+// AZD Managed parameters for real-time audio application
+@description('(AZD Managed) Flag indicating if the real-time audio client application exists and should be deployed')
 param rtaudioClientExists bool
 
-@description('Flag indicating if the real-time audio server application exists and should be deployed')
+@description('(AZD Managed) Flag indicating if the real-time audio server application exists and should be deployed')
 param rtaudioServerExists bool
 
+@description('(AZD Managed) ACS phone number for real-time audio communication')
+param acsSourcePhoneNumber string =''
+// ============================================================================
 @description('Enable API Management for OpenAI load balancing and gateway functionality')
 param enableAPIManagement bool = true
 
@@ -106,13 +110,134 @@ var abbrs = loadJsonContent('./abbreviations.json')
 
 // Generate unique resource token based on subscription, environment, and location
 var resourceToken = uniqueString(subscription().id, environmentName, location)
+
+
+// APPLICATION GATEWAY CONFIGURATION PARAMETERS
+@description('Enable Application Gateway deployment')
+param enableApplicationGateway bool = true
+
+@description('Application Gateway name (will be auto-generated if not provided)')
+param applicationGatewayName string = ''
+
+@description('Application Gateway FQDN for SSL certificate')
+param domainFqdn string = ''
+
+@description('Enable SSL certificate from Key Vault')
+param enableSslCertificate bool = true
+
+@description('Key Vault secret ID for SSL certificate')
+param sslCertificateKeyVaultSecretId string = 'https://kv-rtaudio-devops.vault.azure.net/secrets/rtaudio-fullchain/1e9d85a97f634239a8562418a92766d8'
+
+@description('User identity resource ID for Key Vault secret access to be assigned to the AppGW')
+param keyVaultSecretUserIdentity string = ''
+
+
+@description('Enable Web Application Firewall')
+param enableWaf bool = true
+
+@description('WAF mode (Detection or Prevention)')
+@allowed(['Detection', 'Prevention'])
+param wafMode string = 'Detection'
+
+@description('Application Gateway minimum capacity')
+@minValue(1)
+@maxValue(32)
+param applicationGatewayMinCapacity int = 2
+
+@description('Application Gateway maximum capacity')
+@minValue(1)
+@maxValue(32)
+param applicationGatewayMaxCapacity int = 10
+
+// ============================================================================
+// VARIABLES (add after existing variables section)
+// ============================================================================
+
+// Application Gateway name generation
+var generatedApplicationGatewayName = !empty(applicationGatewayName) ? applicationGatewayName : '${abbrs.networkApplicationGateways}${name}-${environmentName}'
+
+// ============================================================================
+// REPLACE the existing hubSubnets parameter (around line 109) with this corrected version:
+// ============================================================================
+
+
+
 param hubSubnets SubnetConfig[] = [
   {
-    name: 'loadBalancer'          // App Gateway or L4 LB
+    name: 'loadBalancer'          // App Gateway subnet
     addressPrefix: '10.0.0.0/27'
+    securityRules: [
+      // Required inbound rules for Application Gateway v2
+      {
+        name: 'AllowHTTPSInbound'
+        properties: {
+          priority: 1000
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+        }
+      }
+      {
+        name: 'AllowHTTPInbound'
+        properties: {
+          priority: 1010
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '80'
+        }
+      }
+      {
+        name: 'AllowGatewayManagerInbound'
+        properties: {
+          priority: 1020
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'GatewayManager'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '65200-65535'
+        }
+      }
+      {
+        name: 'AllowAzureLoadBalancerInbound'
+        properties: {
+          priority: 1030
+          protocol: '*'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+        }
+      }
+      // Required outbound rules for Application Gateway v2
+      {
+        name: 'AllowInternetOutbound'
+        properties: {
+          priority: 1000
+          protocol: '*'
+          access: 'Allow'
+          direction: 'Outbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Internet'
+          destinationPortRange: '*'
+        }
+      }
+    ]
   }
   {
-    name: 'services'          // Shared services like monitor, orchestrators (if colocated)
+    name: 'services'              // Shared services like monitor, orchestrators
     addressPrefix: '10.0.0.64/26'
   }
   {
@@ -209,35 +334,136 @@ param hubSubnets SubnetConfig[] = [
           destinationPortRange: '80'
         }
       }
-      {
-        name: 'AllowOutboundSQL'
-        properties: {
-          priority: 1020
-          protocol: 'Tcp'
-          access: 'Allow'
-          direction: 'Outbound'
-          sourceAddressPrefix: '*'
-          sourcePortRange: '*'
-          destinationAddressPrefix: 'Sql'
-          destinationPortRange: '1433'
-        }
-      }
-      {
-        name: 'AllowOutboundStorage'
-        properties: {
-          priority: 1030
-          protocol: 'Tcp'
-          access: 'Allow'
-          direction: 'Outbound'
-          sourceAddressPrefix: '*'
-          sourcePortRange: '*'
-          destinationAddressPrefix: 'Storage'
-          destinationPortRange: '443'
-        }
-      }
     ]
   }
 ]
+
+// PUBLIC IP FOR APPLICATION GATEWAY
+module applicationGatewayPublicIp 'br/public:avm/res/network/public-ip-address:0.6.0' = if (enableApplicationGateway) {
+  scope: hubRg
+  name: 'appgw-public-ip'
+  params: {
+    name: '${abbrs.networkPublicIPAddresses}${generatedApplicationGatewayName}'
+    location: location
+    tags: tags
+    skuName: 'Standard'
+    publicIPAllocationMethod: 'Static'
+    // Only set dnsSettings if we have a valid FQDN
+    dnsSettings: !empty(domainFqdn) ? {
+      domainNameLabel: split(domainFqdn, '.')[0]
+      domainNameLabelScope: 'TenantReuse'
+    } : {
+      domainNameLabel: '${generatedApplicationGatewayName}-${resourceToken}'
+      domainNameLabelScope: 'TenantReuse'
+    }
+  }
+}
+
+// MANAGED IDENTITY FOR APPLICATION GATEWAY
+module applicationGatewayIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.4.0' = if (enableApplicationGateway && enableSslCertificate) {
+  scope: hubRg
+  name: 'appgw-identity'
+  params: {
+    name: '${abbrs.managedIdentityUserAssignedIdentities}${generatedApplicationGatewayName}'
+    location: location
+    tags: tags
+  }
+}
+
+// ============================================================================
+// SSL CERTIFICATE KEY VAULT RBAC ASSIGNMENT
+// ============================================================================
+
+// // Extract Key Vault name and resource group from the SSL certificate Key Vault secret ID
+// var sslCertKeyVaultName = enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultSecretId) ? split(split(sslCertificateKeyVaultSecretId, '/')[2], '.')[0] : 'placeholder'
+
+// var sslCertKeyVaultResourceGroup = enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultSecretId) ? split(sslCertificateKeyVaultSecretId, '/')[4] : 'placeholder'
+
+// // Reference to the existing Key Vault containing the SSL certificate
+// resource sslCertKeyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = if (enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultSecretId)) {
+//   name: sslCertKeyVaultName
+//   scope: resourceGroup(sslCertKeyVaultResourceGroup)
+// }
+
+// // Role assignment for Application Gateway managed identity to access SSL certificate Key Vault
+// module sslCertKeyVaultRoleAssignment 'br/public:avm/ptn/authorization/resource-role-assignment:0.1.1' = if (enableApplicationGateway && enableSslCertificate && !empty(sslCertificateKeyVaultSecretId)) {
+//   name: 'ssl-cert-keyvault-role-assignment'
+//   scope: resourceGroup(sslCertKeyVaultResourceGroup)
+//   params: {
+//     principalId: applicationGatewayIdentity.outputs.principalId
+//     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6') // Key Vault Secrets User
+//     resourceId: sslCertKeyVault.id
+//   }
+// }
+
+// APPLICATION GATEWAY MODULE
+
+module applicationGateway 'appgw-avm.bicep' = if (enableApplicationGateway) {
+  scope: hubRg
+  name: 'application-gateway'
+  params: {
+    // Basic configuration
+    applicationGatewayName: generatedApplicationGatewayName
+    location: location
+    tags: tags
+    
+    // Network configuration
+    subnetResourceId: hubNetwork.outputs.subnets.loadBalancer
+    publicIpResourceId: applicationGatewayPublicIp.outputs.resourceId
+    
+    // SKU and scaling configuration
+    skuName: 'WAF_v2'
+    enableAutoscaling: true
+    autoscaleMinCapacity: applicationGatewayMinCapacity
+    autoscaleMaxCapacity: applicationGatewayMaxCapacity
+    
+    // SSL configuration
+    enableSslCertificate: enableSslCertificate
+    keyVaultSecretId: sslCertificateKeyVaultSecretId
+    sslCertificateName: '${generatedApplicationGatewayName}-ssl-cert'
+    managedIdentityResourceId: enableSslCertificate ? keyVaultSecretUserIdentity : ''
+    
+    // Container App backends - use simpler FQDN construction
+    containerAppBackends: [
+      {
+        name: 'rtaudioagent-backend'
+        fqdn: app.outputs.backendContainerAppFqdn
+        port: 80
+        protocol: 'Http'
+        healthProbePath: '/health'
+        healthProbeProtocol: 'Http'
+      }
+      {
+        name: 'rtaudioagent-frontend'
+        fqdn: app.outputs.frontendContainerAppFqdn
+        port: 80
+        protocol: 'Http'
+        healthProbePath: '/'
+        healthProbeProtocol: 'Http'
+      }
+    ]
+    
+    // Use default frontend ports (80, 443) and listeners
+    // Remove custom frontendPorts and httpListeners - let the module use defaults
+    
+    // Security configuration
+    enableHttpRedirect: true
+    enableHttp2: true
+    enableWaf: enableWaf
+    wafMode: wafMode
+    
+    // Monitoring configuration
+    enableTelemetry: true
+    logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+  }
+  dependsOn: enableSslCertificate ? [
+    app // Ensure container apps are deployed first
+    keyVault // Ensure Key Vault and role assignments are ready when SSL is enabled
+  ] : [
+    app // Ensure container apps are deployed first
+  ]
+}
+
 param spokeSubnets SubnetConfig[] = [
   {
     name: 'privateEndpoint'       // PE for Redis, Cosmos, Speech, Blob
@@ -260,18 +486,17 @@ param spokeSubnets SubnetConfig[] = [
 var tags = {
   'azd-env-name': environmentName
   'hidden-title': 'Real Time Audio ${environmentName}'
-
 }
 param networkIsolation bool = true
 
 resource hubRg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: 'rg-hub-${name}-${environmentName}'
+  name: 'rg-hub-${substring(name, 0, min(length(name), 20))}-${substring(environmentName, 0, min(length(environmentName), 10))}'
   location: location
   tags: tags
 }
 
 resource spokeRg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: 'rg-spoke-${name}-${environmentName}'
+  name: 'rg-spoke-${substring(name, 0, min(length(name), 20))}-${substring(environmentName, 0, min(length(environmentName), 10))}'
   location: location
   tags: tags
 }
@@ -540,7 +765,7 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.1' = {
       defaultAction: 'Allow' // TODO: Change to 'Deny' for production with proper firewall rules
       bypass: 'AzureServices'
     }
-    roleAssignments: [
+    roleAssignments: concat([
       {
         principalId: principalId
         principalType: principalType
@@ -551,7 +776,13 @@ module keyVault 'br/public:avm/res/key-vault/vault:0.12.1' = {
         principalType: 'ServicePrincipal'
         roleDefinitionIdOrName: 'Key Vault Secrets User'
       }
-    ]
+    ], (enableApplicationGateway && enableSslCertificate) ? [
+      {
+        principalId: applicationGatewayIdentity.outputs.principalId
+        principalType: 'ServicePrincipal'
+        roleDefinitionIdOrName: 'Key Vault Secrets User'
+      }
+    ] : [])
     privateEndpoints: [
       {
         privateDnsZoneGroup: {
@@ -603,7 +834,7 @@ module speechService 'br/public:avm/res/cognitive-services/account:0.11.0' = {
     
     // Store access keys in Key Vault if local auth is enabled
     secretsExportConfiguration: disableLocalAuth ? null : {
-      accessKey1Name: 'speech-${environmentName}-${resourceToken}-accessKey1'
+      accessKey1Name: 'speech-key'
       keyVaultResourceId: keyVault.outputs.resourceId
     }
 
@@ -674,7 +905,6 @@ module acsConnectionStringSecret 'modules/vault/secret.bicep' = {
     tags: tags
   }
 }
-
 // Store ACS primary key in Key Vault
 module acsPrimaryKeySecret 'modules/vault/secret.bicep' = {
   name: 'acs-primary-key-secret'
@@ -690,7 +920,13 @@ module acsPrimaryKeySecret 'modules/vault/secret.bicep' = {
 // ============================================================================
 // AI GATEWAY (API MANAGEMENT + AZURE OPENAI)
 // ============================================================================
-
+// Managed with AZD:
+// - To disable PublicNetworkAccess, APIM requires a private endpoint resource to be attached
+// - This requires apim to be created first, then private endpoint, then disabling the network access
+// - Manage this with AZD - post provision script:
+//  - set the PublicNetworkAccess attribute to false
+//  - disable the public network access via cli
+param apimPublicNetworkAccess bool = true
 module aiGateway 'ai-gateway.bicep' = {
   scope: hubRg
   name: 'ai-gateway'
@@ -705,6 +941,7 @@ module aiGateway 'ai-gateway.bicep' = {
     
     // APIM configuration
     enableAPIManagement: enableAPIManagement
+    apimPublicNetworkAccess: apimPublicNetworkAccess
     apimSku: 'StandardV2'
     virtualNetworkType: 'External'
     backendConfig: azureOpenAIBackendConfig
@@ -749,6 +986,48 @@ module aiGateway 'ai-gateway.bicep' = {
       }
     ]
   }
+}
+
+// ============================================================================
+// API MANAGEMENT PRIVATE ENDPOINT
+// ============================================================================
+
+// Private endpoint for API Management in spoke VNet
+module apimPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.8.1' = if (enableAPIManagement && networkIsolation) {
+  name: 'apim-private-endpoint'
+  scope: spokeRg
+  params: {
+    name: 'pe-apim-${name}-${environmentName}'
+    location: location
+    tags: tags
+    
+    // Network configuration
+    subnetResourceId: spokeNetwork.outputs.subnets.privateEndpoint
+    
+    // APIM service configuration
+    privateLinkServiceConnections: [
+      {
+        name: 'apim-connection'
+        properties: {
+          privateLinkServiceId: aiGateway.outputs.apim.resourceId
+          groupIds: ['Gateway']
+        }
+      }
+    ]
+    
+    // DNS configuration
+    privateDnsZoneGroup: {
+      name: 'apim-dns-zone-group'
+      privateDnsZoneGroupConfigs: [
+        {
+          name: 'apim-dns-config'
+          privateDnsZoneResourceId: apimDnsZone.outputs.id
+        }
+      ]
+    }
+  }
+  dependsOn: [
+  ]
 }
 
 // Store APIM subscription key in Key Vault
@@ -828,6 +1107,37 @@ module redisEnterprise 'br/public:avm/res/cache/redis-enterprise:0.1.1' = {
   }
 }
 
+// Cosmos + Storage Account
+module data 'data.bicep' = {
+  scope: spokeRg
+  name: 'data-layer'
+  params: {
+    // Required parameters from data.bicep
+    resourceToken: resourceToken
+    location: location
+    tags: tags
+    name: name
+    
+    // Storage configuration
+    storageSkuName: 'Standard_LRS'
+    storageContainerName: 'recordings'
+    
+    // Key Vault for secrets
+    keyVaultResourceId: keyVault.outputs.resourceId
+    
+    // Network configuration
+    privateEndpointSubnetId: spokeNetwork.outputs.subnets.privateEndpoint
+    cosmosDnsZoneId: cosmosMongoDnsZone.outputs.id
+    
+    userAssignedIdentity: {
+      resourceId: uaiAudioAgentBackendIdentity.outputs.resourceId
+      clientId: uaiAudioAgentBackendIdentity.outputs.clientId
+      principalId: uaiAudioAgentBackendIdentity.outputs.principalId
+    }
+    principalId: principalId
+    principalType: principalType
+  }
+}
 // ============================================================================
 // APPLICATION SERVICES (CONTAINER APPS)
 // ============================================================================
@@ -840,13 +1150,21 @@ module app 'app.bicep' = {
     location: location
     tags: tags
     
-    // Key Vault for secrets
-    keyVaultResourceId: keyVault.outputs.resourceId
-    
-    // Azure OpenAI configuration
-    aoai_endpoint: aiGateway.outputs.endpoints.openAI
-    aoai_chat_deployment_id: 'gpt-4o'
-    
+    // UAIs for backend and frontend container apps
+    backendUserAssignedIdentity: {
+      resourceId: uaiAudioAgentBackendIdentity.outputs.resourceId
+      principalId: uaiAudioAgentBackendIdentity.outputs.principalId
+      clientId: uaiAudioAgentBackendIdentity.outputs.clientId
+    }
+    frontendUserAssignedIdentity: {
+      resourceId: uaiAudioAgentFrontendIdentity.outputs.resourceId
+      principalId: uaiAudioAgentFrontendIdentity.outputs.principalId
+      clientId: uaiAudioAgentFrontendIdentity.outputs.clientId
+    }
+
+    backendEnvVars: backendEnvVars
+    backendSecrets: backendSecrets
+
     // Monitoring configuration
     appInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
@@ -855,20 +1173,184 @@ module app 'app.bicep' = {
     principalId: principalId
     principalType: principalType
     
-    // Application deployment flags
-    rtaudioClientExists: rtaudioClientExists
-    rtaudioServerExists: rtaudioServerExists
-    
     // Network configuration
     appSubnetResourceId: spokeNetwork.outputs.subnets.app
-    privateEndpointSubnetId: spokeNetwork.outputs.subnets.privateEndpoint
-    cosmosDnsZoneId: cosmosMongoDnsZone.outputs.id
+    
+    // AZD Managed Variables
+    rtaudioClientExists: rtaudioClientExists
+    rtaudioServerExists: rtaudioServerExists
   }
 }
+
+// Redis configuration variables
+var redisEndpointParts = split(redisEnterprise.outputs.endpoint, ':')
+var redis_host = redisEndpointParts[0]
+var redis_port = length(redisEndpointParts) > 1 ? redisEndpointParts[1] : '10000'
+
+var backendSecrets = [
+  {
+    name: 'acs-connection-string'
+    keyVaultUrl: acsConnectionStringSecret.outputs.secretUri
+    identity: uaiAudioAgentBackendIdentity.outputs.resourceId
+  }
+  {
+    name: 'cosmos-connection-string'
+    keyVaultUrl: data.outputs.mongoConnectionStringSecretUri
+    identity: uaiAudioAgentBackendIdentity.outputs.resourceId
+  }
+  {
+    name: 'openai-apim-subscription-key'
+    keyVaultUrl: enableAPIManagement ? apimSubscriptionKeySecret.outputs.secretUri : ''
+    identity: uaiAudioAgentBackendIdentity.outputs.resourceId
+  }
+  {
+    name: 'speech-key'
+    keyVaultUrl: speechService.outputs.exportedSecrets['speech-key'].secretUri
+    identity: uaiAudioAgentBackendIdentity.outputs.resourceId
+  }
+]
+var frontendEnvVars = [
+    {
+      name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+      value: monitoring.outputs.applicationInsightsConnectionString
+    }
+    {
+      name: 'AZURE_CLIENT_ID'
+      value: uaiAudioAgentFrontendIdentity.outputs.clientId 
+    }
+    {
+      name: 'PORT'
+      value: '5173'
+    }
+    {
+      name: 'VITE_BACKEND_BASE_URL'
+      value: enableApplicationGateway ? 'https://${domainFqdn}' : ''
+    }
+]
+var backendEnvVars = [
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: uaiAudioAgentBackendIdentity.outputs.clientId
+  }
+
+  // Application Insights
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: monitoring.outputs.applicationInsightsConnectionString
+  }
+  
+  // Azure Communication Services
+  {
+    name: 'ACS_CONNECTION_STRING'
+    secretRef: 'acs-connection-string'
+  }
+  {
+    name: 'ACS_SOURCE_PHONE_NUMBER'
+    value: acsSourcePhoneNumber
+  }
+  
+  // Base URL for webhooks (typically set by deployment environment)
+  {
+    name: 'BASE_URL'
+    value: enableApplicationGateway ? 'https://${domainFqdn}' : ''
+  }
+  
+  // Redis Configuration
+  {
+    name: 'REDIS_HOST'
+    value: redis_host
+  }
+  {
+    name: 'REDIS_PORT'
+    value: redis_port
+  }
+  
+  // Azure Speech Services
+  {
+    name: 'AZURE_SPEECH_ENDPOINT'
+    value: 'https://${speechService.outputs.endpoint}'
+  }
+  {
+    name: 'AZURE_SPEECH_KEY'
+    secretRef: 'speech-key'
+  }
+  {
+    name: 'AZURE_SPEECH_RESOURCE_ID'
+    value: speechService.outputs.resourceId
+  }
+  {
+    name: 'AZURE_SPEECH_REGION'
+    value: location
+  }
+  
+  // Azure Storage (from app module outputs)
+  // {
+  //   name: 'AZURE_STORAGE_CONTAINER_URL'
+  //   value: '${app.outputs.storageAccountBlobEndpoint}recordings'
+  // }
+  // {
+  //   name: 'AZURE_STORAGE_CONNECTION_STRING'
+  //   secretRef: 'storage-connection-string'
+  // }
+  
+  // Azure Cosmos DB
+  {
+    name: 'AZURE_COSMOS_DB_DATABASE_NAME'
+    value: data.outputs.mongoDatabaseName
+  }
+  {
+    name: 'AZURE_COSMOS_DB_COLLECTION_NAME'
+    value: data.outputs.mongoCollectionName
+  }
+  {
+    name: 'AZURE_COSMOS_CONNECTION_STRING'
+    secretRef: 'cosmos-connection-string'
+  }
+  
+  // Azure OpenAI
+  {
+    name: 'AZURE_OPENAI_ENDPOINT'
+    value: aiGateway.outputs.endpoints.openAI
+  }
+  {
+    name: 'AZURE_OPENAI_KEY'
+    secretRef: enableAPIManagement ? 'openai-apim-subscription-key' : 'openai-primary-key'
+  }
+  {
+    name: 'AZURE_OPENAI_CHAT_DEPLOYMENT_ID'
+    value: 'gpt-4o'
+  }
+  {
+    name: 'AZURE_OPENAI_API_VERSION'
+    value: '2025-01-01-preview'
+  }
+]
 
 // ============================================================================
 // OUTPUTS FOR AZD INTEGRATION
 // ============================================================================
 
+@description('Azure Resource Group name')
 output AZURE_RESOURCE_GROUP string = spokeRg.name
+
+@description('Azure Container Registry endpoint')
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = app.outputs.containerRegistryEndpoint
+
+@description('Azure Communication Services endpoint')
+output ACS_ENDPOINT string = acs.outputs.endpoint
+
+@description('Application Gateway resource ID')
+output APPLICATION_GATEWAY_RESOURCE_ID string = enableApplicationGateway ? applicationGateway.outputs.applicationGatewayResourceId : ''
+
+@description('Application Gateway public IP address')
+output APPLICATION_GATEWAY_PUBLIC_IP string = enableApplicationGateway ? applicationGateway.outputs.publicIpAddress : ''
+
+@description('Application Gateway FQDN')
+output APPLICATION_GATEWAY_FQDN string = enableApplicationGateway ? applicationGateway.outputs.fqdn : ''
+
+@description('Application Gateway name')
+output APPLICATION_GATEWAY_NAME string = enableApplicationGateway ? applicationGateway.outputs.applicationGatewayName : ''
+
+@description('WAF policy resource ID')
+output WAF_POLICY_RESOURCE_ID string = enableApplicationGateway && enableWaf ? applicationGateway.outputs.wafPolicyResourceId : ''
+

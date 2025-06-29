@@ -33,7 +33,7 @@ param location string
 param tags object = {}
 
 @description('Array of secrets at the container app control plane level. Each item is an object: { name: <secret name>, value: <secret value> }')
-param secrets SecretType[] = []
+param secrets secretType[] = []
 
 @description('Array of secret references for environment variables. Each item is an object: { name: <env var>, secretRef: <secret name> }')
 param secretEnvRefs SecretEnvVarType[] = []
@@ -56,9 +56,21 @@ var _secrets = enableEasyAuth
     ], secrets)
   : secrets
 
-type SecretType = {
-  name: string
-  value: string
+@export()
+@description('The type for a secret.')
+type secretType = {
+  @description('Optional. Resource ID of a managed identity to authenticate with Azure Key Vault, or System to use a system-assigned identity.')
+  identity: string?
+
+  @description('Conditional. The URL of the Azure Key Vault secret referenced by the Container App. Required if `value` is null.')
+  keyVaultUrl: string?
+
+  @description('Optional. The name of the container app secret.')
+  name: string?
+
+  @description('Conditional. The container app secret value, if not fetched from the Key Vault. Required if `keyVaultUrl` is not null.')
+  @secure()
+  value: string?
 }
 
 type SecretEnvVarType = {
