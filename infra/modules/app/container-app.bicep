@@ -22,6 +22,7 @@ param userAssignedResourceId string = ''
 @description('Container registry definitions')
 param registries array = []
 
+param customDomains array = []
 
 @description('Resource ID of the container apps environment')
 param environmentResourceId string
@@ -39,7 +40,7 @@ param secrets secretType[] = []
 param secretEnvRefs SecretEnvVarType[] = []
 
 @description('Ingress settings for the container app')
-param publicAccessAllowed bool = false
+param ingressExternal bool = false
 
 @description('Enable EasyAuth integration')
 param enableEasyAuth bool = false
@@ -97,6 +98,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
         userAssignedResourceId
       ]
     }
+    customDomains: customDomains
     registries: registries
     containers: [for c in containers: {
       name: c.name
@@ -112,7 +114,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
       maxReplicas: scaleMaxReplicas
     }
     corsPolicy: corsPolicy
-    ingressExternal: publicAccessAllowed
+    ingressExternal: ingressExternal
     ingressTargetPort: ingressTargetPort
     stickySessionsAffinity: stickySessionsAffinity
     trafficLatestRevision: true

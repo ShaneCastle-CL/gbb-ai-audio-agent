@@ -20,3 +20,13 @@ services:
       path: ./Dockerfile
       context: ../../../
       platform: linux/amd64
+
+hooks:
+  preprovision:
+    shell: sh
+    run: ./scripts/azd-preprovision.sh
+    continueOnError: false
+  postprovision:
+    shell: sh
+    run: ./scripts/azd-postprovision.sh
+    continueOnError: false

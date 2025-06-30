@@ -83,7 +83,7 @@ param jwtAudience string
 // The Azure Entra ID group object ID that grants access to the API
 // Users must be members of this group to access protected endpoints
 @description('Azure Entra ID group object ID for user authorization in APIM policies')
-param entraGroupId string
+param entraGroupId string = ''
 
 // ============================================================================
 // NETWORK CONFIGURATION
@@ -218,6 +218,19 @@ param hubSubnets SubnetConfig[] = [
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
           destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'AllowAzureInfrastructureInbound'
+        properties: {
+          priority: 1040
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '65503-65534'
         }
       }
       // Required outbound rules for Application Gateway v2
@@ -428,10 +441,10 @@ module applicationGateway 'appgw-avm.bicep' = if (enableApplicationGateway) {
       {
         name: 'rtaudioagent-backend'
         fqdn: app.outputs.backendContainerAppFqdn
-        port: 80
-        protocol: 'Http'
+        port: 443
+        protocol: 'Https'
         healthProbePath: '/health'
-        healthProbeProtocol: 'Http'
+        healthProbeProtocol: 'Https'
       }
       {
         name: 'rtaudioagent-frontend'
@@ -472,6 +485,14 @@ param spokeSubnets SubnetConfig[] = [
   {
     name: 'app'        // Real-time agents, FastAPI, containers
     addressPrefix: '10.1.10.0/23'
+    delegations: [
+      {
+        name: 'Microsoft.App/environments'
+        properties: {
+          serviceName: 'Microsoft.App/environments'
+        }
+      }
+    ]
   }
   {
     name: 'cache'                 // Redis workers (can be merged into `app` if simple)
@@ -1138,6 +1159,59 @@ module data 'data.bicep' = {
     principalType: principalType
   }
 }
+
+module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
+  scope: spokeRg
+  name: 'storage'
+  params: {
+    name: '${abbrs.storageStorageAccounts}${resourceToken}'
+    location: location
+    tags: tags
+    kind: 'StorageV2'
+    skuName: 'Standard_LRS'
+    publicNetworkAccess: 'Enabled' // Necessary for uploading documents to storage container
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+    allowBlobPublicAccess: false
+    allowSharedKeyAccess: true
+    blobServices: {
+      deleteRetentionPolicyDays: 2
+      deleteRetentionPolicyEnabled: true
+      containers: [
+        {
+          name: 'audioagent'
+          publicAccess: 'None'
+        }
+        {
+          name: 'prompt'
+          publicAccess: 'None'
+        }
+      ]
+    }
+    roleAssignments: [
+      {
+        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        principalId: uaiAudioAgentBackendIdentity.outputs.principalId
+        principalType: 'ServicePrincipal'
+      }
+      {
+        roleDefinitionIdOrName: 'Storage Blob Data Reader'
+        principalId: principalId
+        // principalType: 'User'  
+        principalType: principalType
+      } 
+      {
+        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
+        principalId: principalId
+        // principalType: 'User'
+        principalType: principalType
+      }      
+    ]
+  }
+}
+
 // ============================================================================
 // APPLICATION SERVICES (CONTAINER APPS)
 // ============================================================================
@@ -1162,11 +1236,20 @@ module app 'app.bicep' = {
       clientId: uaiAudioAgentFrontendIdentity.outputs.clientId
     }
 
+    // backendCertificate: {
+    //   certificateKeyVaultProperties: {
+    //     identityResourceId: keyVaultSecretUserIdentity
+    //     keyVaultUrl: sslCertificateKeyVaultSecretId
+    //   }
+    //   certificateType: 'ServerSSLCertificate' // Optional, ServerSSLCertificate or ImagePullTrustedCA
+    //   domainName: domainFqdn
+    // }
+
+    frontendEnvVars: frontendEnvVars
     backendEnvVars: backendEnvVars
     backendSecrets: backendSecrets
 
     // Monitoring configuration
-    appInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     
     // RBAC configuration
@@ -1175,7 +1258,19 @@ module app 'app.bicep' = {
     
     // Network configuration
     appSubnetResourceId: spokeNetwork.outputs.subnets.app
-    
+    privateDnsZoneResourceId: containerAppsDnsZone.outputs.id
+    privateEndpointSubnetResourceId: spokeNetwork.outputs.subnets.privateEndpoint
+
+    backendCors: {
+      allowedOrigins: [
+        'https://${domainFqdn}'
+        'http://localhost:5173'
+        ]
+        allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+        allowedHeaders: ['*']
+        allowCredentials: true
+    }
+
     // AZD Managed Variables
     rtaudioClientExists: rtaudioClientExists
     rtaudioServerExists: rtaudioServerExists
@@ -1229,21 +1324,28 @@ var frontendEnvVars = [
 ]
 var backendEnvVars = [
   {
-    name: 'AZURE_CLIENT_ID'
-    value: uaiAudioAgentBackendIdentity.outputs.clientId
+    name: 'AZURE_COSMOS_CONNECTION_STRING'
+    secretRef: 'cosmos-connection-string'
   }
-
-  // Application Insights
   {
-    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-    value: monitoring.outputs.applicationInsightsConnectionString
+    name: 'AZURE_SPEECH_KEY'
+    secretRef: 'speech-key'
   }
-  
-  // Azure Communication Services
   {
     name: 'ACS_CONNECTION_STRING'
     secretRef: 'acs-connection-string'
   }
+
+  {
+    name: 'AZURE_CLIENT_ID'
+    value: uaiAudioAgentBackendIdentity.outputs.clientId
+  }
+
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: monitoring.outputs.applicationInsightsConnectionString
+  }
+
   {
     name: 'ACS_SOURCE_PHONE_NUMBER'
     value: acsSourcePhoneNumber
@@ -1268,12 +1370,9 @@ var backendEnvVars = [
   // Azure Speech Services
   {
     name: 'AZURE_SPEECH_ENDPOINT'
-    value: 'https://${speechService.outputs.endpoint}'
+    value: speechService.outputs.endpoint
   }
-  {
-    name: 'AZURE_SPEECH_KEY'
-    secretRef: 'speech-key'
-  }
+
   {
     name: 'AZURE_SPEECH_RESOURCE_ID'
     value: speechService.outputs.resourceId
@@ -1302,20 +1401,17 @@ var backendEnvVars = [
     name: 'AZURE_COSMOS_DB_COLLECTION_NAME'
     value: data.outputs.mongoCollectionName
   }
-  {
-    name: 'AZURE_COSMOS_CONNECTION_STRING'
-    secretRef: 'cosmos-connection-string'
-  }
+
   
   // Azure OpenAI
   {
     name: 'AZURE_OPENAI_ENDPOINT'
     value: aiGateway.outputs.endpoints.openAI
   }
-  {
-    name: 'AZURE_OPENAI_KEY'
-    secretRef: enableAPIManagement ? 'openai-apim-subscription-key' : 'openai-primary-key'
-  }
+  // {
+  //   name: 'AZURE_OPENAI_KEY'
+  //   secretRef: enableAPIManagement ? 'openai-apim-subscription-key' : 'openai-primary-key'
+  // }
   {
     name: 'AZURE_OPENAI_CHAT_DEPLOYMENT_ID'
     value: 'gpt-4o'
@@ -1354,3 +1450,5 @@ output APPLICATION_GATEWAY_NAME string = enableApplicationGateway ? applicationG
 @description('WAF policy resource ID')
 output WAF_POLICY_RESOURCE_ID string = enableApplicationGateway && enableWaf ? applicationGateway.outputs.wafPolicyResourceId : ''
 
+@description('Backend User Assigned Identity Principal ID, to be added to the entra group postprovision')
+output BACKEND_UAI_PRINCIPAL_ID string = uaiAudioAgentBackendIdentity.outputs.principalId

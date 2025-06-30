@@ -90,7 +90,7 @@ param loggers array = []
 param audience string
 
 @description('Azure Entra ID group object ID for user authorization')
-param entraGroupId string
+param entraGroupId string = ''
 
 // ============================================================================
 // IDENTITY & SECURITY

@@ -17,7 +17,6 @@ param rtaudioServerExists bool
 @description('Enable EasyAuth for the frontend internet facing container app')
 param enableEasyAuth bool = true
 
-param appInsightsConnectionString string = 'InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://dc.services.visualstudio.com/v2/track'
 param logAnalyticsWorkspaceResourceId string = '00000000-0000-0000-0000-000000000000'
 
 // Network parameters for reference
@@ -32,8 +31,18 @@ param principalType string
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
+param frontendEnvVars array = []
+
 param backendUserAssignedIdentity object = {}
 param frontendUserAssignedIdentity object = {}
+param frontendExternalAccessEnabled bool = true
+
+param backendCors object = {}
+param backendSecrets ContainerAppKvSecret[] 
+param backendEnvVars array = []
+
+param backendCertificate object = {}
+param backendCustomDomains array = []
 
 var beContainerName =  toLower(substring('rtagent-server-${resourceToken}', 0, 22))
 var feContainerName =  toLower(substring('rtagent-client-${resourceToken}', 0, 22))
@@ -72,7 +81,6 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
   }
 }
 
-param frontendExternalAccessEnabled bool = true
 // Container apps environment (deployed into appSubnet)
 module externalContainerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.2' = if (frontendExternalAccessEnabled){
   name: 'external-container-apps-environment'
@@ -84,12 +92,12 @@ module externalContainerAppsEnvironment 'br/public:avm/res/app/managed-environme
         sharedKey: listKeys(logAnalyticsWorkspaceResourceId, '2022-10-01').primarySharedKey
       }
     }
-    publicNetworkAccess: 'Enabled' // Allows public access to the Container Apps Environment
+    publicNetworkAccess: frontendExternalAccessEnabled == true ? 'Enabled' : 'Disabled' // Enables public access to the Container Apps Environment
     name: 'ext-${name}${abbrs.appManagedEnvironments}${resourceToken}'
     location: location
     zoneRedundant: false
-    // infrastructureSubnetResourceId: appSubnetResourceId // Enables private networking in the specified subnet
-    internal: false
+    infrastructureSubnetResourceId: frontendExternalAccessEnabled == true ? null : appSubnetResourceId // Enables private networking in the specified subnet
+    internal: frontendExternalAccessEnabled == false
     tags: tags
   }
 }
@@ -108,6 +116,21 @@ module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.
         sharedKey: listKeys(logAnalyticsWorkspaceResourceId, '2022-10-01').primarySharedKey
       }
     }
+    workloadProfiles: [
+      {
+        name: 'D4'
+        workloadProfileType: 'D4'
+        maximumCount: 10
+        minimumCount: 1
+      }
+    ]
+    managedIdentities: {
+      systemAssigned: false
+      userAssignedResourceIds: !empty(backendCertificate) ? [backendCertificate.?certificateKeyVaultProperties.?identityResourceId] : []
+    }
+    certificate: backendCertificate // Optional SSL certificate for the backend container app
+
+    publicNetworkAccess: 'Disabled' // Disables public access to the Container Apps Environment
     name: '${name}${abbrs.appManagedEnvironments}${resourceToken}'
     location: location
     zoneRedundant: false
@@ -131,60 +154,6 @@ module containerAppsPrivateEndpoint './modules/networking/private-endpoint.bicep
     }
 }
 
-param storageSkuName string = 'Standard_LRS'
-param storageContainerName string = 'audioagent'
-
-
-module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
-  name: 'storage'
-  params: {
-    name: '${abbrs.storageStorageAccounts}${resourceToken}'
-    location: location
-    tags: tags
-    kind: 'StorageV2'
-    skuName: storageSkuName
-    publicNetworkAccess: 'Enabled' // Necessary for uploading documents to storage container
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
-    }
-    allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
-    blobServices: {
-      deleteRetentionPolicyDays: 2
-      deleteRetentionPolicyEnabled: true
-      containers: [
-        {
-          name: storageContainerName
-          publicAccess: 'None'
-        }
-        {
-          name: 'prompt'
-          publicAccess: 'None'
-        }
-      ]
-    }
-    roleAssignments: [
-      {
-        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-        principalId: backendUserAssignedIdentity.principalId
-        principalType: 'ServicePrincipal'
-      }
-      {
-        roleDefinitionIdOrName: 'Storage Blob Data Reader'
-        principalId: principalId
-        // principalType: 'User'  
-        principalType: principalType
-      } 
-      {
-        roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-        principalId: principalId
-        // principalType: 'User'
-        principalType: principalType
-      }      
-    ]
-  }
-}
 
 module fetchFrontendLatestImage './modules/app/fetch-container-image.bicep' = {
   name: 'gbbAiAudioAgent-fetch-image'
@@ -216,7 +185,7 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
       allowCredentials: false
     }
     
-    publicAccessAllowed: true
+    ingressExternal: true
 
     ingressTargetPort: 5173
     scaleMinReplicas: 1
@@ -230,24 +199,7 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
           cpu: json('0.5')
           memory: '1.0Gi'
         }
-        env: [
-          {
-            name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-            value: appInsightsConnectionString
-          }
-          {
-            name: 'AZURE_CLIENT_ID'
-            value: frontendUserAssignedIdentity.clientId
-          }
-          {
-            name: 'PORT'
-            value: '5173'
-          }
-          // {
-          //   name: 'VITE_BACKEND_BASE_URL'
-          //   value: 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
-          // }
-        ]
+        env: frontendEnvVars
       }
     ]
     userAssignedResourceId: frontendUserAssignedIdentity.resourceId
@@ -269,8 +221,6 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
 }
 
 
-param backendSecrets ContainerAppKvSecret[] 
-param backendEnvVars array = []
 module backendAudioAgent './modules/app/container-app.bicep' = {
   name: 'backend-audio-agent'
   params: {
@@ -279,17 +229,17 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
     scaleMinReplicas: 1
     scaleMaxReplicas: 10
     secrets: backendSecrets
-    corsPolicy: {
-      allowedOrigins: [
-      // 'https://${frontendAudioAgent.outputs.containerAppFqdn}'
-      // 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
-      // 'https://${existingAppGatewayPublicIp.properties.ipAddress}'
-      'http://localhost:5173'
-      ]
-      allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-      allowedHeaders: ['*']
-      allowCredentials: true
-    }
+    corsPolicy: backendCors
+
+    ingressExternal: true // Limit to VNet, setting to false will limit network to Container App Environment
+    customDomains: [
+      // {
+      //   name: backendCertificate.?domainName
+      //   // /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-spoke-rtaudioagent-localdev/providers/Microsoft.App/managedEnvironments/rtaudioagentcae-7ggx3vub2aaci/certificates/rtaudio-fullchain-fixed
+      //   certificateId: '${containerAppsEnvironment.outputs.resourceId}/certificates/${backendCertificate.?name}'
+      //   bindingType: 'Auto'
+      // }
+    ]
     containers: [
       {
         image: fetchBackendLatestImage.outputs.?containers[?0].?image ?? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -298,7 +248,7 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
           cpu: json('1.0')
           memory: '2.0Gi'
         }
-
+        
         env: backendEnvVars
       }
     ]

@@ -207,16 +207,16 @@ var backendPools = concat(
     }
   })
 )
-
 // Build backend HTTP settings
 var backendHttpSettings = map(containerAppBackends, backend => {
   name: '${backend.name}-http-settings'
   properties: {
-    port: backend.port
+    port: backend.protocol == 'Https' ? 443 : backend.port
     protocol: backend.protocol
     cookieBasedAffinity: 'Disabled'
     pickHostNameFromBackendAddress: true
     requestTimeout: requestTimeout
+    trustedRootCertificates: backend.protocol == 'Https' ? [] : null
     probe: contains(backend, 'healthProbePath') ? {
       id: resourceId('Microsoft.Network/applicationGateways/probes', applicationGatewayName, '${backend.name}-health-probe')
     } : null
@@ -227,7 +227,7 @@ var backendHttpSettings = map(containerAppBackends, backend => {
 var healthProbes = map(filter(containerAppBackends, backend => contains(backend, 'healthProbePath')), backend => {
   name: '${backend.name}-health-probe'
   properties: {
-    protocol: backend.?healthProbeProtocol ?? 'Http'
+    protocol: backend.?healthProbeProtocol ?? (backend.protocol == 'Https' ? 'Https' : 'Http')
     path: backend.healthProbePath
     interval: 30
     timeout: 30

@@ -6,13 +6,13 @@
         "value": "${DISABLE_LOCAL_AUTH=false}"
       },
       "domainFqdn": {
-        "value": "${AZURE_DOMAIN_FQDN=rt-audiodemo.net}"
+        "value": "${AZURE_DOMAIN_FQDN}"
       },
       "sslCertificateKeyVaultSecretId": {
-        "value": "${AZURE_SSL_KEY_VAULT_SECRET_ID=https://kv-rtaudio-devops.vault.azure.net/secrets/rtaudio-fullchain/1e9d85a97f634239a8562418a92766d8}"
+        "value": "${AZURE_SSL_KEY_VAULT_SECRET_ID}"
       },
       "keyVaultSecretUserIdentity": {
-        "value": "${AZURE_KEY_VAULT_SECRET_USER_IDENTITY=/subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/agw-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/agw-uai-kv-ssl-manual}"
+        "value": "${AZURE_KEY_VAULT_SECRET_USER_IDENTITY}"
       },
       "jwtAudience": {
         "value": "${AZURE_JWT_AUDIENCE}"
@@ -36,7 +36,7 @@
         "value": "${ACS_SOURCE_PHONE_NUMBER}"
       },
       "enableEasyAuth": {
-        "value": "${ENABLE_EASY_AUTH=false}"
+        "value": "${ENABLE_EASY_AUTH}"
       },
       "enableAppGateway": {
         "value": "${ENABLE_APP_GATEWAY=false}"
