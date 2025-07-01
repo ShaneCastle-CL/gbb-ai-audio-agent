@@ -39,7 +39,7 @@
         "value": "${ACS_SOURCE_PHONE_NUMBER}"
       },
       "enableEasyAuth": {
-        "value": "${ENABLE_EASY_AUTH}"
+        "value": "${ENABLE_EASY_AUTH=false}"
       },
       "enableAppGateway": {
         "value": "${ENABLE_APP_GATEWAY=false}"

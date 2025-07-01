@@ -276,7 +276,7 @@ if [[ -z "$EXISTING_VM_PASSWORD" ]]; then
     echo "📝 Password has been stored in azd environment variables."
     echo ""
     echo "⚠️  Important: This password will be stored in the Key Vault provisioned by this deployment."
-    echo "   Password: $VM_PASSWORD"
+    # Password is securely stored in environment variables and Key Vault. Not displayed for security.
     echo ""
 else
     echo "✅ Jumphost VM password already configured."

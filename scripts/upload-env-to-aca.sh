@@ -3,7 +3,7 @@
 # Script to upload environment variables from .env file to existing Azure Container App
 # Usage: ./upload-env-to-aca.sh [container-app-name] [resource-group] [env-file]
 
-set -e
+set -euo pipefail
 
 # Color codes for output
 RED='\033[0;31m'
@@ -153,22 +153,14 @@ fi
 
 # Prepare environment variables for update
 print_info "Preparing environment variables for upload..."
-SET_ENV_VARS_ARGS=""
-for env_var in "${ENV_VARS[@]}"; do
-    if [[ -z "$SET_ENV_VARS_ARGS" ]]; then
-        SET_ENV_VARS_ARGS="$env_var"
-    else
-        SET_ENV_VARS_ARGS="$SET_ENV_VARS_ARGS $env_var"
-    fi
-done
 
 # Update Container App with new environment variables
 print_info "Updating Container App with environment variables..."
-print_info "Running command: az containerapp update --name \"$CONTAINER_APP_NAME\" --resource-group \"$RESOURCE_GROUP\" --set-env-vars $SET_ENV_VARS_ARGS"
+print_info "Running command: az containerapp update --name \"$CONTAINER_APP_NAME\" --resource-group \"$RESOURCE_GROUP\" --set-env-vars \"${ENV_VARS[@]}\""
 az containerapp update \
     --name "$CONTAINER_APP_NAME" \
     --resource-group "$RESOURCE_GROUP" \
-    --set-env-vars $SET_ENV_VARS_ARGS \
+    --set-env-vars "${ENV_VARS[@]}" \
     --output none
 
 print_success "Environment variables uploaded successfully to Container App '$CONTAINER_APP_NAME'"
