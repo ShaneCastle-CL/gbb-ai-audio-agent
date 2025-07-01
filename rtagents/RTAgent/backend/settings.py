@@ -39,6 +39,7 @@ AZURE_STORAGE_CONTAINER_URL: str = os.getenv("AZURE_STORAGE_CONTAINER_URL", "")
 
 # ACS_STREAMING_MODE: StreamMode = StreamMode.MEDIA
 ACS_STREAMING_MODE: StreamMode = StreamMode.MEDIA
+
 # API route fragments (keep them in one place so routers can import)
 ACS_CALL_PATH = "/api/call"
 ACS_CALLBACK_PATH: str = "/call/callbacks"
