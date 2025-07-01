@@ -58,7 +58,9 @@ else
         echo "✅ Successfully created ACS phone number: $PHONE_NUMBER"
 
         # Set the ACS_SOURCE_PHONE_NUMBER in azd environment
-        azd env set ACS_SOURCE_PHONE_NUMBER "$PHONE_NUMBER"
+        # Extract just the phone number from the output
+        CLEAN_PHONE_NUMBER=$(echo "$PHONE_NUMBER" | grep -o '+[0-9]\+' | head -1)
+        azd env set ACS_SOURCE_PHONE_NUMBER "$CLEAN_PHONE_NUMBER"
         echo "🔄 Updated ACS_SOURCE_PHONE_NUMBER in .env file."
     } || {
         echo "⚠️ Warning: ACS phone number creation failed, but continuing with the rest of the script..."
