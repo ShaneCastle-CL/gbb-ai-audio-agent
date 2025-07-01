@@ -1265,8 +1265,8 @@ module app 'app.bicep' = {
 
     backendCors: {
       allowedOrigins: [
-          'https://${domainFqdn}'
           acs.outputs.endpoint
+          'https://${domainFqdn}'
           'http://localhost:5173'
         ]
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
