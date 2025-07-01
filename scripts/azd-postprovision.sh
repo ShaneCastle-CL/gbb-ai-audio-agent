@@ -62,6 +62,22 @@ else
         CLEAN_PHONE_NUMBER=$(echo "$PHONE_NUMBER" | grep -o '+[0-9]\+' | head -1)
         azd env set ACS_SOURCE_PHONE_NUMBER "$CLEAN_PHONE_NUMBER"
         echo "🔄 Updated ACS_SOURCE_PHONE_NUMBER in .env file."
+        # Update the backend container app environment variable
+        echo "🔄 Updating backend container app environment variable..."
+        BACKEND_CONTAINER_APP_NAME="$(azd env get-value BACKEND_CONTAINER_APP_NAME)"
+        BACKEND_RESOURCE_GROUP_NAME="$(azd env get-value BACKEND_RESOURCE_GROUP_NAME)"
+
+        if [ -n "$BACKEND_CONTAINER_APP_NAME" ] && [ -n "$BACKEND_RESOURCE_GROUP_NAME" ]; then
+            echo "📱 Updating ACS_SOURCE_PHONE_NUMBER in container app: $BACKEND_CONTAINER_APP_NAME"
+            az containerapp update \
+                --name "$BACKEND_CONTAINER_APP_NAME" \
+                --resource-group "$BACKEND_RESOURCE_GROUP_NAME" \
+                --set-env-vars "ACS_SOURCE_PHONE_NUMBER=$CLEAN_PHONE_NUMBER" \
+                --output none
+            echo "✅ Successfully updated container app environment variable."
+        else
+            echo "⚠️ Warning: Could not update container app - missing BACKEND_CONTAINER_APP_NAME or BACKEND_RESOURCE_GROUP_NAME"
+        fi
     } || {
         echo "⚠️ Warning: ACS phone number creation failed, but continuing with the rest of the script..."
     }

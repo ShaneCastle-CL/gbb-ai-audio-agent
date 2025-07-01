@@ -1456,3 +1456,9 @@ output WAF_POLICY_RESOURCE_ID string = enableApplicationGateway && enableWaf ? a
 
 @description('Backend User Assigned Identity Principal ID, to be added to the entra group postprovision')
 output BACKEND_UAI_PRINCIPAL_ID string = uaiAudioAgentBackendIdentity.outputs.principalId
+
+@description('Backend Container App name')
+output BACKEND_CONTAINER_APP_NAME string = app.outputs.backendContainerAppName
+
+@description('Backend Resource Group name')
+output BACKEND_RESOURCE_GROUP_NAME string = spokeRg.name

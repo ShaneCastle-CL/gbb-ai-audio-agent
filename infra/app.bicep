@@ -279,19 +279,34 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
 // Outputs for downstream consumption and integration
 
 // Container Registry
+@description('The login server URL for the container registry')
 output containerRegistryEndpoint string = containerRegistry.outputs.loginServer
+
+@description('The resource ID of the container registry')
 output containerRegistryResourceId string = containerRegistry.outputs.resourceId
 
-// Container Apps Environment
+@description('The resource ID of the container apps environment')
 output containerAppsEnvironmentId string = containerAppsEnvironment.outputs.resourceId
 
-// Container Apps
-// output frontendContainerAppResourceId string = frontendAudioAgent.outputs.containerAppResourceId
+@description('The resource ID of the backend container app')
 output backendContainerAppResourceId string = backendAudioAgent.outputs.containerAppResourceId
+
+@description('The name of the frontend container app')
 output frontendAppName string = feContainerName
+
+@description('The name of the backend container app')
 output backendAppName string = beContainerName
 
+@description('The container app name of the frontend application')
+output frontendContainerAppName string = frontendAudioAgent.outputs.containerAppName
+
+@description('The container app name of the backend application')
+output backendContainerAppName string = backendAudioAgent.outputs.containerAppName
+
+@description('The fully qualified domain name of the frontend container app')
 output frontendContainerAppFqdn string = frontendAudioAgent.outputs.containerAppFqdn
+
+@description('The fully qualified domain name of the backend container app')
 output backendContainerAppFqdn string = backendAudioAgent.outputs.containerAppFqdn
 
 // NOTE: These parameters are currently not used directly in this file, but are available for future use and for passing to modules that support subnet assignment.
