@@ -103,41 +103,41 @@ class SpeechSynthesizer:
         """
         speech_config = None
         
-        # if self.key:
-        #     # Use subscription key authentication (most reliable)
-        #     logger.debug("Using subscription key for Azure Speech authentication")
-        #     speech_config = speechsdk.SpeechConfig(
-        #         subscription=self.key, 
-        #         region=self.region
-        #     )
-        # else:
-        #     # Try environment variable first as fallback
-        #     fallback_key = os.getenv("AZURE_SPEECH_KEY")
-        #     if fallback_key:
-        #         logger.debug("Using AZURE_SPEECH_KEY from environment")
-        #         speech_config = speechsdk.SpeechConfig(
-        #             subscription=fallback_key, 
-        #             region=self.region
-        #         )
-        #     else:
-        #         # Use default Azure credential for authentication
-        #         # Get a fresh token each time to handle token expiration
-        #         try:
-        #             logger.debug("Attempting to use DefaultAzureCredential for Azure Speech")
-        #             credential = DefaultAzureCredential()
-        #             token = credential.get_token("https://cognitiveservices.azure.com/.default")
-        #             auth_token = "aad#" + self.speech_resource_id + "#" + token.token
-        #             speech_config = speechsdk.SpeechConfig(
-        #                 auth_token=auth_token,
-        #                 region=self.region
-        #             )
-        #             logger.debug("Successfully authenticated with DefaultAzureCredential")
-        #         except Exception as e:
-        #             logger.error(f"Failed to get Azure credential token: {e}")
-        #             raise RuntimeError(f"Failed to authenticate with Azure Speech. Please set AZURE_SPEECH_KEY environment variable or ensure proper Azure credentials are configured: {e}")
+        if self.key:
+            # Use subscription key authentication (most reliable)
+            logger.debug("Using subscription key for Azure Speech authentication")
+            speech_config = speechsdk.SpeechConfig(
+                subscription=self.key, 
+                region=self.region
+            )
+        else:
+            # Try environment variable first as fallback
+            fallback_key = os.getenv("AZURE_SPEECH_KEY")
+            if fallback_key:
+                logger.debug("Using AZURE_SPEECH_KEY from environment")
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=fallback_key, 
+                    region=self.region
+                )
+            else:
+                # Use default Azure credential for authentication
+                # Get a fresh token each time to handle token expiration
+                try:
+                    logger.debug("Attempting to use DefaultAzureCredential for Azure Speech")
+                    credential = DefaultAzureCredential()
+                    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+                    auth_token = "aad#" + self.speech_resource_id + "#" + token.token
+                    speech_config = speechsdk.SpeechConfig(
+                        auth_token=auth_token,
+                        region=self.region
+                    )
+                    logger.debug("Successfully authenticated with DefaultAzureCredential")
+                except Exception as e:
+                    logger.error(f"Failed to get Azure credential token: {e}")
+                    raise RuntimeError(f"Failed to authenticate with Azure Speech. Please set AZURE_SPEECH_KEY environment variable or ensure proper Azure credentials are configured: {e}")
         
-        # if not speech_config:
-        #     raise RuntimeError("Failed to create speech config - no valid authentication method found")
+        if not speech_config:
+            raise RuntimeError("Failed to create speech config - no valid authentication method found")
             
         speech_config.speech_synthesis_language = self.language
         speech_config = speechsdk.SpeechConfig(
