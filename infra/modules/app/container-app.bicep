@@ -22,6 +22,7 @@ param userAssignedResourceId string = ''
 @description('Container registry definitions')
 param registries array = []
 
+param customDomains array = []
 
 @description('Resource ID of the container apps environment')
 param environmentResourceId string
@@ -33,13 +34,13 @@ param location string
 param tags object = {}
 
 @description('Array of secrets at the container app control plane level. Each item is an object: { name: <secret name>, value: <secret value> }')
-param secrets SecretType[] = []
+param secrets secretType[] = []
 
 @description('Array of secret references for environment variables. Each item is an object: { name: <env var>, secretRef: <secret name> }')
 param secretEnvRefs SecretEnvVarType[] = []
 
 @description('Ingress settings for the container app')
-param publicAccessAllowed bool = false
+param ingressExternal bool = false
 
 @description('Enable EasyAuth integration')
 param enableEasyAuth bool = false
@@ -56,9 +57,21 @@ var _secrets = enableEasyAuth
     ], secrets)
   : secrets
 
-type SecretType = {
-  name: string
-  value: string
+@export()
+@description('The type for a secret.')
+type secretType = {
+  @description('Optional. Resource ID of a managed identity to authenticate with Azure Key Vault, or System to use a system-assigned identity.')
+  identity: string?
+
+  @description('Conditional. The URL of the Azure Key Vault secret referenced by the Container App. Required if `value` is null.')
+  keyVaultUrl: string?
+
+  @description('Optional. The name of the container app secret.')
+  name: string?
+
+  @description('Conditional. The container app secret value, if not fetched from the Key Vault. Required if `keyVaultUrl` is not null.')
+  @secure()
+  value: string?
 }
 
 type SecretEnvVarType = {
@@ -85,6 +98,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
         userAssignedResourceId
       ]
     }
+    customDomains: customDomains
     registries: registries
     containers: [for c in containers: {
       name: c.name
@@ -100,7 +114,7 @@ module containerApp 'br/public:avm/res/app/container-app:0.16.0' = {
       maxReplicas: scaleMaxReplicas
     }
     corsPolicy: corsPolicy
-    ingressExternal: publicAccessAllowed
+    ingressExternal: ingressExternal
     ingressTargetPort: ingressTargetPort
     stickySessionsAffinity: stickySessionsAffinity
     trafficLatestRevision: true

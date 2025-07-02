@@ -264,3 +264,16 @@ type SubnetDelegation = {
   @description('Delegation type')
   type: string?
 }
+
+@export()
+@description('Configuration for a user-assigned managed identity')
+type UserAssignedIdentityConfig = {
+  @description('Resource ID of the user-assigned managed identity')
+  resourceId: string
+
+  clientId: string
+
+  principalId: string
+
+  roleAssignments: RoleAssignmentConfig[]?
+}

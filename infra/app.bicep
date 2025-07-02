@@ -12,17 +12,12 @@ import { ContainerAppKvSecret } from './modules/types.bicep'
 // AZD managed variables
 param rtaudioClientExists bool
 param rtaudioServerExists bool
-param acsSourcePhoneNumber string = ''
 
 // Required parameters for the app environment (app config values, secrets, etc.)
 @description('Enable EasyAuth for the frontend internet facing container app')
 param enableEasyAuth bool = true
 
-param appInsightsConnectionString string = 'InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://dc.services.visualstudio.com/v2/track'
 param logAnalyticsWorkspaceResourceId string = '00000000-0000-0000-0000-000000000000'
-
-// Key Vault parameters
-param keyVaultResourceId string
 
 // Network parameters for reference
 // param vnetName string
@@ -33,122 +28,24 @@ param appSubnetResourceId string
 param principalId string
 param principalType string
 
-// App Dependencies
-param aoai_endpoint string
-param aoai_chat_deployment_id string
-// param acsResourceId string = ''
-
-
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = uniqueString(subscription().id, resourceGroup().id, location)
 
+param frontendEnvVars array = []
 
-// param apimDnsZoneId string = '' // Optional DNS zone ID for APIM, can be used for private endpoints
-// param aoaiDnsZoneId string = '' // Optional DNS zone ID for Azure OpenAI, can be used for private endpoints
-param cosmosDnsZoneId string = '' // Optional DNS zone ID for Cosmos DB, can be used for private endpoints
-param privateEndpointSubnetId string = '' // Subnet ID for private endpoints, if applicable
+param backendUserAssignedIdentity object = {}
+param frontendUserAssignedIdentity object = {}
+param frontendExternalAccessEnabled bool = true
 
-param disableLocalAuth bool = true // Keep enabled for now, can be disabled in prod
-// param vnetIntegrationSubnetId string = ''
-// param privateEndpoints array = []
+param backendCors object = {}
+param backendSecrets ContainerAppKvSecret[] 
+param backendEnvVars array = []
 
-
-module frontendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
-  name: 'gbbAiAudioAgentidentity'
-  params: {
-    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgent-${resourceToken}'
-    location: location
-  }
-}
-
-module backendUserAssignedIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.2.1' = {
-  name: 'gbbAiAudioAgentBackendIdentity'
-  params: {
-    name: '${name}${abbrs.managedIdentityUserAssignedIdentities}gbbAiAudioAgentBackend-${resourceToken}'
-    location: location
-  }
-}
+param backendCertificate object = {}
+param backendCustomDomains array = []
 
 var beContainerName =  toLower(substring('rtagent-server-${resourceToken}', 0, 22))
 var feContainerName =  toLower(substring('rtagent-client-${resourceToken}', 0, 22))
-
-
-// Cosmos DB MongoDB Cluster
-resource mongoCluster 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
-  name: 'mongo-${name}-${resourceToken}'
-  location: location
-  tags: tags
-  kind: 'MongoDB'
-  properties: {
-    disableLocalAuth: disableLocalAuth
-    databaseAccountOfferType: 'Standard'
-    locations: [
-      {
-        locationName: location
-        failoverPriority: 0
-      }
-    ]
-    // administrator: {
-    //   userName: cosmosAdministratorUsername
-    //   password: cosmosAdministratorPassword
-    // }
-    apiProperties: {
-      serverVersion: '7.0'
-    }
-
-    capabilities: [
-      {
-        name: 'EnableMongo'
-      }
-    ]
-    consistencyPolicy: {
-      defaultConsistencyLevel: 'Session'
-    }
-    publicNetworkAccess: 'Enabled'
-
-  }
-}
-
-
-
-module mongoPrivateEndpoint 'br/public:avm/res/network/private-endpoint:0.7.1' = {
-  name: 'mongo-pe-${name}-${resourceToken}'
-  params: {
-    name: 'mongo-pe-${name}-${resourceToken}'
-    location: location
-    subnetResourceId: privateEndpointSubnetId
-    privateLinkServiceConnections: [
-      {
-        name: 'mongo-pls-${name}-${resourceToken}'
-        properties: {
-          privateLinkServiceId: mongoCluster.id
-          groupIds: [
-            'MongoDB'
-          ]
-        }
-      }
-    ]
-    privateDnsZoneGroup: {
-      privateDnsZoneGroupConfigs: [
-        {
-          name: 'default'
-          privateDnsZoneResourceId: cosmosDnsZoneId
-        }
-      ]
-    }
-  }
-}
-
-// Store MongoDB connection string in Key Vault if local auth is enabled
-resource mongoConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!disableLocalAuth) {
-  name: '${last(split(keyVaultResourceId, '/'))}/mongo-connection-string'
-  properties: {
-    value: mongoCluster.listConnectionStrings().connectionStrings[0].connectionString
-  }
-}
-
-
-
 
 // Container registry
 module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' = {
@@ -170,21 +67,20 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.1.1' =
         roleDefinitionIdOrName: 'AcrPush'
       }
       // Temporarily disabled - managed identity deployment timing issue
-      // {
-      //   principalId: frontendUserAssignedIdentity.outputs.principalId
-      //   principalType: 'ServicePrincipal'
-      //   roleDefinitionIdOrName: 'AcrPull'
-      // }
-      // {
-      //   principalId: backendUserAssignedIdentity.outputs.principalId
-      //   principalType: 'ServicePrincipal'
-      //   roleDefinitionIdOrName: 'AcrPull'
-      // }
+      {
+        principalId: frontendUserAssignedIdentity.principalId
+        principalType: 'ServicePrincipal'
+        roleDefinitionIdOrName: 'AcrPull'
+      }
+      {
+        principalId: backendUserAssignedIdentity.principalId
+        principalType: 'ServicePrincipal'
+        roleDefinitionIdOrName: 'AcrPull'
+      }
     ]
   }
 }
 
-param frontendExternalAccessEnabled bool = true
 // Container apps environment (deployed into appSubnet)
 module externalContainerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.2' = if (frontendExternalAccessEnabled){
   name: 'external-container-apps-environment'
@@ -196,14 +92,19 @@ module externalContainerAppsEnvironment 'br/public:avm/res/app/managed-environme
         sharedKey: listKeys(logAnalyticsWorkspaceResourceId, '2022-10-01').primarySharedKey
       }
     }
+    publicNetworkAccess: frontendExternalAccessEnabled == true ? 'Enabled' : 'Disabled' // Enables public access to the Container Apps Environment
     name: 'ext-${name}${abbrs.appManagedEnvironments}${resourceToken}'
     location: location
     zoneRedundant: false
-    // infrastructureSubnetResourceId: appSubnetResourceId // Enables private networking in the specified subnet
-    internal: false
+    infrastructureSubnetResourceId: frontendExternalAccessEnabled == true ? null : appSubnetResourceId // Enables private networking in the specified subnet
+    internal: frontendExternalAccessEnabled == false
     tags: tags
   }
 }
+
+param privateDnsZoneResourceId string = ''
+param privateEndpointSubnetResourceId string = ''
+
 // Container apps environment (deployed into appSubnet)
 module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.2' = {
   name: 'container-apps-environment'
@@ -215,6 +116,21 @@ module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.
         sharedKey: listKeys(logAnalyticsWorkspaceResourceId, '2022-10-01').primarySharedKey
       }
     }
+    workloadProfiles: [
+      {
+        name: 'D4'
+        workloadProfileType: 'D4'
+        maximumCount: 10
+        minimumCount: 1
+      }
+    ]
+    managedIdentities: {
+      systemAssigned: false
+      userAssignedResourceIds: !empty(backendCertificate) ? [backendCertificate.?certificateKeyVaultProperties.?identityResourceId] : []
+    }
+    certificate: backendCertificate // Optional SSL certificate for the backend container app
+
+    publicNetworkAccess: 'Disabled' // Disables public access to the Container Apps Environment
     name: '${name}${abbrs.appManagedEnvironments}${resourceToken}'
     location: location
     zoneRedundant: false
@@ -224,60 +140,20 @@ module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.11.
   }
 }
 
-param storageSkuName string = 'Standard_LRS'
-param storageContainerName string = 'audioagent'
-
-
-module storage 'br/public:avm/res/storage/storage-account:0.9.1' = {
-  name: 'storage'
-  params: {
-    name: '${abbrs.storageStorageAccounts}${resourceToken}'
-    location: location
-    tags: tags
-    kind: 'StorageV2'
-    skuName: storageSkuName
-    publicNetworkAccess: 'Enabled' // Necessary for uploading documents to storage container
-    networkAcls: {
-      defaultAction: 'Allow'
-      bypass: 'AzureServices'
+// Private endpoint for Container Apps Environment
+module containerAppsPrivateEndpoint './modules/networking/private-endpoint.bicep' = if (privateDnsZoneResourceId != '' && privateEndpointSubnetResourceId != '') {
+    name: 'backend-container-apps-private-endpoint'
+    params: {
+      name: 'pe-${name}${resourceToken}'
+      location: location
+      tags: tags
+      subnetId: privateEndpointSubnetResourceId
+      serviceId: containerAppsEnvironment.outputs.resourceId
+      groupIds: ['managedEnvironments']
+      dnsZoneId: privateDnsZoneResourceId
     }
-    allowBlobPublicAccess: false
-    allowSharedKeyAccess: true
-    blobServices: {
-      deleteRetentionPolicyDays: 2
-      deleteRetentionPolicyEnabled: true
-      containers: [
-        {
-          name: storageContainerName
-          publicAccess: 'None'
-        }
-        {
-          name: 'prompt'
-          publicAccess: 'None'
-        }
-      ]
-    }
-    roleAssignments: [
-      // {
-      //   roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-      //   principalId: backendUserAssignedIdentity.outputs.principalId
-      //   principalType: 'ServicePrincipal'
-      // }
-      // {
-      //   roleDefinitionIdOrName: 'Storage Blob Data Reader'
-      //   principalId: principalId
-      //   // principalType: 'User'  
-      //   principalType: principalType
-      // } 
-      // {
-      //   roleDefinitionIdOrName: 'Storage Blob Data Contributor'
-      //   principalId: principalId
-      //   // principalType: 'User'
-      //   principalType: principalType
-      // }      
-    ]
-  }
 }
+
 
 module fetchFrontendLatestImage './modules/app/fetch-container-image.bicep' = {
   name: 'gbbAiAudioAgent-fetch-image'
@@ -309,7 +185,7 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
       allowCredentials: false
     }
     
-    publicAccessAllowed: true
+    ingressExternal: true
 
     ingressTargetPort: 5173
     scaleMinReplicas: 1
@@ -323,33 +199,15 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
           cpu: json('0.5')
           memory: '1.0Gi'
         }
-        env: [
-          {
-            name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-            value: appInsightsConnectionString
-          }
-          {
-            name: 'AZURE_CLIENT_ID'
-            value: frontendUserAssignedIdentity.outputs.clientId
-          }
-          {
-            name: 'PORT'
-            value: '5173'
-          }
-          // {
-          //   name: 'VITE_BACKEND_BASE_URL'
-          //   value: 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
-          // }
-        ]
+        env: frontendEnvVars
       }
     ]
-    userAssignedResourceId: frontendUserAssignedIdentity.outputs.resourceId
+    userAssignedResourceId: frontendUserAssignedIdentity.resourceId
 
     registries: [
-      // Temporarily disabled - managed identity access issue
       {
         server: containerRegistry.outputs.loginServer
-        identity: frontendUserAssignedIdentity.outputs.resourceId
+        identity: frontendUserAssignedIdentity.resourceId
       }
     ]
     
@@ -359,32 +217,19 @@ module frontendAudioAgent 'modules/app/container-app.bicep' = {
     tags: union(tags, { 'azd-service-name': 'rtaudio-client' })
   }
   dependsOn: [
-    containerAppsEnvironment
-    frontendUserAssignedIdentity
-    fetchFrontendLatestImage
   ]
 }
 
-// @description('Resource ID of an existing Application Gateway to use')
-// param existingAppGatewayResourceName string = 'ai-realtime-sandbox-wus2-appgw'
-// param existingAppGatewayResourceGroupName string = 'ai-realtime-sandbox'
-
-// resource existingAppGateway 'Microsoft.Network/applicationGateways@2022-09-01' existing = if (!empty(existingAppGatewayResourceName)) {
-//   scope: resourceGroup(existingAppGatewayResourceGroupName)
-//   name: existingAppGatewayResourceName
-// }
-
-// @description('Name of the existing public IP address associated with the Application Gateway')
-// param existingAppGatewayPublicIpName string = 'ai-realtime-sandbox-appgw-pip'
-
-// resource existingAppGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2022-05-01' existing = if (!empty(existingAppGatewayPublicIpName)) {
-//   scope: resourceGroup(existingAppGatewayResourceGroupName)
-//   name: existingAppGatewayPublicIpName
-// }
-
-
-
-// param backendSecrets ContainerAppKvSecret[] 
+// Update backend CORS to include frontend container app origin
+var updatedBackendCors = union(backendCors, {
+  allowedOrigins: union(
+    backendCors.?allowedOrigins ?? [],
+    [
+      'https://${frontendAudioAgent.outputs.containerAppFqdn}'
+      'http://${frontendAudioAgent.outputs.containerAppFqdn}'
+    ]
+  )
+})
 
 module backendAudioAgent './modules/app/container-app.bicep' = {
   name: 'backend-audio-agent'
@@ -393,17 +238,18 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
     ingressTargetPort: 8010
     scaleMinReplicas: 1
     scaleMaxReplicas: 10
-    corsPolicy: {
-      allowedOrigins: [
-      // 'https://${frontendAudioAgent.outputs.containerAppFqdn}'
-      // 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
-      // 'https://${existingAppGatewayPublicIp.properties.ipAddress}'
-      'http://localhost:5173'
-      ]
-      allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-      allowedHeaders: ['*']
-      allowCredentials: true
-    }
+    secrets: backendSecrets
+    corsPolicy: updatedBackendCors
+
+    ingressExternal: true // Limit to VNet, setting to false will limit network to Container App Environment
+    customDomains: [
+      // {
+      //   name: backendCertificate.?domainName
+      //   // /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-spoke-rtaudioagent-localdev/providers/Microsoft.App/managedEnvironments/rtaudioagentcae-7ggx3vub2aaci/certificates/rtaudio-fullchain-fixed
+      //   certificateId: '${containerAppsEnvironment.outputs.resourceId}/certificates/${backendCertificate.?name}'
+      //   bindingType: 'Auto'
+      // }
+    ]
     containers: [
       {
         image: fetchBackendLatestImage.outputs.?containers[?0].?image ?? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -412,74 +258,15 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
           cpu: json('1.0')
           memory: '2.0Gi'
         }
-        // secrets: backendSecrets
-
-        env: [
-          {
-            name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-            value: appInsightsConnectionString
-          }
-          {
-            name: 'AZURE_CLIENT_ID'
-            value: backendUserAssignedIdentity.outputs.clientId
-          }
-          {
-            name: 'PORT'
-            value: '8010'
-          }
-          {
-            name: 'AZURE_OPENAI_ENDPOINT'
-            value: aoai_endpoint
-          }
-          {
-            name: 'AZURE_OPENAI_CHAT_DEPLOYMENT_ID'
-            value: aoai_chat_deployment_id
-          }
-          // { // For when RBAC access to speech service is enabled
-          //   name: 'AZURE_SPEECH_RESOURCE_ID'
-          //   value: aiGateway.outputs.aiServicesIds[0]
-          // }
-          // {
-          //   name: 'REDIS_HOST'
-          //   value: redis_host
-          // }
-          // {
-          //   name: 'REDIS_PORT'
-          //   value: redis_port
-          // }
-          {
-            name: 'AZURE_SPEECH_REGION'
-            value: location
-          }
-          // {
-          //   name: 'BASE_URL'
-          //   value: 'https://${existingAppGatewayPublicIp.properties.ipAddress}'
-          // }
-          {
-            name: 'ACS_SOURCE_PHONE_NUMBER'
-            value: acsSourcePhoneNumber
-          }
-          // {  // For when ACS RBAC is enabled
-          //   name: 'ACS_RESOURCE_ENDPOINT'
-          //   value: 'https://${communicationServices.properties.hostName}'
-          // }
-          {
-            name: 'USE_ENTRA_CREDENTIALS'
-            value: 'true'
-          }
-        ]
+        
+        env: backendEnvVars
       }
     ]
-    userAssignedResourceId: backendUserAssignedIdentity.outputs.resourceId
-    // managedIdentities: {
-    //   userAssignedResourceIds: [
-    //     backendUserAssignedIdentity.outputs.resourceId
-    //   ]
-    // }
+    userAssignedResourceId: backendUserAssignedIdentity.?resourceId ?? ''
     registries: [
       {
         server: containerRegistry.outputs.loginServer
-        identity: backendUserAssignedIdentity.outputs.resourceId
+        identity: backendUserAssignedIdentity.?resourceId ?? ''
       }
     ]
     environmentResourceId: containerAppsEnvironment.outputs.resourceId
@@ -492,32 +279,34 @@ module backendAudioAgent './modules/app/container-app.bicep' = {
 // Outputs for downstream consumption and integration
 
 // Container Registry
+@description('The login server URL for the container registry')
 output containerRegistryEndpoint string = containerRegistry.outputs.loginServer
+
+@description('The resource ID of the container registry')
 output containerRegistryResourceId string = containerRegistry.outputs.resourceId
 
-// Container Apps Environment
+@description('The resource ID of the container apps environment')
 output containerAppsEnvironmentId string = containerAppsEnvironment.outputs.resourceId
 
-// User Assigned Identities
-output frontendUserAssignedIdentityClientId string = frontendUserAssignedIdentity.outputs.clientId
-output frontendUserAssignedIdentityResourceId string = frontendUserAssignedIdentity.outputs.resourceId
-output backendUserAssignedIdentityClientId string = backendUserAssignedIdentity.outputs.clientId
-output backendUserAssignedIdentityResourceId string = backendUserAssignedIdentity.outputs.resourceId
-
-// // Communication Services
-// output communicationServicesResourceId string = communicationServices.id
-// output communicationServicesEndpoint string = communicationServices.properties.hostName
-
-// Container Apps
-// output frontendContainerAppResourceId string = frontendAudioAgent.outputs.containerAppResourceId
+@description('The resource ID of the backend container app')
 output backendContainerAppResourceId string = backendAudioAgent.outputs.containerAppResourceId
+
+@description('The name of the frontend container app')
 output frontendAppName string = feContainerName
+
+@description('The name of the backend container app')
 output backendAppName string = beContainerName
 
-// Application Gateway Integration
-// output frontendBaseUrl string = 'https://${existingAppGatewayPublicIp.properties.dnsSettings.fqdn}'
-// output backendBaseUrl string = 'https://${existingAppGatewayPublicIp.properties.ipAddress}'
+@description('The container app name of the frontend application')
+output frontendContainerAppName string = frontendAudioAgent.outputs.containerAppName
 
+@description('The container app name of the backend application')
+output backendContainerAppName string = backendAudioAgent.outputs.containerAppName
 
+@description('The fully qualified domain name of the frontend container app')
+output frontendContainerAppFqdn string = frontendAudioAgent.outputs.containerAppFqdn
+
+@description('The fully qualified domain name of the backend container app')
+output backendContainerAppFqdn string = backendAudioAgent.outputs.containerAppFqdn
 
 // NOTE: These parameters are currently not used directly in this file, but are available for future use and for passing to modules that support subnet assignment.

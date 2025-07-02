@@ -74,101 +74,117 @@ The logical architecture abstracts the underlying Azure infrastructure to focus 
 
 ```mermaid
 flowchart TD
-    %% User Interface Layer
+    %% ─────────────────────────── User Interface Layer ─────────────────────────────
     subgraph "👥 User Interface Layer"
-        Phone["📞 Phone Calls<br/>Inbound/Outbound"]
-        WebMobile["📱💻 Web & Mobile Apps<br/>Real-time Voice Interface"]
+        Phone["📞 Phone Calls<br/>Inbound / Outbound"]
+        WebMobile["📱💻 Web & Mobile Apps<br/>Voice Interface"]
     end
-    
-    %% Communication Bridge
+
+    %% ─────────────────────────── Communication Bridge ─────────────────────────────
     subgraph "⚡ Azure Communication Bridge"
-        ACS["🔗 Azure Communication Services<br/>Voice & Media Management"]
+        ACS["🔗 Azure Communication Services<br/>Voice & Media Transport"]
         Speech["🗣️ Azure Speech Services<br/>STT ↔ TTS Processing"]
     end
 
-    %% Intelligence Layer
-    subgraph "🧠 AI Processing Engine"
-        WebSocket["⚡ Real-time WebSocket<br/>Transcription Stream"]
-        Orchestrator["🎯 Intent Orchestrator<br/>Smart Agent Routing<br/>🔌 Dynamic Agent Registration"]
+    %% ─────────────────────────── AI Processing Engine ─────────────────────────────
+    subgraph "🧠 Real-Time Processing"
+        WebSocket["⚡ Transcription Stream<br/>via WebSocket"]
+        Orchestrator["🎯 Intent Orchestrator<br/>Agent Routing + Registration"]
     end
 
-    %% Agent Network - Emphasizing Modularity
-    subgraph "🤖 Modular Agent Network"
+    %% ─────────────────────────── Core Agent Framework ─────────────────────────────
+    subgraph "🏗️ Modular Agent Network"
         subgraph "🔌 Core Agent Framework"
-            AgentRegistry["📋 Agent Registry<br/>🔄 Hot-Swappable Components<br/>📊 Health Monitoring"]
-            AgentInterface["🔗 Standardized Agent Interface<br/>🏗️ Common API Contract<br/>⚙️ Plugin Architecture"]
+            AgentRegistry["📋 Agent Registry<br/>Component Health + Hot Swap"]
+            AgentInterface["🧩 Standardized Agent Interface<br/>Common API Contract"]
         end
-        
-        subgraph "🏢 Industry-Specific Agents"
-            Auth["🔐 Auth Agent<br/>🔌 Pluggable"]
-            FNOL["📋 FNOL Agent<br/>🔌 Pluggable"] 
-            Healthcare["🏥 Healthcare Agent<br/>🔌 Pluggable"]
-            Legal["⚖️ Legal Agent<br/>🔌 Pluggable"]
-            Support["🛠️ Support Agent<br/>🔌 Pluggable"]
-            NAgents["💬 Custom Agents<br/>🔌 Unlimited Extensibility"]
-        end
-            
-        subgraph "🧠 AI Model Hub"
-            OpenAI["🧠 Multi-Model AI Hub<br/>GPT-4o • o1 • Claude • Gemini<br/>🔌 Model-Agnostic Interface"]
-            
-            OpenAI --> TaskRouter{🎯 Model Router}
+    end
+
+    %% ─────────────────────────── Agent Intelligence Hub ───────────────────────────
+    subgraph "🧠 Agent Intelligence Hub"
+        AIHub["🧠 Agent Hub<br/>Central Control Layer"]
+
+        %% ── Subgraph: Model-Agnostic Reasoning
+        subgraph "🔄 Model-Agnostic Routing"
+            TaskRouter{🎯 Model Router}
             TaskRouter -->|Complex Reasoning| O1["🔬 o1-preview<br/>Advanced Analytics"]
-            TaskRouter -->|Speed Critical| GPT4o["⚡ GPT-4o<br/>Real-time Response"]
-            TaskRouter -->|Cost Efficient| GPT4oMini["💰 GPT-4o-mini<br/>Standard Queries"]
+            TaskRouter -->|Speed Critical| GPT4o["⚡ GPT-4o<br/>Real-Time Output"]
+            TaskRouter -->|Cost Sensitive| GPT4oMini["💰 GPT-4o-mini<br/>Standard Tasks"]
+        end
+
+        %% ── Subgraph: Industry-Specific Agents
+        subgraph "🏥 Industry-Specific Agents"
+            FNOL["📋 FNOL Agent"]
+            Healthcare["🏥 Healthcare Agent"]
+            Legal["⚖️ Legal Agent"]
+            Support["🛠️ Support Agent"]
+            NAgents["💬 Custom Agents"]
+        end
+
+        %% ── Subgraph: Memory Store
+        subgraph "🧠 Memory Store"
+            ShortTermMemory["📊 Short-Term Memory<br/>Real-Time Session"]
+            LongTermMemory["🗃️ Long-Term Memory<br/>Historical Context"]
+        end
+
+        %% ── Subgraph: Tool Store
+        subgraph "🧰 Tool Store"
+            FetchData["📄 Fetch Data<br/>from Docs or APIs"]
+            SyncAction["🔁 Sync Action<br/>External Services"]
+            CustomFunction["💻 Custom Function<br/>Python Logic"]
         end
     end
 
-    %% Backend Infrastructure
-    subgraph "🏗️ Session Management"
-        Queue["📥 Message Queue<br/>🔌 Agent-Agnostic Routing"]
-        Redis["💾 Redis State<br/>📊 Real-time Session Data"]
-        Manager["🔄 Conversation Manager<br/>🎯 Dynamic Agent Assignment"]
+    %% ─────────────────────────── Session Management ─────────────────────────────
+    subgraph "📦 Session Management"
+        Queue["📥 Agent-Agnostic Queue"]
+        Redis["💾 Redis State<br/>Live Context"]
+        Manager["🧠 Conversation Manager<br/>Dynamic Agent Assignment"]
     end
 
-    %% Flow Connections
+    %% ─────────────────────────── Flow Connections ─────────────────────────────
     Phone <--> ACS
     WebMobile <--> ACS
-    ACS <--> Speech
-    Speech <--> WebSocket
-    WebSocket <--> Orchestrator
-    
-    %% Agent Framework Connections
-    Orchestrator <--> AgentRegistry
-    AgentRegistry --> AgentInterface
-    AgentInterface --> Auth
-    AgentInterface --> FNOL
-    AgentInterface --> Healthcare
-    AgentInterface --> Legal
-    AgentInterface --> Support
-    AgentInterface --> NAgents
-    
-    %% AI Processing
-    Auth --> OpenAI
-    FNOL --> OpenAI
-    Healthcare --> OpenAI
-    Legal --> OpenAI
-    Support --> OpenAI
-    NAgents --> OpenAI
-    
-    %% Response Flow
-    OpenAI --> Queue
-    Queue --> Speech
-    
-    %% State Management
-    Orchestrator <--> Manager
-    Manager <--> Redis
+    ACS --> Speech
+    Speech --> WebSocket
+    WebSocket --> Orchestrator
 
-    %% Styling
-    classDef user fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    classDef bridge fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    classDef process fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
-    classDef agent fill:#fff8e1,stroke:#f57c00,stroke-width:2px
-    classDef infra fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    Orchestrator --> AgentRegistry
+    AgentRegistry --> AgentInterface
+    AgentInterface --> AIHub
+
+    AIHub --> FNOL
+    AIHub --> Healthcare
+    AIHub --> Legal
+    AIHub --> Support
+    AIHub --> NAgents
+    AIHub --> TaskRouter
+
+    TaskRouter --> Queue
+    Queue --> Speech
+
+    Orchestrator --> Manager
+    Manager --> Redis
+    ShortTermMemory --> Redis
+
+    %% Tools & Memory Used by Custom Agents
+    NAgents --> ShortTermMemory
+    NAgents --> LongTermMemory
+    NAgents --> FetchData
+    NAgents --> SyncAction
+    NAgents --> CustomFunction
+
+    %% ─────────────────────────── Styles ─────────────────────────────
+    classDef user fill:#4CAF50,stroke:#2E7D32,stroke-width:3px,color:#FFFFFF
+    classDef bridge fill:#2196F3,stroke:#1565C0,stroke-width:3px,color:#FFFFFF
+    classDef process fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#FFFFFF
+    classDef agent fill:#9C27B0,stroke:#6A1B9A,stroke-width:3px,color:#FFFFFF
+    classDef infra fill:#F44336,stroke:#C62828,stroke-width:3px,color:#FFFFFF
 
     class Phone,WebMobile user
     class ACS,Speech bridge
     class WebSocket,Orchestrator process
-    class Auth,FNOL,Healthcare,Legal,Support,NAgents,OpenAI agent
+    class FNOL,Healthcare,Legal,Support,NAgents,AIHub,O1,GPT4o,GPT4oMini,TaskRouter agent
     class Queue,Redis,Manager infra
 ```
 
@@ -217,41 +233,104 @@ The system operates on an event-driven architecture that enables real-time proce
 ### Real-Time Event Processing Flow
 
 ```mermaid
-sequenceDiagram
-    participant Client as Phone/Web Client
-    participant ACS as Azure Communication Services
-    participant Backend as Agent Backend
-    participant Redis as Redis Cache
-    participant OpenAI as AI Model Hub
-    participant EventGrid as Event Grid
-    participant External as External Systems
+flowchart TD
 
-    %% Call Initiation
-    Client->>ACS: Initiate Call
-    ACS->>Backend: Call Connected Event
-    Backend->>Redis: Create Session State
-    Backend->>EventGrid: Publish CALL_STARTED
-    EventGrid->>External: Fan-out to Subscribers
+%% ────────────────────────────────  User Interface  ───────────────────────────
+subgraph "👥 User Interface Layer"
+    Phone["📞 Phone Calls<br/>Inbound/Outbound"]
+    WebMobile["📱💻 Web & Mobile Apps<br/>Real-time Voice Interface"]
+end
 
-    %% Real-time Conversation Loop
-    loop Real-time Conversation
-        Client->>ACS: Audio Stream
-        ACS->>Backend: STT Transcription
-        Backend->>Redis: Update Conversation Context
-        Backend->>OpenAI: Process with Context
-        OpenAI->>Backend: AI Response
-        Backend->>Redis: Store Response
-        Backend->>ACS: TTS Audio
-        ACS->>Client: Audio Playback
-        Backend->>EventGrid: Publish TURN_COMPLETED
+%% ─────────────────────────── Azure Communication Bridge ──────────────────────
+subgraph "⚡ Azure Communication Bridge"
+    ACS["🔗 Azure Communication Services<br/>Voice & Media Management"]
+    Speech["🗣️ Azure Speech Services<br/>STT ↔ TTS Processing"]
+end
+
+%% ──────────────────────────────  AI Processing  ──────────────────────────────
+subgraph "🧠 AI Processing Engine"
+    WebSocket["⚡ Real-time WebSocket<br/>Transcription Stream"]
+    Orchestrator["🎯 Intent Orchestrator<br/>Smart Agent Routing<br/>🔌 Dynamic Agent Registration"]
+end
+
+%% ───────────────────────────  Modular Agent Network  ─────────────────────────
+subgraph "🤖 Modular Agent Network"
+
+    %% ── Core Agent Framework
+    subgraph "🔌 Core Agent Framework"
+        AgentRegistry["📋 Agent Registry<br/>🔄 Hot-Swappable Components<br/>📊 Health Monitoring"]
+        AgentInterface["🔗 Standardized Agent Interface<br/>🏗️ Common API Contract<br/>⚙️ Plugin Architecture"]
+        AgentInterface --> AgentRegistry
     end
 
-    %% Call Termination
-    Client->>ACS: End Call
-    ACS->>Backend: Call Ended Event
-    Backend->>Redis: Update Final State
-    Backend->>EventGrid: Publish CALL_ENDED
-    EventGrid->>External: Trigger Post-call Workflows
+    %% ── AI Model Hub (parent container for the two branches)
+    subgraph "🧠 AI Model Hub"
+        direction TB
+
+        %% ── Branch 1: Industry-Specific Agents
+        subgraph "🏢 Industry-Specific Agents"
+            Auth["🔐 Auth Agent<br/>🔌 Pluggable"]
+            FNOL["📋 FNOL Agent<br/>🔌 Pluggable"]
+            Healthcare["🏥 Healthcare Agent<br/>🔌 Pluggable"]
+            Legal["⚖️ Legal Agent<br/>🔌 Pluggable"]
+            Support["🛠️ Support Agent<br/>🔌 Pluggable"]
+            NAgents["💬 Custom Agents<br/>🔌 Unlimited Extensibility"]
+        end
+
+        %% ── Branch 2: Model-Specific Execution
+        subgraph "🧬 Model-Specific Execution"
+            TaskRouter{🎯 Model Router}
+            TaskRouter -->|Complex Reasoning| O1["🔬 o1-preview<br/>Advanced Analytics"]
+            TaskRouter -->|Speed Critical| GPT4o["⚡ GPT-4o<br/>Real-time Response"]
+            TaskRouter -->|Cost Efficient| GPT4oMini["💰 GPT-4o-mini<br/>Standard Queries"]
+        end
+    end
+end
+
+%% ───────────────────────────── Session Management ────────────────────────────
+subgraph "🏗️ Session Management"
+    Queue["📥 Message Queue<br/>🔌 Agent-Agnostic Routing"]
+    Redis["💾 Redis State<br/>📊 Real-time Session Data"]
+    Manager["🔄 Conversation Manager<br/>🎯 Dynamic Agent Assignment"]
+end
+
+%% ────────────────────────────  Flow Connections  ─────────────────────────────
+Phone      <--> ACS
+WebMobile  <--> ACS
+ACS        <--> Speech
+Speech     <--> WebSocket
+WebSocket  <--> Orchestrator
+
+Orchestrator <--> AgentRegistry  %% Orchestrator sees live registry status
+
+%% Industry agents to router
+Auth       --> TaskRouter
+FNOL       --> TaskRouter
+Healthcare --> TaskRouter
+Legal      --> TaskRouter
+Support    --> TaskRouter
+NAgents    --> TaskRouter
+
+%% Router to queue → TTS chain
+TaskRouter --> Queue
+Queue      --> Speech
+
+%% State management links
+Orchestrator <--> Manager
+Manager      <--> Redis
+
+%% ──────────────────────────────  Styling  ────────────────────────────────────
+classDef user   fill:#4CAF50,stroke:#2E7D32,stroke-width:3px,color:#FFFFFF
+classDef bridge fill:#2196F3,stroke:#1565C0,stroke-width:3px,color:#FFFFFF
+classDef proc   fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#FFFFFF
+classDef agent  fill:#9C27B0,stroke:#6A1B9A,stroke-width:3px,color:#FFFFFF
+classDef infra  fill:#F44336,stroke:#C62828,stroke-width:3px,color:#FFFFFF
+
+class Phone,WebMobile user
+class ACS,Speech bridge
+class WebSocket,Orchestrator proc
+class Auth,FNOL,Healthcare,Legal,Support,NAgents,O1,GPT4o,GPT4oMini,TaskRouter agent
+class Queue,Redis,Manager infra
 ```
 
 ### Key Event Types

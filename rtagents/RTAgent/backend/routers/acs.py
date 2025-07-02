@@ -13,14 +13,11 @@ Outbound phone-call flow via Azure Communication Services.
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Dict, Optional
 
 from azure.communication.callautomation import PhoneNumberIdentifier
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
-from flask import logging
 from pydantic import BaseModel
 
 from rtagents.RTAgent.backend.orchestration.conversation_state import ConversationManager
@@ -257,6 +254,6 @@ async def acs_media_ws(ws: WebSocket):
         # Close WebSocket if not already closed
         try:
             if ws.client_state == WebSocketState.CONNECTED:
-                await ws.close()
+                    await ws.close()
         except Exception as e:
             logger.error(f"Error closing WebSocket: {e}", exc_info=True)

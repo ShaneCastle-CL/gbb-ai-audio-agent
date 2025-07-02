@@ -1,58 +1,213 @@
-<!-- markdownlint-disable MD033 -->
+<!-- markdownlint-disable MD033 MD041 -->
 
-# **🎙️ RTMedAgent: Real-Time Voice Intelligence for Healthcare Workflows**
+# 🎙️ **RTAgent**  
+*Real-Time Voice Intelligence Framework on Azure*
 
-> This project is **part of the [HLS Ignited Program](https://github.com/microsoft/aihlsIgnited)**, a series of hands-on accelerators designed to democratize AI in healthcare. The program supports providers and payers in building transformative solutions using **Azure AI Services**. Explore other accelerators and discover how AI is reshaping care delivery.
+> **RTAgent** fuses **Azure Communication Services (ACS)**, **Azure Speech**, **Azure OpenAI**, and first-class observability into a single low-latency voice stack. Plug in any YAML-defined agent—insurance FNOL, healthcare triage, legal intake—and go live **using only GA Azure services**.
 
-<img src="utils/images/medagent.png" align="right" height="200" style="float:right; height:200px;" />
+## 📑 Table of Contents
+1. [Overview](#overview)
+2. [Key Features](#key-features)
+3. [Solution Architecture](#solution-architecture)
+4. [Latency & Barge-In Budget](#latency--barge-in-budget)
+5. [Extensibility](#extensibility)
+6. [Getting Started](#getting-started)
+    1. [Local Quick-Start](#local-quick-start)
+7. [Deployment on Azure](#deployment-on-azure)
+8. [Load & Chaos Testing](#load--chaos-testing)
+9. [Repository Layout](#repository-layout)
+10. [Roadmap](#roadmap)
+11. [Contributing](#contributing)
+12. [License & Disclaimer](#license--disclaimer)
 
-**RTMedAgent** is a real-time voice agent that enables healthcare organizations to deliver **empathetic and intelligent voice-first experiences** using a cascade of **Azure AI services**. Built for patient-facing support scenarios, the system simulates a smart and responsive voice agent capable of assisting users with everyday healthcare tasks by combining the following technologies:
+## **Overview** 
 
-- **Azure Speech-to-Text** for real-time transcription  
-- **Azure AI Search** for semantic understanding and intent recognition  
-- **Azure Text-to-Speech** to generate human-like responses  
-- **Azure OpenAI with Function Calling and Streaming Output** to dynamically trigger backend actions  
-- **WebSocket architecture** to ensure low-latency, two-way voice interaction  
+<img src="utils/images/RTAGENT.png" align="right" height="180" alt="RTAgent Logo" />
 
-This intelligent voice agent assists with common healthcare workflows like appointment scheduling, prescription refills, medication guidance, and prior authorization evaluations, all while maintaining high standards for safety, privacy, and clarity.
+> **88 %** of customers still make a **phone call** when they need real support  
+> — yet most IVRs feel like 1999. **RTAgent** fixes that.
+
+**RTAgent in a nutshell**
+
+RTAgent is a voice-to-voice AI pipeline that you can splice into any phone line, web client, or CCaaS flow. Audio enters through ACS, is transcribed on the fly, routed through your own modular agent chain, and then streamed back as TTS— all in a single sub-second loop. Every step is exposed as a micro-module so you can fine-tune latency, swap models, or inject custom business logic without touching the rest of the stack. The result: natural conversation and granular control over each hop of the call.
+
+### **✨ Key Capabilities**
+
+- **Omni-channel** — same agent for PSTN, Teams, or web chat (see diagram below).  
+- **YAML-defined agents** — hot-swap FNOL, triage, billing, or any custom intent with **low code**.  
+- **Robust barge-in** — partial STT cancels TTS instantly; no “talk-over” frustration.  
+- **Structured output** — native JSON / function calling ready for CRM, EMR, or claims systems.  
+- **Enterprise WebSocket middleware** — unifies voice-to-voice streams, elastically multiplexes thousands of concurrent sessions, and slots cleanly into existing CX stacks for at-scale conversational routing.  
+
+<img src="utils/images/omnichannel_rt_voice.png" align="center" alt="Omni-channel RT Voice Experience diagram" width="800
+"/>
+
+*(Left: callers on web & phone → RTAgent; right: seamless CCaaS escalation when a human is truly needed)*
+
+## **Key Features**
+
+| Category | Highlights |
+|----------|------------|
+| 🔄 Streaming | Bidirectional (PSTN ↔ WebSocket ↔ LLM) with < 500 ms RTT |
+| 🧠 Agents | Drop-in FNOL, Healthcare, Legal, or custom YAML agents |
+| 📊 Model Router | GPT-4o, GPT-4o-mini, phi per turn (cost/speed/quality aware) |
+| 🧰 Tools | Function-calling tool store; call external APIs in-flight |
+| 📈 Scale | Queue-backed session manager across Container Apps replicas |
+| 🛡️ Enterprise | App Gateway + WAF, private endpoints, managed identity |
+| 🧪 Testing | Azure Load Testing, Locust, Artillery scripts included |
+| 📞 CCaaS Bridge | Seamless SIP hand-off between ACS and any CCaaS (Amazon Connect, Genesys, Five9) |
+
+## **Solution Architecture**
+
+```mermaid
+flowchart LR
+  %% ─────────────── 1 · Users ─────────────────────
+  subgraph "Users"
+    PSTN["📞 PSTN / Teams"]
+    WEB["🌐 Web / Mobile"]
+  end
+
+  %% ─────────────── 2 · Telco Bridge ──────────────
+  subgraph "Telco Bridge (PSTN only)"
+    CCaaS["🏢 CCaaS / Telco"]
+    ACS["🔗 Azure Comm Svc"]
+  end
+
+  %% ─────────────── 3 · Real-Time Engine ──────────
+  subgraph "🎙️ Real-Time Engine"
+    Planner["🧭 Planner / Orchestrator"]
+    Tools["🔧 Tool Store"]
+    Memory["🗃️ Memory Store"]
+
+    %% ---- RTAgent with internal pipeline
+    subgraph RTAgent
+      STT["STT"] --> LLM["LLM"] --> TTS["TTS"]
+    end
+
+    %% LLM reaches out to stores (dashed = data look-ups)
+    LLM -.-> Tools
+    LLM -.-> Memory
+  end
+
+  %% === Inbound voice =========================================================
+  PSTN --> CCaaS -->|SIP / RTP| ACS -->|WebSocket audio| Planner
+  WEB  -->|WebSocket audio| Planner
+
+  %% === Planner → Agent =======================================================
+  Planner --> RTAgent
+  RTAgent --> Planner
+
+  %% === Outbound voice (same path back) =======================================
+  Planner -->|WebSocket audio| ACS --> CCaaS --> PSTN
+  Planner -->|WebSocket audio| WEB
+
+  %% Styling
+  classDef bridge fill:#0078D4,color:#fff,stroke-width:2px
+  classDef store  fill:#FFE082,color:#000,stroke-width:1px,stroke:#F57F17,stroke-dasharray: 5
+  class CCaaS,ACS bridge
+  class Tools,Memory store
+```
+
+Detailed flow, infra, and state diagrams live in `docs/Architecture.md`.
+
+## **Latency & Barge-In Budget**
+
+| Hop | Target | Key Tuning |
+|-----|--------|------------|
+| STT first-byte | 40–60 ms | WebSocket streaming models |
+| LLM token | 15–40 ms | GPT-4o / cost-tier routing |
+| TTS first-byte | 45–70 ms | 24 kHz output, low-latency mode |
+| Network | ~20 ms | Same-region services |
+
+**Barge-In Flow**
+
+1. Partial STT from ACS (<10 ms) triggers `on_partial`.  
+2. Current TTS stream cancelled; `StopAudio` sent to ACS.  
+3. New speech queued; playback starts immediately—no audible clip.  
+
+Full code walk-through: `docs/ACSBargeInFlow.md`.
+
+## **Extensibility**
+
+| Extension Point | How-To |
+|-----------------|--------|
+| 🧩 New Agent | Implement new agents in `rtagents/agents/` |
+| 🔧 Tool | Add a function in `tools/`, reference in YAML |
+| 🧠 Memory | Swap Redis for Cosmos DB / Vector DB |
+| 🎯 Router | Edit `router.yaml` to balance cost vs. speed |
+
+Cross-cloud and CCaaS integrations are documented in `docs/IntegrationPoints.md`.
+
+## **Getting Started**
+
+### Local Quick-Start
+
+```bash
+# 1️⃣ Backend (FastAPI + Uvicorn)
+git clone https://github.com/your-org/gbb-ai-audio-agent.git
+cd gbb-ai-audio-agent/rtagents/RTAgent/backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.sample .env   # add ACS, Speech, OpenAI keys
+python server.py      # ws://localhost:8010/realtime
+```
+
+```bash
+# 2️⃣ Frontend (Vite + React)
+cd ../../frontend
+npm install
+npm run dev           # http://localhost:5173
+```
+
+Dial-in from a real phone? Expose your backend with **Azure Dev Tunnels**, update `BASE_URL` in both `.env` files, and mirror the URL in the ACS event subscription.
+
+## **Deployment on Azure**
+
+```bash
+azd auth login
+azd up         # full infra + code (~15 min)
+```
+
+• SSL via Key Vault ‑> App Gateway  
+• Container Apps auto-scale (KEDA)  
+• Private Redis, Cosmos DB, OpenAI endpoints  
+
+Step-by-step guide: `docs/DeploymentGuide.md`.
+
+## **Load & Chaos Testing**
+
+Targets: **<500 ms STT→TTS • 1k+ concurrent calls • >99.5 % success** (WIP)
+
+```bash
+az load test run --test-plan tests/load/azure-load-test.yaml
+```
+
+Locust & Artillery scripts: `docs/LoadTesting.md`.
 
 
-## **📞 Addressing Burnout and Enhancing Efficiency in Healthcare Call Centers**
+## **Repository Layout**
+```text
+gbb-ai-audio-agent/
+├── .github/          # CI / CD
+├── docs/             # Architecture, Deployment, Integration
+├── infra/            # Bicep modules & azd templates
+├── rtagents/         # Core Python package (agents, tools, router) [backend + Frontend (React + Vite frontend)]
+├── labs/             # Jupyter notebooks & PoCs
+├── src/              # source code libraries
+├── tests/            # pytest + load tests
+├── utils/            # diagrams & helper scripts
+└── Makefile, docker-compose.yml, CHANGELOG.md …
+```
 
-> "Healthcare call centers spend, on average, 43% of their annual operating budget on labor costs but only 0.6% on technologies to prevent agent burnout and turnover"  
-> — *[The State of Healthcare Call Centers, Hyro](https://assets-002.noviams.com/novi-file-uploads/pac/PDFs-and-Documents/Industry_Partners/Hyro_-_The_State_of_Healthcare_Call_Centers_2023_Report-fa539649.pdf?utm_source=chatgpt.com)​*
+## **Roadmap**
+- Live Agent API integration
+- Multi-modal agents (docs + images)  
 
+## **Contributing**
+PRs & issues welcome—see `CONTRIBUTING.md` and run `make pre-commit` before pushing.
 
-Healthcare call centers are the frontline of patient interaction, yet they grapple with high turnover rates and staff burnout. A study by the Quality Assurance & Training Connection (QATC) indicates that the average call center agent turnover rate ranges between 30%–45%. This attrition not only affects service quality but also escalates operational costs.​ By embracing AI-driven tools, healthcare organizations can enhance efficiency, reduce staff turnover, and ultimately improve patient satisfaction.
-
-## **🚀 How to Get Started**
-
-If you're new to Azure AI Speech and Azure OpenAI, specilaly on the realtime realm of thissg pellas efolfow the labs. Experienced AI engineers can jump straight to the use case sections, which showcase how to create how **** and **X-ray Knowledge Stores** for real-world applications.
-
-### **🧪 [RTMedAgent Labs](labs/README.md)**
-
-+ 🧪 **Building Your Voice-to-Voice Agent with Azure AI Speech and AOAI**: [🧾 Notebook - Building a Voice-to-Voice Agent with Azure AI Speech](labs/01-build-your-audio-agent.ipynb) Follow this step-by-step guide to create a voice-to-voice agent using Azure AI Speech services and Azure OpenAI. Learn how to configure speech recognition, integrate external tools, and generate human-like responses for real-time interactions.
-
-### **🏥 Use Cases**
-
-#### **📝 [Voice-to-Voice Experience with RTMedAgent (Web-Powered AI Assistant)](rtagents/browser_RTMedAgent/README.md)**
-
-This use case demonstrates how to deliver real-time, AI-powered healthcare conversations using Azure and OpenAI services. It transforms natural patient voice interactions into structured, actionable outcomes by orchestrating multiple services into one seamless agentic system.
-
-![alt text](utils/images/arch.png)
-
-1. **Audio Ingestion via Web Service**: Stream audio through a browser-based into a WebSocket connection.  
-2. **Azure Speech-to-Text (STT)**: Converts live audio into transcribed text for LLM processing.  
-3. **Azure OpenAI with Function Calling & Streaming**: Understands patient intent, routes queries, and dynamically calls backend tools in real time.  
-4. **Azure Text-to-Speech (TTS)**: Delivers natural, empathetic voice responses back to the user (chunks).  
-5. **RAI, Evaluation & Monitoring (Azure AI Studio)**: Ensures safety, transparency, and continuous performance evaluation of the deployed voice agent.  
-
-## **📚 More Resources**
-
-- **[Azure AI Foundry](https://azure.microsoft.com/en-us/products/ai-foundry/?msockid=0b24a995eaca6e7d3c1dbc1beb7e6fa8#Use-cases-and-Capabilities)** – Develop and deploy custom AI apps and APIs responsibly with a comprehensive platform.
-- **[Azure AI Speech Documentation](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/)** – Explore the official documentation for Azure AI Speech to learn about its capabilities, including Speech-to-Text, Text-to-Speech, and Speech Translation.
-- **[Azure AI Speech Samples](https://github.com/Azure-Samples/cognitive-services-speech-sdk)** – Access a collection of sample projects and code snippets to help you get started with Azure AI Speech SDK.
-
+## **License & Disclaimer**
+Released under MIT. This sample is **not** an official Microsoft product—validate compliance (HIPAA, PCI, GDPR, etc.) before production use.
 
 <br>
 

@@ -64,6 +64,8 @@ param oaiBackendPoolName string = 'openai-backend-pool'
 @description('Enable API Management for AI Services gateway functionality')
 param enableAPIManagement bool = false
 
+param apimPublicNetworkAccess bool = true
+
 @allowed(['BasicV2', 'StandardV2'])
 @description('SKU for API Management service')
 param apimSku string = 'StandardV2'
@@ -85,10 +87,10 @@ param loggers array = []
 // ============================================================================
 
 @description('JWT audience claim value for token validation in APIM policies')
-param audience string
+param audience string = ''
 
 @description('Azure Entra ID group object ID for user authorization')
-param entraGroupId string
+param entraGroupId string = ''
 
 // ============================================================================
 // IDENTITY & SECURITY
@@ -178,7 +180,7 @@ module aiSvc 'br/public:avm/res/cognitive-services/account:0.11.0' = [for (backe
     
     // Security configuration
     disableLocalAuth: disableLocalAuth
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: apimPublicNetworkAccess == true ? 'Enabled' : 'Disabled'
     
     // Model deployments
     deployments: [for model in backend.models: {
@@ -245,6 +247,7 @@ module apim 'br/public:avm/res/api-management/service:0.9.1' = if (enableAPIMana
     virtualNetworkType: virtualNetworkType
     subnetResourceId: !empty(apimSubnetResourceId) ? apimSubnetResourceId : null
     
+
     // Configuration
     namedValues: namedValues
     loggers: loggers

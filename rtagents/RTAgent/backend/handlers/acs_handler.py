@@ -134,7 +134,20 @@ class ACSHandler:
                         incoming_call_context=incoming_call_context,
                         stream_mode=ACS_STREAMING_MODE
                     )
-                    logger.info("Call answered: %s", answer_call_result.call_connection_id)
+                    # participants = event.data.get("participants", [])
+                    # target_number = cm.get_context("target_number")
+                    # target_joined = any(
+                    #     p.get("identifier", {}).get("rawId", "").endswith(target_number or "")
+                    #     for p in participants
+                    # ) if target_number else False
+                    # cm.update_context("target_participant_joined", target_joined)
+                    # cm.persist_to_redis(redis_mgr)
+                    if answer_call_result:
+                        call_connection_id = getattr(answer_call_result, 'call_connection_id', None)
+                        if call_connection_id:
+                            logger.info("Call answered: %s", call_connection_id)
+                        else:
+                            logger.warning("Call answered but no call_connection_id available: %s", answer_call_result)
                 else:
                     logger.info(f"Received event of type {event_type}: {event}")
 
