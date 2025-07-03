@@ -1,112 +1,219 @@
-# 🧠 RTMedAgent – Real-Time Voice AI Assistant (Browser-Based)
+<!-- markdownlint-disable MD033 -->
 
-Enable **real-time voice-to-voice healthcare interactions** using Azure Speech Services and GPT. This browser-based application listens to patient speech, interprets intent using AI, and responds with synthesized speech via Azure Text-to-Speech (TTS)—all in real time.
+# **🎙️ RTMedAgent: Real-Time Voice Intelligence for Healthcare Workflows**
 
-## 📂 Folder Structure
+## 📑 Table of Contents
+- [Overview](#overview)
+- [Solution Architecture](#solution-architecture)
+- [Getting Started](#getting-started)
+  - [Quick Start](#quick-start)
+- [Deployment](#deployment)
+
+---
+
+## **Overview**
+<img src="../../utils/images/medagent.png" align="right" height="180" alt="RTMedAgent Logo" />
+
+**RTMedAgent** is a reference implementation of a **real-time, voice-first virtual agent** powered by **Azure AI**. It enables healthcare organizations to deliver safe, empathetic, and intelligent phone experiences for common patient needs—reducing human hand-offs for routine tasks.
+
+> “Healthcare call centers spend, on average, 43% of their annual operating budget on labor but only 0.6% on technology to prevent agent burnout.” – *Hyro, 2023 Report*
+
+### **Why Healthcare Call Centers Need AI**
+
+| **Challenge**              | **Impact**                          |
+|-----------------------------|--------------------------------------|
+| 🔄 High agent turnover (30–45%) | Rising hiring/training costs       |
+| 😫 Staff burnout            | Lower service quality & satisfaction |
+| 💰 High labor share of budget | Less room for innovation            |
+| 📉 Inconsistent service     | Patient frustration & delays         |
+
+## **Solution Architecture**
+
+The high-level RTMedAgent architecture:
+
+![Architecture Diagram](../../utils/images/arch.png)
+
+1. **Browser** streams audio via **WebSocket** ↔️ backend.  
+2. **Speech-to-Text** (Azure Speech) transcribes audio.  
+3. **Azure OpenAI** analyzes intent and orchestrates tools.  
+4. **Azure AI Search** enriches context for accurate answers.  
+5. **Text-to-Speech** generates natural responses.  
+6. **Observability** is handled through **Azure AI Studio** and **Application Insights**.
+
+Detailed framework approach:
+
+```mermaid
+flowchart TD
+  %% ─────────────────────────── User Interface Layer ─────────────────────────────
+  subgraph "👥 User Interface Layer"
+    Phone["📞 Phone Calls<br/>Inbound / Outbound"]
+    WebMobile["📱💻 Web & Mobile Apps<br/>Voice Interface"]
+  end
+
+  %% ─────────────────────────── Communication Bridge ─────────────────────────────
+  subgraph "⚡ Azure Communication Bridge"
+    ACS["🔗 Azure Communication Services<br/>Voice & Media Transport"]
+    Speech["🗣️ Azure Speech Services<br/>STT ↔ TTS Processing"]
+  end
+
+  %% ─────────────────────────── AI Processing Engine ─────────────────────────────
+  subgraph "🧠 Real-Time Processing"
+    WebSocket["⚡ Transcription Stream<br/>via WebSocket"]
+    Orchestrator["🎯 Intent Orchestrator<br/>Agent Routing + Registration"]
+  end
+
+  %% ─────────────────────────── Core Agent Framework ─────────────────────────────
+  subgraph "🏗️ Modular Agent Network"
+    subgraph "🔌 Core Agent Framework"
+      AgentRegistry["📋 Agent Registry<br/>Component Health + Hot Swap"]
+      AgentInterface["🧩 Standardized Agent Interface<br/>Common API Contract"]
+    end
+  end
+
+  %% ─────────────────────────── Agent Intelligence Hub ───────────────────────────
+  subgraph "🧠 Agent Intelligence Hub"
+    AIHub["🧠 Agent Hub<br/>Central Control Layer"]
+
+    %% ── Subgraph: Model-Agnostic Reasoning
+    subgraph "🔄 Model-Agnostic Routing"
+      TaskRouter{🎯 Model Router}
+      TaskRouter -->|Complex Reasoning| O1["🔬 o1-preview<br/>Advanced Analytics"]
+      TaskRouter -->|Speed Critical| GPT4o["⚡ GPT-4o<br/>Real-Time Output"]
+      TaskRouter -->|Cost Sensitive| GPT4oMini["💰 GPT-4o-mini<br/>Standard Tasks"]
+    end
+
+    %% ── Subgraph: Industry-Specific Agents
+    subgraph "🏥 Industry-Specific Agents"
+      FNOL["📋 FNOL Agent"]
+      Healthcare["🏥 Healthcare Agent"]
+      Legal["⚖️ Legal Agent"]
+      Support["🛠️ Support Agent"]
+      NAgents["💬 Custom Agents"]
+    end
+
+    %% ── Subgraph: Memory Store
+    subgraph "🧠 Memory Store"
+      ShortTermMemory["📊 Short-Term Memory<br/>Real-Time Session"]
+      LongTermMemory["🗃️ Long-Term Memory<br/>Historical Context"]
+    end
+
+    %% ── Subgraph: Tool Store
+    subgraph "🧰 Tool Store"
+      FetchData["📄 Fetch Data<br/>from Docs or APIs"]
+      SyncAction["🔁 Sync Action<br/>External Services"]
+      CustomFunction["💻 Custom Function<br/>Python Logic"]
+    end
+  end
+
+  %% ─────────────────────────── Session Management ─────────────────────────────
+  subgraph "📦 Session Management"
+    Queue["📥 Agent-Agnostic Queue"]
+    Redis["💾 Redis State<br/>Live Context"]
+    Manager["🧠 Conversation Manager<br/>Dynamic Agent Assignment"]
+  end
+
+  %% ─────────────────────────── Flow Connections ─────────────────────────────
+  Phone <--> ACS
+  WebMobile <--> ACS
+  ACS --> Speech
+  Speech --> WebSocket
+  WebSocket --> Orchestrator
+
+  Orchestrator --> AgentRegistry
+  AgentRegistry --> AgentInterface
+  AgentInterface --> AIHub
+
+  AIHub --> FNOL
+  AIHub --> Healthcare
+  AIHub --> Legal
+  AIHub --> Support
+  AIHub --> NAgents
+  AIHub --> TaskRouter
+
+  TaskRouter --> Queue
+  Queue --> Speech
+
+  Orchestrator --> Manager
+  Manager --> Redis
+  ShortTermMemory --> Redis
+
+  %% Tools & Memory Used by Custom Agents
+  NAgents --> ShortTermMemory
+  NAgents --> LongTermMemory
+  NAgents --> FetchData
+  NAgents --> SyncAction
+  NAgents --> CustomFunction
+
+  %% ─────────────────────────── Styles ─────────────────────────────
+  classDef user fill:#4CAF50,stroke:#2E7D32,stroke-width:3px,color:#FFFFFF
+  classDef bridge fill:#2196F3,stroke:#1565C0,stroke-width:3px,color:#FFFFFF
+  classDef process fill:#FF9800,stroke:#E65100,stroke-width:3px,color:#FFFFFF
+  classDef agent fill:#9C27B0,stroke:#6A1B9A,stroke-width:3px,color:#FFFFFF
+  classDef infra fill:#F44336,stroke:#C62828,stroke-width:3px,color:#FFFFFF
+
+  class Phone,WebMobile user
+  class ACS,Speech bridge
+  class WebSocket,Orchestrator process
+  class FNOL,Healthcare,Legal,Support,NAgents,AIHub,O1,GPT4o,GPT4oMini,TaskRouter agent
+  class Queue,Redis,Manager infra
+```
+
+Please visit 📄 **[Architecture Guide](docs/Architecture.md)** for more details.
+
+## **Deployment**
+
+A full IaC walkthrough—including networking, SSL, scalability, and CI/CD—is in 📄 **[Deployment Guide](docs/DeploymentGuide.md)**
+
+## **Getting Started**
+
+**Understanding Folder Structure**
+
+The RTMedAgent project is organized into the following folders:
 
 ```
 rtagents/
-└── browser_RTMedAgent/
-    ├── backend/               # WebSocket server with GPT integration (Python)
-    ├── frontend/              # React + Vite UI powered by Azure Speech SDK
-    ├── test_cases_scenarios/  # Optional test scripts and scenarios
-    └── README.md              # This file
+└─ RTMedAgent/
+  ├─ backend/      # FastAPI WebSocket server for real-time transcription and GPT orchestration
+  ├─ frontend/     # React + Vite client leveraging Azure Speech SDK for voice interactions
+  ├─ test_cases_scenario/  # Optional test scripts and scenarios for validating workflows
+  └─ README.md     # Project documentation and setup instructions
 ```
 
-## 🧪 Use Case Summary
+Each folder serves a specific purpose to ensure modularity and ease of development. For example:
+- **backend/** handles server-side logic, including WebSocket communication and AI orchestration.
+- **frontend/** provides the user interface for interacting with the voice agent.
+- **test_cases_scenario/** contains optional resources for testing and debugging specific use cases.
+- **README.md** (You are here)
 
-> #### **📝 Real-Time Voice AI for Healthcare**
->
-> RTMedAgent showcases how to deliver real-time, AI-driven healthcare conversations using Azure and OpenAI services. It transforms natural patient speech into actionable, structured outcomes through a seamless, interactive system.
+Refer to the folder descriptions above as you navigate the codebase.
 
-## 🚀 Getting Started
+### **Quick Start**
 
-### 1. 🔧 Start the Backend
-### 🛰️ Using Azure Communication Services (ACS) for Calling
+Follow these steps to set up and run RTMedAgent locally:
 
-If you want to enable outbound calling via Azure Communication Services (ACS):
-
-1. **Create a Dev Tunnel for Local Backend Access**
-
-    ACS requires your backend to be accessible from the public internet. Use [Azure Dev Tunnel](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/overview) to expose your local backend on port `8010`:
-
-    ```bash
-    devtunnel create --allow-anonymous
-    devtunnel port create -p 8010
-    devtunnel host    
-    ```
-
-    This will provide a public URL (e.g., `https://<random>-<port>.use.devtunnels.ms`). Use this URL for your ACS webhook configuration.
-    Set this as your `BASE_URL` value on your python .env
-
-2. **Update Environment Variables**
-
-    - Copy `.env.sample` to `.env` in the `root` directory:
-
-      ```bash
-      cp .env.sample .env
-      ```
-
-    - Edit `.env` and update the following variables as needed:
-      ```env
-      AZURE_OPENAI_API_KEY=your_openai_api_key
-      AZURE_OPENAI_ENDPOINT=your_openai_endpoint
-      AZURE_OPENAI_DEPLOYMENT=your_openai_deployment_name
-      AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION=2024-10-01-preview
-      AZURE_SPEECH_KEY=your_speech_service_key
-      AZURE_SPEECH_REGION=your_speech_service_region
-      BASE_URL=https://<your-devtunnel>.devtunnels.ms
-      ACS_CONNECTION_STRING=your_acs_connection_string
-      ACS_SOURCE_PHONE_NUMBER=+1234567890
-      ```
-
-    Replace `<your-devtunnel>` with the public Dev Tunnel URL from step 1.
-
-3. **Configure ACS Webhook**
-
-    In your Azure Communication Services resource, set the webhook/callback URL to your Dev Tunnel endpoint (e.g., `https://<your-devtunnel>.devtunnels.ms/api/acs-callback`).
-
----
-Navigate to the `backend` folder and start the WebSocket server:
-
+**Step 1: Clone the Repository**
 ```bash
-cd rtagents/browser_RTMedAgent/backend
+git clone https://github.com/your-org/gbb-ai-audio-agent.git
+cd gbb-ai-audio-agent
+```
+
+**Step 2: Set Up the Python Backend**
+```bash
+cd rtagents/RTMedAgent/backend
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python server.py
+cp .env.sample .env   # Fill in the required keys
+python server.py      # Backend will run at ws://localhost:8010/realtime
 ```
 
-✅ The WebSocket server will start at: `ws://localhost:8010/realtime`
-
-### 2. 💻 Start the Frontend
-
-In a new terminal, navigate to the `frontend` folder and start the UI:
-
+**Step 3: Run the React Frontend**
 ```bash
-cd rtagents/browser_RTMedAgent/frontend
+cd ../frontend
 npm install
-npm run dev
+npm run dev           # Frontend will run at http://localhost:5173
 ```
 
-✅ The UI will be available at: `http://localhost:5173`
+> **Pro Tip:** For outbound PSTN calling, expose the backend using **Azure Dev Tunnels**. Update the `BASE_URL` in your environment variables and ensure the same URL is configured in your **Azure Communication Services** callback settings.
 
-### 🔑 Environment Setup (Optional)
 
-If supported, create a `.env` file in the `frontend` directory with the following variables:
 
-  ```env
-  VITE_AZURE_SPEECH_KEY=your_speech_key
-  VITE_AZURE_REGION=your_region
-  VITE_BACKEND_BASE_URL=https://<your-devtunnel>.devtunnels.ms
-  ```
-
-If `.env` is not supported, manually update these constants in `App.jsx`.
-
-## 🛠️ System Overview
-
-- **🎤 Speech-to-Text (STT):** Azure Speech SDK
-- **🧠 AI Reasoning:** Azure OpenAI GPT (via backend)
-- **🔊 Text-to-Speech (TTS):** Azure Neural Voices
-- **🔁 Real-Time Streaming:** WebSocket for bidirectional communication
-- **🖥️ Frontend:** React + Vite
-
-This system enables seamless, real-time voice interactions for healthcare applications.

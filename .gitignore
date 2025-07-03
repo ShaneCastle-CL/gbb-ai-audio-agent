@@ -182,6 +182,8 @@ records/
 .DS_Store
 
 .ssl/
+rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml
+
 
 # Don't include UV artifacts in version control
 uv.lock

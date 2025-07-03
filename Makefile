@@ -77,10 +77,14 @@ remove_conda_env:
 # Target to run the Streamlit app locally
 
 stt_aoai_tts_server: 
-	python rtagents/RTInsuranceAgent/backend/main.py
+<<<<<<< Updated upstream
+	python rtagents/rtagent/backend/main.py
+=======
+	python rtagents/RTAgent/backend/main.py
+>>>>>>> Stashed changes
 
 stt_aoai_tts_browser: 
-	cd rtagents/RTInsuranceAgent/frontend && npm install && npm run dev
+	cd rtagents/RTAgent/frontend && npm install && npm run dev
 
 stt_aoai_transcribe_microphone: 
 	python rtagents/acs_gpt4o_transcribe/app/microphone_transcribe.py
