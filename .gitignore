@@ -137,7 +137,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
+.env.bak/
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -184,9 +184,27 @@ records/
 .ssl/
 rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml
 
+<<<<<<< HEAD
 
 # Don't include UV artifacts in version control
 uv.lock
 pyproject.toml
 .python-version
 *package-lock.json
+=======
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+.terraform/
+.terraform.lock.hcl
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+>>>>>>> c69811b11fe96796a358ec523535479ee65b6cb3
