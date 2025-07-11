@@ -82,7 +82,7 @@
 
 #   ingress {
 #     external_enabled = true
-#     target_port      = 5173
+#     target_port      = 8080
 #     traffic_weight {
 #       percentage      = 100
 #       latest_revision = true
@@ -106,7 +106,7 @@
 
 #       env {
 #         name  = "PORT"
-#         value = "5173"
+#         value = "8080"
 #       }
 #     }
 #   }
@@ -174,7 +174,7 @@
 
 #   ingress {
 #     external_enabled = true
-#     target_port      = 8010
+#     target_port      = 8000
 #     traffic_weight {
 #       percentage      = 100
 #       latest_revision = true

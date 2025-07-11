@@ -13,21 +13,26 @@ infra:
 #     host: appservice
 #     language: js
     
-    
 #   rtaudio-server:
 #     project: rtagents/RTAgent/backend
 #     host: appservice
 #     language: python
+    
 
 hooks:
   preprovision:
     shell: sh
-    run: ./scripts/azd-preprovision.sh
+    run: ./scripts/azd/preprovision.sh terraform
     interactive: true
+    continueOnError: false
+  predeploy:
+    shell: sh
+    run: ./scripts/azd/predeploy.sh RTAgent
+    interactive: false
     continueOnError: false
   postprovision:
     shell: sh
-    run: ./scripts/azd-postprovision.sh
+    run: ./scripts/azd/postprovision.sh
     interactive: true
     continueOnError: false
 

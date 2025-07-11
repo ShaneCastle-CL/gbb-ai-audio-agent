@@ -14,16 +14,20 @@ echo ""
 # Load environment variables from .env file
 echo "🔍 Checking ACS_SOURCE_PHONE_NUMBER..."
 EXISTING_ACS_PHONE_NUMBER="$(azd env get-value ACS_SOURCE_PHONE_NUMBER 2>/dev/null || echo "")"
-
+SKIP_PHONE_CREATION=false
 if [ -n "$EXISTING_ACS_PHONE_NUMBER" ] && [ "$EXISTING_ACS_PHONE_NUMBER" != "null" ]; then
     if [[ "$EXISTING_ACS_PHONE_NUMBER" =~ ^\+[0-9]+$ ]]; then
         echo "✅ ACS_SOURCE_PHONE_NUMBER already exists: $EXISTING_ACS_PHONE_NUMBER"
         echo "⏩ Skipping phone number creation."
+        SKIP_PHONE_CREATION=true
     else
         echo "⚠️ ACS_SOURCE_PHONE_NUMBER exists but is not a valid phone number format: $EXISTING_ACS_PHONE_NUMBER"
         echo "🔄 Proceeding with phone number creation..."
+        SKIP_PHONE_CREATION=false
     fi
-else
+fi
+
+if [ "$SKIP_PHONE_CREATION" == false ]; then
     echo "🔄 Creating a new ACS phone number..."
     {
         # Ensure Azure CLI communication extension is installed
@@ -49,7 +53,7 @@ else
 
         # Run the Python script to create a new phone number
         echo "📞 Creating a new ACS phone number..."
-        PHONE_NUMBER=$(python3 scripts/acs_phone_number_manager.py --endpoint "$ACS_ENDPOINT" purchase || echo "")
+        PHONE_NUMBER=$(python3 scripts/azd/helpers/acs_phone_number_manager.py --endpoint "$ACS_ENDPOINT" purchase)
         if [ -z "$PHONE_NUMBER" ]; then
             echo "❌ Error: Failed to create ACS phone number."
             exit 1

@@ -63,6 +63,8 @@ resource "azurerm_linux_web_app" "frontend" {
   })
 }
 
+
+
 # Backend App Service  
 resource "azurerm_linux_web_app" "backend" {
   name                = "${var.name}-backend-app-${local.resource_token}"
@@ -93,6 +95,8 @@ resource "azurerm_linux_web_app" "backend" {
     "AZURE_SPEECH_KEY" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=speech-key)"
     "AZURE_OPENAI_KEY" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=openai-key)"
   }, {
+    "PORT"                                  = "8000"
+
     # Regular environment variables - matching container app configuration
     "AZURE_CLIENT_ID"                       = azurerm_user_assigned_identity.backend.client_id
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string

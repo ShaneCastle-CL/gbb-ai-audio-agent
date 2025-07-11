@@ -51,7 +51,7 @@ output "AZURE_SPEECH_REGION" {
 # Communication Services
 output "ACS_ENDPOINT" {
   description = "Azure Communication Services endpoint"
-  value       = "https://${azurerm_communication_service.main.data_location}.communication.azure.com"
+  value       = azurerm_communication_service.main.hostname
 }
 
 output "ACS_RESOURCE_ID" {
