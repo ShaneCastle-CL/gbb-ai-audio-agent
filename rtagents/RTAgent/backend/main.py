@@ -11,6 +11,7 @@ Entrypoint that stitches everything together:
 from __future__ import annotations
 
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -50,27 +51,19 @@ from rtagents.RTAgent.backend.agents.prompt_store.prompt_manager import PromptMa
 
 logger = get_logger("main")
 
-# --------------------------------------------------------------------------- #
-#  App factory
-# --------------------------------------------------------------------------- #
-app = FastAPI()
-app.state.clients = set()  # /relay dashboard sockets
-app.state.greeted_call_ids = set()  # to avoid double greetings
 
-# ---------------- Middleware ------------------------------------------------
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    max_age=86400,
-)
-
-# ---------------- Startup / Shutdown ---------------------------------------
-@app.on_event("startup")
-async def on_startup() -> None:
+# --------------------------------------------------------------------------- #
+#  Lifecycle Management
+# --------------------------------------------------------------------------- #
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifecycle: startup and shutdown events."""
+    # Startup
     logger.info("🚀 startup…")
+
+    # Initialize app state
+    app.state.clients = set()  # /relay dashboard sockets
+    app.state.greeted_call_ids = set()  # to avoid double greetings
 
     # Speech SDK
     app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS)
@@ -79,6 +72,7 @@ async def on_startup() -> None:
         candidate_languages=["en-US", "es-ES", "fr-FR", "ko-KR", "it-IT"],
         audio_format="pcm"
     )
+    
     # Redis connection
     app.state.redis = AzureRedisManager()
 
@@ -109,6 +103,7 @@ async def on_startup() -> None:
             "silence_duration_ms": SILENCE_DURATION_MS,
         },
     }
+    
     # Outbound ACS caller (may be None if env vars missing)
     app.state.acs_caller = initialize_acs_caller_instance()
     app.state.auth_agent = RTAgent(
@@ -117,13 +112,32 @@ async def on_startup() -> None:
     app.state.claim_intake_agent = RTAgent(
         config_path="rtagents/RTAgent/backend/agents/agent_store/claim_intake_agent.yaml"
     )
+    
     logger.info("startup complete")
-
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
+    
+    # Yield control to the application
+    yield
+    
+    # Shutdown
     logger.info("🛑 shutdown…")
-    # (Close Redis, ACS sessions, etc. if your helpers expose close() methods)
+    # Close Redis, ACS sessions, etc. if your helpers expose close() methods
+    # Add any cleanup logic here as needed
 
+
+# --------------------------------------------------------------------------- #
+#  App factory
+# --------------------------------------------------------------------------- #
+app = FastAPI(lifespan=lifespan)
+
+# ---------------- Middleware ------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=86400,
+)
 
 # ---------------- Routers ---------------------------------------------------
 app.include_router(api_router)
@@ -134,9 +148,10 @@ app.include_router(api_router)
 if __name__ == "__main__":
     import uvicorn
 
+    port = int(os.environ.get("PORT", 8010))
     uvicorn.run(
         "main:app",  # Use import string to support reload
         host="0.0.0.0",
-        port=8010,
+        port=port,
         reload=True,
     )

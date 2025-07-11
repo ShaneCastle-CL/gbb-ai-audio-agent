@@ -92,7 +92,25 @@ variable "openai_models" {
     {
       name     = "gpt-4o"
       version  = "2024-11-20"
-      sku_name = "Standard"
+      sku_name = "DataZoneStandard"
+      capacity = 50
+    },
+    {
+      name     = "gpt-4o-mini"
+      version  = "2024-07-18"
+      sku_name = "DataZoneStandard"
+      capacity = 50
+    },
+    {
+      name     = "gpt-4.1-mini"
+      version  = "2025-04-14"
+      sku_name = "DataZoneStandard"
+      capacity = 50
+    },
+    {
+      name     = "gpt-4.1"
+      version  = "2025-04-14"
+      sku_name = "DataZoneStandard"
       capacity = 50
     }
   ]
