@@ -192,6 +192,7 @@ rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml
 *.tfstate
 *.tfstate.*
 *.tfvars
+main.tfvars.json
 .terraform/
 .terraform.lock.hcl
 crash.log

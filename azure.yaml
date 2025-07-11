@@ -27,7 +27,7 @@ hooks:
     continueOnError: false
   predeploy:
     shell: sh
-    run: ./scripts/azd/predeploy.sh RTAgent
+    run: ./scripts/azd/predeploy.sh RTAgent appservice
     interactive: false
     continueOnError: false
   postprovision:
