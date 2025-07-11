@@ -34,15 +34,22 @@ case "$PROVIDER" in
         ;;
     "terraform")
         echo "Terraform deployment detected"
-        # Call tf-init.sh from helpers directory
-        TF_INIT_SCRIPT="$SCRIPT_DIR/helpers/tf-init.sh"
-        if [ -f "$TF_INIT_SCRIPT" ]; then
-            echo "Running Terraform Remote State initialization..."
-            bash "$TF_INIT_SCRIPT"
-        else
-            echo "Error: tf-init.sh not found at $TF_INIT_SCRIPT"
-            exit 1
+        # Set terraform variables through environment exports
+        echo "Setting Terraform variables from Azure environment..."
+        export TF_VAR_environment_name="$AZURE_ENV_NAME"
+        export TF_VAR_location="$AZURE_LOCATION"
+
+        if [ -z "$AZURE_ENV_NAME" ]; then
+            echo "Warning: AZURE_ENV_NAME environment variable is not set"
         fi
+
+        if [ -z "$AZURE_LOCATION" ]; then
+            echo "Warning: AZURE_LOCATION environment variable is not set"
+        fi
+
+        echo "Terraform variables configured:"
+        echo "  TF_VAR_environment_name=$TF_VAR_environment_name"
+        echo "  TF_VAR_location=$TF_VAR_location"
         ;;
     *)
         echo "Error: Invalid provider '$PROVIDER'. Must be 'bicep' or 'terraform'"

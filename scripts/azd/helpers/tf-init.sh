@@ -95,9 +95,17 @@ check_existing_state_config() {
     local storage_container_name
     local resource_group_name
     
-    storage_account_name=$(get_azd_env_value "TERRAFORM_STATE_STORAGE_ACCOUNT")
-    storage_container_name=$(get_azd_env_value "TERRAFORM_STATE_CONTAINER")
-    resource_group_name=$(get_azd_env_value "TERRAFORM_STATE_RESOURCE_GROUP")
+    # Check for new RS_* variables first
+    storage_account_name=$(get_azd_env_value "RS_STORAGE_ACCOUNT")
+    storage_container_name=$(get_azd_env_value "RS_CONTAINER_NAME")
+    resource_group_name=$(get_azd_env_value "RS_RESOURCE_GROUP")
+    
+    # Fall back to old TERRAFORM_STATE_* variables for backward compatibility
+    if [[ -z "$storage_account_name" ]]; then
+        storage_account_name=$(get_azd_env_value "TERRAFORM_STATE_STORAGE_ACCOUNT")
+        storage_container_name=$(get_azd_env_value "TERRAFORM_STATE_CONTAINER")
+        resource_group_name=$(get_azd_env_value "TERRAFORM_STATE_RESOURCE_GROUP")
+    fi
     
     if [[ -n "$storage_account_name" && -n "$storage_container_name" && -n "$resource_group_name" ]]; then
         log_warning "Terraform remote state configuration already exists:"
@@ -108,6 +116,12 @@ check_existing_state_config() {
         # Check if the storage account actually exists
         if az storage account show --name "$storage_account_name" --resource-group "$resource_group_name" &> /dev/null; then
             log_success "Storage account exists and is accessible."
+            
+            # Set global variables for use by other functions
+            STORAGE_ACCOUNT_NAME="$storage_account_name"
+            STORAGE_CONTAINER_NAME="$storage_container_name"
+            RESOURCE_GROUP_NAME="$resource_group_name"
+            
             return 0
         else
             log_warning "Storage account does not exist or is not accessible. Will create new one."
@@ -261,33 +275,50 @@ assign_storage_permissions() {
     fi
 }
 
-# Set azd environment variables
+# Set azd environment variables for Terraform remote state
 set_azd_environment_variables() {
     log_info "Setting azd environment variables..."
     
-    azd env set TERRAFORM_STATE_STORAGE_ACCOUNT "$STORAGE_ACCOUNT_NAME"
-    azd env set TERRAFORM_STATE_CONTAINER "$STORAGE_CONTAINER_NAME" 
-    azd env set TERRAFORM_STATE_RESOURCE_GROUP "$RESOURCE_GROUP_NAME"
-    azd env set TERRAFORM_STATE_KEY "terraform.tfstate"
+    azd env set RS_STORAGE_ACCOUNT "$STORAGE_ACCOUNT_NAME"
+    azd env set RS_CONTAINER_NAME "$STORAGE_CONTAINER_NAME" 
+    azd env set RS_RESOURCE_GROUP "$RESOURCE_GROUP_NAME"
+    azd env set RS_STATE_KEY "terraform.tfstate"
     
     log_success "Environment variables set:"
-    echo "  TERRAFORM_STATE_STORAGE_ACCOUNT=$STORAGE_ACCOUNT_NAME"
-    echo "  TERRAFORM_STATE_CONTAINER=$STORAGE_CONTAINER_NAME"
-    echo "  TERRAFORM_STATE_RESOURCE_GROUP=$RESOURCE_GROUP_NAME"
-    echo "  TERRAFORM_STATE_KEY=terraform.tfstate"
+    echo "  RS_STORAGE_ACCOUNT=$STORAGE_ACCOUNT_NAME"
+    echo "  RS_CONTAINER_NAME=$STORAGE_CONTAINER_NAME"
+    echo "  RS_RESOURCE_GROUP=$RESOURCE_GROUP_NAME"
+    echo "  RS_STATE_KEY=terraform.tfstate"
+}
+
+# Ensure infra-tf directory exists
+ensure_terraform_directory() {
+    local infra_dir="./infra-tf"
+    
+    log_info "Ensuring Terraform directory exists..."
+    
+    if [[ ! -d "$infra_dir" ]]; then
+        mkdir -p "$infra_dir"
+        log_success "Created Terraform directory: $infra_dir"
+    else
+        log_success "Terraform directory already exists: $infra_dir"
+    fi
 }
 
 # Update Terraform variables file with azd environment values
 update_terraform_vars() {
     local tfvars_file="./infra-tf/main.tfvars.json"
+    local provider_conf_file="./infra-tf/provider.conf.json"
     local env_name
     local location
+    local subscription_id
     
-    log_info "Updating Terraform variables file..."
+    log_info "Updating Terraform variables and configuration files..."
     
     # Get azd environment values
     env_name=$(get_azd_env_value "AZURE_ENV_NAME")
     location=$(get_azd_env_value "AZURE_LOCATION")
+    subscription_id=$(az account show --query id -o tsv)
     
     # Set defaults if not found
     if [[ -z "$env_name" ]]; then
@@ -334,46 +365,45 @@ EOF
 EOF
     fi
     
-    log_success "Terraform variables updated:"
-    echo "  environment_name: $env_name"
-    echo "  location: $location"
-    echo "  File: $tfvars_file"
-}
-
-# Create Terraform backend configuration file
-create_backend_config() {
-    local backend_config_file="./infra-tf/backend.tf"
-    
-    log_info "Creating Terraform backend configuration..."
-    
-    cat > "$backend_config_file" << EOF
-# ============================================================================
-# TERRAFORM BACKEND CONFIGURATION
-# ============================================================================
-# This file configures Terraform to use Azure Storage for remote state
-# with Entra ID authentication.
-
-terraform {
-  backend "azurerm" {
-    storage_account_name = "$STORAGE_ACCOUNT_NAME"
-    container_name       = "$STORAGE_CONTAINER_NAME"
-    key                  = "terraform.tfstate"
-    use_azuread_auth     = true
-  }
+    # Create provider configuration file
+    log_info "Creating provider configuration file: $provider_conf_file"
+    cat > "$provider_conf_file" << EOF
+{
+  "subscription_id": "$subscription_id",
+  "environment_name": "$env_name",
+  "location": "$location",
+  "terraform_state_storage_account": "$STORAGE_ACCOUNT_NAME",
+  "terraform_state_container": "$STORAGE_CONTAINER_NAME",
+  "terraform_state_resource_group": "$RESOURCE_GROUP_NAME"
 }
 EOF
     
-    log_success "Backend configuration created: $backend_config_file"
+    log_success "Terraform configuration files updated:"
+    echo "  environment_name: $env_name"
+    echo "  location: $location"
+    echo "  subscription_id: $subscription_id"
+    echo "  Files: $tfvars_file, $provider_conf_file"
+}
+
+# Create Terraform backend configuration file
+create_provider_config() {
+    local provider_config_file="./infra-tf/provider.conf.json"
     
-    # Also create a gitignore entry to avoid committing backend.tf with hardcoded values
-    if [[ -f .gitignore ]]; then
-        if ! grep -q "infra-tf/backend.tf" .gitignore; then
-            echo "" >> .gitignore
-            echo "# Terraform backend config (contains environment-specific values)" >> .gitignore
-            echo "infra-tf/backend.tf" >> .gitignore
-            log_info "Added backend.tf to .gitignore"
-        fi
-    fi
+    log_info "Creating azd Terraform provider configuration..."
+    
+    cat > "$provider_config_file" << EOF
+{
+    "resource_group_name": "\${RS_RESOURCE_GROUP}",
+    "storage_account_name": "\${RS_STORAGE_ACCOUNT}",
+    "container_name": "\${RS_CONTAINER_NAME}",
+    "key": "azd/\${AZURE_ENV_NAME}.tfstate"
+}
+EOF
+    
+    log_success "Provider configuration created: $provider_config_file"
+    
+    # No need to add to gitignore since provider.conf.json contains template variables,
+    # not hardcoded values. This file should be committed to version control.
 }
 
 # Validate the setup
@@ -392,9 +422,8 @@ validate_setup() {
         return 1
     fi
     
-    # Test Terraform init (if terraform is available)
+    # Test Terraform initialization if terraform is available
     if command -v terraform &> /dev/null; then
-        log_info "Testing Terraform initialization..."
         if (cd infra-tf && terraform init -input=false &> /dev/null); then
             log_success "Terraform initialization successful."
         else
@@ -418,6 +447,21 @@ main() {
     # Check if remote state is already configured
     if check_existing_state_config; then
         log_success "Terraform remote state is already configured and accessible."
+        
+        # Still need to create provider.conf.json and set environment variables for azd
+        log_info "Creating azd provider configuration for existing remote state..."
+        set_azd_environment_variables
+        create_provider_config
+        
+        echo ""
+        log_success "✅ azd Terraform provider configuration completed!"
+        echo ""
+        echo "📋 Next steps:"
+        echo "   1. Verify configuration with 'azd env get-values | grep RS_'"
+        echo "   2. Run 'azd up' to deploy your infrastructure"
+        echo ""
+        echo "📁 Files updated:"
+        echo "   - infra-tf/provider.conf.json (azd Terraform provider configuration)"
         exit 0
     fi
     
@@ -433,7 +477,7 @@ main() {
     # Configure azd and Terraform
     set_azd_environment_variables
     update_terraform_vars
-    create_backend_config
+    create_provider_config
     
     # Validate setup
     validate_setup
@@ -446,9 +490,8 @@ main() {
     echo "   2. Run 'azd up' to deploy your infrastructure"
     echo ""
     echo "� Files updated:"
-    echo "   - infra-tf/backend.tf (Terraform backend configuration)"
+    echo "   - infra-tf/provider.conf.json (azd Terraform provider configuration)"
     echo "   - infra-tf/main.tfvars.json (Terraform variables from azd env)"
-    echo "   - .gitignore (added backend.tf exclusion)"
     echo ""
     echo "�🔒 Security notes:"
     echo "   - Remote state uses Entra ID authentication"
