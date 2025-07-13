@@ -7,6 +7,8 @@ import {
 } from "microsoft-cognitiveservices-speech-sdk";
 import ReactFlow, { ReactFlowProvider, MiniMap, Controls } from "reactflow";
 import "reactflow/dist/style.css";
+import { useHealthMonitor } from "./hooks/useHealthMonitor";
+import HealthStatusIndicator from "./components/HealthStatusIndicator";
 
 /* ------------------------------------------------------------------ *
  *  ENV VARS
@@ -16,6 +18,8 @@ const {
   VITE_AZURE_REGION: AZURE_REGION,
   VITE_BACKEND_BASE_URL: API_BASE_URL,
 } = import.meta.env;
+
+
 const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
 
 /* ------------------------------------------------------------------ *
@@ -176,6 +180,19 @@ export default function RealTimeVoiceApp() {
   const [targetPhoneNumber, setTargetPhoneNumber] = useState("");
   const [callActive, setCallActive] = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
+
+  /* ---------- health monitoring ---------- */
+  const { 
+    healthStatus = { isHealthy: null, lastChecked: null, responseTime: null, error: null },
+    readinessStatus = { status: null, timestamp: null, responseTime: null, checks: [], lastChecked: null, error: null },
+    overallStatus = { isHealthy: false, hasWarnings: false, criticalErrors: [] },
+    refresh = () => {} 
+  } = useHealthMonitor({
+    baseUrl: API_BASE_URL,
+    healthInterval: 30000,
+    readinessInterval: 15000,
+    enableAutoRefresh: true,
+  });
 
 
   /* ---------- mind‑map state ---------- */
@@ -688,11 +705,25 @@ export default function RealTimeVoiceApp() {
     <div style={styles.root}>
       {/* ------- HEADER ------- */}
       <header style={styles.header}>
-        <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
-        <p style={styles.headerSubtitle}>
-          Transforming patient care with real‑time, intelligent voice
-          interactions powered by Azure AI
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
+            <p style={styles.headerSubtitle}>
+              Transforming patient care with real‑time, intelligent voice
+              interactions powered by Azure AI
+            </p>
+          </div>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <HealthStatusIndicator
+              healthStatus={healthStatus}
+              readinessStatus={readinessStatus}
+              overallStatus={overallStatus}
+              onRefresh={refresh}
+              compact={true}
+            />
+          </div>
+        </div>
       </header>
 
       {/* ------- CHAT ------- */}
