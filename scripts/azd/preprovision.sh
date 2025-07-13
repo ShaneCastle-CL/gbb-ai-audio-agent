@@ -34,89 +34,66 @@ case "$PROVIDER" in
         ;;
     "terraform")
         echo "Terraform deployment detected"
+        echo "Running Terraform Remote State initialization..."
         
-        echo "Setting Terraform variables from Azure environment..."
-        
-        # Define required tfvars mappings (environment_variable:tfvar_key)
-        declare -A REQUIRED_TFVARS=(
-            ["AZURE_ENV_NAME"]="environment_name"
-            ["AZURE_LOCATION"]="location"
-        )
-        
-        TFVARS_FILE="./infra-tf/main.tfvars.json"
-        
-        # Check if update is needed
-        needs_tfvars_update() {
-            if [ ! -f "$TFVARS_FILE" ]; then
-                echo "Creating new $TFVARS_FILE..."
-                return 0
-            fi
-            
-            # Check each required variable
-            for env_var in "${!REQUIRED_TFVARS[@]}"; do
-                tfvar_key="${REQUIRED_TFVARS[$env_var]}"
-                
-                if ! grep -q "\"$tfvar_key\"" "$TFVARS_FILE"; then
-                    echo "Missing required variable '$tfvar_key' in $TFVARS_FILE"
-                    return 0
-                fi
-                
-                # Check if value is empty
-                value=$(jq -r ".$tfvar_key // empty" "$TFVARS_FILE" 2>/dev/null)
-                if [ -z "$value" ] || [ "$value" = "null" ]; then
-                    echo "Empty value for '$tfvar_key' in $TFVARS_FILE"
-                    return 0
-                fi
-            done
-            
-            echo "$TFVARS_FILE already contains all required variables with values"
-            return 1
-        }
-        
-        # Update tfvars file if needed
-        if needs_tfvars_update; then
-            echo "Updating $TFVARS_FILE..."
-            
-            # Start with existing file or empty object
-            if [ -f "$TFVARS_FILE" ]; then
-                base_json=$(cat "$TFVARS_FILE")
-            else
-                base_json="{}"
-            fi
-            
-            # Build jq arguments for all required variables
-            jq_args=()
-            for env_var in "${!REQUIRED_TFVARS[@]}"; do
-                tfvar_key="${REQUIRED_TFVARS[$env_var]}"
-                env_value="${!env_var}"
-                
-                if [ -z "$env_value" ]; then
-                    echo "Warning: Environment variable $env_var is not set"
-                    continue
-                fi
-                
-                jq_args+=(--arg "$tfvar_key" "$env_value")
-            done
-            
-            # Build jq expression to set all variables
-            jq_expr=". + {"
-            first=true
-            for env_var in "${!REQUIRED_TFVARS[@]}"; do
-                tfvar_key="${REQUIRED_TFVARS[$env_var]}"
-                if [ ! -z "${!env_var}" ]; then
-                    if [ "$first" = false ]; then
-                        jq_expr+=", "
-                    fi
-                    jq_expr+="\"$tfvar_key\": \$$tfvar_key"
-                    first=false
-                fi
-            done
-            jq_expr+="}"
-            
-            # Apply updates
-            echo "$base_json" | jq "${jq_args[@]}" "$jq_expr" > "$TFVARS_FILE"
-            echo "  tfvars file updated: $TFVARS_FILE"
+        # Call tf-init.sh from helpers directory
+        TF_INIT_SCRIPT="$SCRIPT_DIR/helpers/tf-init.sh"
+        if [ -f "$TF_INIT_SCRIPT" ]; then
+            bash "$TF_INIT_SCRIPT"
+        else
+            echo "Warning: tf-init.sh not found at $TF_INIT_SCRIPT"
         fi
+        
+        # Set terraform variables through environment exports and tfvars file
+        echo "Setting Terraform variables from Azure environment..."
+        export TF_VAR_environment_name="$AZURE_ENV_NAME"
+        export TF_VAR_location="$AZURE_LOCATION"
+
+        # Validate required variables
+        if [ -z "$AZURE_ENV_NAME" ]; then
+            echo "Error: AZURE_ENV_NAME environment variable is not set"
+            exit 1
+        fi
+
+        if [ -z "$AZURE_LOCATION" ]; then
+            echo "Error: AZURE_LOCATION environment variable is not set"
+            exit 1
+        fi
+
+        # Get optional ACS phone number from AZD environment
+        ACS_SOURCE_PHONE_NUMBER=$(azd env get-value ACS_SOURCE_PHONE_NUMBER 2>/dev/null || echo "")
+        
+        # Generate tfvars.json
+        TFVARS_FILE="./infra-tf/main.tfvars.json"
+        echo "Generating $TFVARS_FILE..."
+        
+        # Build JSON content dynamically
+        JSON_CONTENT="{
+  \"environment_name\": \"$AZURE_ENV_NAME\",
+  \"location\": \"$AZURE_LOCATION\""
+        
+        if [ -n "$ACS_SOURCE_PHONE_NUMBER" ]; then
+            JSON_CONTENT="$JSON_CONTENT,
+  \"acs_source_phone_number\": \"$ACS_SOURCE_PHONE_NUMBER\""
+        fi
+        
+        JSON_CONTENT="$JSON_CONTENT
+}"
+        
+        # Write to file
+        echo "$JSON_CONTENT" > "$TFVARS_FILE"
+
+        # Display configuration summary
+        echo ""
+        echo "✅ Terraform variables configured:"
+        echo "   Environment: $AZURE_ENV_NAME"
+        echo "   Location: $AZURE_LOCATION"
+        if [ -n "$ACS_SOURCE_PHONE_NUMBER" ]; then
+            echo "   ACS Phone: $ACS_SOURCE_PHONE_NUMBER"
+        else
+            echo "   ACS Phone: null (not set)"
+        fi
+        echo "   Config file: $TFVARS_FILE"
         ;;
     *)
         echo "Error: Invalid provider '$PROVIDER'. Must be 'bicep' or 'terraform'"

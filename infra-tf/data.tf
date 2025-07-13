@@ -101,7 +101,6 @@ import {
   to = azapi_resource.mongoCluster
 }
 */
-
 resource "azapi_resource" "mongoCluster" {
   type      = "Microsoft.DocumentDB/mongoClusters@2025-04-01-preview"
   parent_id = azurerm_resource_group.main.id
@@ -114,9 +113,10 @@ resource "azapi_resource" "mongoCluster" {
         password = random_password.cosmos_admin.result
       }
       authConfig = {
+        # Ensure the order is always the same and matches the API's default
         allowedModes = [
-          "NativeAuth",
-          "MicrosoftEntraID"
+          "MicrosoftEntraID",
+          "NativeAuth"
         ]
       }
       backup = {}
@@ -142,6 +142,22 @@ resource "azapi_resource" "mongoCluster" {
     }
   }
   tags = local.tags
+
+  # Suppress diffs for allowedModes array ordering
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["authConfig"]["allowedModes"],
+      output["properties"]["authConfig"]["allowedModes"],
+      output["properties"]["backup"]["earliestRestoreTime"],
+      output["properties"]["clusterStatus"],
+      output["properties"]["connectionString"],
+      output["properties"]["infrastructureVersion"],
+      output["properties"]["provisioningState"],
+      output["properties"]["replica"]["replicationState"],
+      output["properties"]["replica"]["role"],
+      output["tags"]
+    ]
+  }
 }
 
 
@@ -170,7 +186,6 @@ resource "azurerm_key_vault_secret" "cosmos_admin_password" {
 
     depends_on = [azurerm_role_assignment.keyvault_admin]
 }
-
 # RBAC assignments for Cosmos DB vCore cluster
 resource "azapi_resource" "cosmos_backend_db_user" {
   type = "Microsoft.DocumentDB/mongoClusters/users@2025-04-01-preview"
@@ -180,7 +195,7 @@ resource "azapi_resource" "cosmos_backend_db_user" {
     properties = {
       identityProvider = {
         properties = {
-          principalType = "servicePrincipal"
+          principalType = "ServicePrincipal"
         }
         type = "MicrosoftEntraID"
         // For remaining properties, see IdentityProvider objects
@@ -192,6 +207,18 @@ resource "azapi_resource" "cosmos_backend_db_user" {
         }
       ]
     }
+  }
+
+  # Suppress diffs for output and principalType casing
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["identityProvider"]["properties"]["principalType"],
+      output["properties"]["provisioningState"],
+      output["properties"]["roles"],
+      output["id"],
+      output["type"],
+      output,
+    ]
   }
 }
 

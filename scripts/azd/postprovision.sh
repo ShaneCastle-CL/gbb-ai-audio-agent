@@ -114,63 +114,20 @@ echo ""
 AZD_ENV_NAME="$(azd env get-value AZURE_ENV_NAME 2>/dev/null || echo "dev")"
 ENV_FILE=".env.${AZD_ENV_NAME}"
 
-echo "🔧 Creating ${ENV_FILE} in project root..."
+# Get the script directory to locate helper scripts
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GENERATE_ENV_SCRIPT="$SCRIPT_DIR/helpers/generate-env.sh"
 
-# Function to safely get azd environment value with fallback
-get_azd_value() {
-    local key="$1"
-    local fallback="$2"
-    azd env get-value "$key" 2>/dev/null || echo "${fallback:-}"
-}
+echo "📝 Running: $GENERATE_ENV_SCRIPT $AZD_ENV_NAME $ENV_FILE"
 
-# Generate the backend environment file
-cat > "$ENV_FILE" << EOF
-# Generated automatically by azd postprovision hook on $(date)
-# Environment: ${AZD_ENV_NAME}
-# =================================================================
+# Run the modular environment generation script
+if "$GENERATE_ENV_SCRIPT" "$AZD_ENV_NAME" "$ENV_FILE"; then
+    echo "✅ Environment file generation completed successfully"
+else
+    echo "❌ Environment file generation failed"
+    exit 1
+fi
 
-# Azure OpenAI Configuration
-AZURE_OPENAI_KEY=$(get_azd_value "AZURE_OPENAI_KEY")
-AZURE_OPENAI_ENDPOINT=$(get_azd_value "AZURE_OPENAI_ENDPOINT")
-AZURE_OPENAI_DEPLOYMENT=$(get_azd_value "AZURE_OPENAI_CHAT_DEPLOYMENT_ID")
-AZURE_OPENAI_API_VERSION=$(get_azd_value "AZURE_OPENAI_API_VERSION")
-AZURE_OPENAI_CHAT_DEPLOYMENT_ID=$(get_azd_value "AZURE_OPENAI_CHAT_DEPLOYMENT_ID")
-AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION=2024-10-01-preview
-
-# Azure Speech Services Configuration
-AZURE_SPEECH_ENDPOINT=$(get_azd_value "AZURE_SPEECH_ENDPOINT")
-AZURE_SPEECH_KEY=$(get_azd_value "AZURE_SPEECH_KEY")
-AZURE_SPEECH_RESOURCE_ID=$(get_azd_value "AZURE_SPEECH_RESOURCE_ID")
-AZURE_SPEECH_REGION=$(get_azd_value "AZURE_SPEECH_REGION")
-
-# Base URL Configuration
-BASE_URL=$(get_azd_value "BACKEND_CONTAINER_APP_URL")
-
-# Azure Communication Services Configuration
-ACS_CONNECTION_STRING=$(get_azd_value "ACS_CONNECTION_STRING")
-ACS_SOURCE_PHONE_NUMBER=$(get_azd_value "ACS_SOURCE_PHONE_NUMBER")
-
-# Redis Configuration
-REDIS_HOST=$(get_azd_value "REDIS_HOSTNAME")
-REDIS_PORT=$(get_azd_value "REDIS_PORT")
-
-# Azure Storage Configuration
-AZURE_STORAGE_CONNECTION_STRING=$(get_azd_value "AZURE_STORAGE_CONNECTION_STRING")
-AZURE_STORAGE_CONTAINER_URL=$(get_azd_value "AZURE_STORAGE_CONTAINER_URL")
-
-# Azure Cosmos DB Configuration
-AZURE_COSMOS_DB_DATABASE_NAME=$(get_azd_value "AZURE_COSMOS_DB_DATABASE_NAME" "audioagentdb")
-AZURE_COSMOS_DB_COLLECTION_NAME=$(get_azd_value "AZURE_COSMOS_DB_COLLECTION_NAME" "audioagentcollection")
-AZURE_COSMOS_CONNECTION_STRING=$(get_azd_value "AZURE_COSMOS_CONNECTION_STRING")
-
-# ACS Streaming Configuration
-ACS_STREAMING_MODE=media
-EOF
-
-# Set appropriate permissions
-chmod 644 "$ENV_FILE" 2>/dev/null || true
-
-echo "✅ Created ${ENV_FILE} successfully"
 echo "📋 Environment file contains $(grep -c '^[A-Z]' "$ENV_FILE") configuration variables"
 echo ""
 

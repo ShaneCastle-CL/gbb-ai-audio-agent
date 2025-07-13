@@ -1,23 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
-
-# ========================================================================
-# 🚀 Enhanced Azure App Service Deployment with azd Integration
-# ========================================================================
-
-# Colors for output
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-
-# Configuration
-AGENT="${1:-RTAgent}"
-MODE="${2:-both}"  # frontend, backend, or both
-
-# Helper functions
+# ================# Helper functions
 log_info() {
     echo -e "${BLUE}ℹ️  [INFO]${NC} $*"
 }
@@ -34,169 +17,219 @@ log_error() {
     echo -e "${RED}❌ [ERROR]${NC} $*" >&2
 }
 
-echo "========================================================================="
-echo "🚀 Deploying $AGENT ($MODE) to App Service"
-echo "========================================================================="
-
-# Validate azd environment
-validate_azd_environment() {
-    log_info "Validating azd environment..."
+# Check if required commands exist
+check_dependencies() {
+    local missing_commands=()
     
-    local required_vars=("AZURE_RESOURCE_GROUP" "FRONTEND_APP_SERVICE_NAME" "BACKEND_APP_SERVICE_NAME" "AZURE_ENV_NAME")
-    local missing_vars=()
-    
-    for var in "${required_vars[@]}"; do
-        if ! azd env get-value "$var" &>/dev/null; then
-            missing_vars+=("$var")
+    for cmd in "${REQUIRED_COMMANDS[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            missing_commands+=("$cmd")
         fi
     done
     
-    if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        log_error "Missing required azd environment variables: ${missing_vars[*]}"
-        log_error "Please run 'azd provision' first or set the missing variables."
+    if [[ ${#missing_commands[@]} -gt 0 ]]; then
+        log_error "Missing required commands: ${missing_commands[*]}"
+        log_error "Please install missing dependencies and try again."
+        exit 1
+    fi
+}
+
+# Get azd environment variable value
+get_azd_env_value() {
+    local key="$1"
+    local value
+    
+    if value=$(azd env get-value "$key" 2>/dev/null); then
+        echo "$value"
+    else
+        echo ""
+    fi
+}
+
+# Validate deployment configuration
+validate_deployment_config() {
+    log_info "Validating deployment configuration..."
+    
+    local errors=()
+    
+    # Get AZD variables
+    RG=$(get_azd_env_value "AZURE_RESOURCE_GROUP")
+    BACKEND_APP=$(get_azd_env_value "BACKEND_APP_SERVICE_NAME")
+    AZD_ENV=$(get_azd_env_value "AZURE_ENV_NAME")
+    AGENT_BACKEND="rtagents/$AGENT/backend"
+    
+    # Check required AZD variables
+    [[ -z "$RG" ]] && errors+=("AZURE_RESOURCE_GROUP")
+    [[ -z "$BACKEND_APP" ]] && errors+=("BACKEND_APP_SERVICE_NAME")
+    [[ -z "$AZD_ENV" ]] && errors+=("AZURE_ENV_NAME")
+    
+    # Check agent backend directory
+    [[ ! -d "$AGENT_BACKEND" ]] && errors+=("Agent backend directory: $AGENT_BACKEND")
+    
+    if [[ ${#errors[@]} -gt 0 ]]; then
+        log_error "Configuration validation failed:"
+        for error in "${errors[@]}"; do
+            echo "   - Missing: $error"
+        done
         exit 1
     fi
     
-    log_success "azd environment validated."
+    log_success "Configuration validated successfully"
+    echo "  Resource Group: $RG"
+    echo "  Backend App: $BACKEND_APP"
+    echo "  Agent: $AGENT"
+    echo "  AZD Environment: $AZD_ENV"
 }
+# 🚀 Azure App Service Deployment Script
+# ========================================================================
+# This script deploys backend applications to Azure App Service with
+# configurable file inclusion/exclusion patterns and automatic validation.
+#
+# Usage: ./appsvc-deploy.sh [AGENT_NAME]
+#
+# ========================================================================
 
-# Get AZD variables with validation
-get_azd_vars() {
-    RG=$(azd env get-value AZURE_RESOURCE_GROUP)
-    FRONTEND_APP=$(azd env get-value FRONTEND_APP_SERVICE_NAME)
-    BACKEND_APP=$(azd env get-value BACKEND_APP_SERVICE_NAME)
-    AZD_ENV=$(azd env get-value AZURE_ENV_NAME)
-    
-    log_info "Using azd environment: $AZD_ENV"
-    log_info "Resource Group: $RG"
-    log_info "Frontend App: $FRONTEND_APP"
-    log_info "Backend App: $BACKEND_APP"
-}
+set -euo pipefail
 
-# Deploy Frontend with azd-style build process
-deploy_frontend() {
-    log_info "📱 Deploying frontend..."
+# Colors for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
+# Constants
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly REQUIRED_COMMANDS=("az" "azd" "rsync" "zip" "curl")
+
+# Configuration
+readonly AGENT="${1:-RTAgent}"
+readonly BACKEND_DIRS=("src" "utils")
+readonly REQUIRED_FILES=("requirements.txt")
+readonly EXCLUDE_PATTERNS=("__pycache__" "*.pyc" ".pytest_cache" "*.log" ".coverage" "htmlcov" ".DS_Store" ".git" "node_modules" "*.tmp" "*.temp")
+
+echo "🚀 Deploying $AGENT to App Service"
+
+# Get AZD variables and validate
+RG=$(azd env get-value AZURE_RESOURCE_GROUP)
+BACKEND_APP=$(azd env get-value BACKEND_APP_SERVICE_NAME)
+AZD_ENV=$(azd env get-value AZURE_ENV_NAME)
+AGENT_BACKEND="rtagents/$AGENT/backend"
+
+[[ -z "$RG" || -z "$BACKEND_APP" || -z "$AZD_ENV" ]] && { echo "❌ Missing AZD environment variables"; exit 1; }
+[[ ! -d "$AGENT_BACKEND" ]] && { echo "❌ Agent backend directory not found: $AGENT_BACKEND"; exit 1; }
+
+echo "✅ Validated: $BACKEND_APP in $RG (env: $AZD_ENV)"
+
+# Prepare deployment package
+TEMP_DIR=".azure/$AZD_ENV/backend"
+echo "� Preparing deployment in: $TEMP_DIR"
+rm -rf "$TEMP_DIR" && mkdir -p "$TEMP_DIR"
+
+# Copy files with exclusions
+copy_with_excludes() {
+    local src="$1"
+    local dest="$2"
     
-    local project_dir="rtagents/$AGENT/frontend"
-    local temp_dir=".azure/$AZD_ENV/frontend"
-    
-    # Validate project directory
-    if [[ ! -d "$project_dir" ]]; then
-        log_error "Frontend project directory not found: $project_dir"
+    if [[ ! -d "$src" ]]; then
+        log_warning "Source directory not found: $src"
         return 1
     fi
     
+    log_info "Copying: $src -> $dest"
+    
+    # Build exclude arguments
+    local exclude_args=()
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        exclude_args+=(--exclude="$pattern")
+    done
+    
+    rsync -a "${exclude_args[@]}" "$src/" "$dest/"
+}
+
+# Prepare deployment package
+prepare_deployment_package() {
+    local temp_dir="$1"
+    
+    log_info "Preparing deployment package..."
+    
     # Clean and create temp deployment directory
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
+    rm -rf "$temp_dir" && mkdir -p "$temp_dir"
     
-    # Copy frontend code excluding node_modules and build artifacts
-    log_info "Copying frontend code..."
-    rsync -av --exclude='node_modules' --exclude='dist' --exclude='.git' \
-        --exclude='*.log' --exclude='.DS_Store' --exclude='coverage' \
-        "$project_dir/" "$temp_dir/"
+    # Copy agent backend
+    mkdir -p "$temp_dir/$AGENT_BACKEND"
+    copy_with_excludes "$AGENT_BACKEND" "$temp_dir/$AGENT_BACKEND"
     
-    # Build frontend (similar to what azd would do)
-    log_info "Building frontend..."
-    (
-        cd "$temp_dir"
-        
-        # Install dependencies if package.json exists
-        if [[ -f "package.json" ]]; then
-            npm ci --production
-            
-            # Run build if build script exists
-            if npm run build --if-present; then
-                log_success "Frontend build completed."
-            else
-                log_warning "No build script found or build failed."
-            fi
+    # Copy shared directories
+    for dir in "${BACKEND_DIRS[@]}"; do
+        if [[ -d "$dir" ]]; then
+            copy_with_excludes "$dir" "$temp_dir/$dir"
+        else
+            log_warning "Configured directory not found: $dir"
         fi
-        
-        # Create deployment package
-        zip -r frontend.zip . \
-            -x "node_modules/*" \
-            -x "dist/*" \
-            -x ".git/*" \
-            -x "*.log" \
-            -x ".DS_Store"
-    )
+    done
     
-    # Deploy to App Service
-    log_info "Deploying to App Service..."
-    az webapp deploy \
-        --resource-group "$RG" \
-        --name "$FRONTEND_APP" \
-        --src-path "$temp_dir/frontend.zip" \
-        --type zip
+    # Copy required files
+    for file in "${REQUIRED_FILES[@]}"; do
+        if [[ -f "$file" ]]; then
+            log_info "Copying required file: $file"
+            cp "$file" "$temp_dir/"
+        else
+            log_error "Required file missing: $file"
+            exit 1
+        fi
+    done
     
-    # Clean up
-    rm -f "$temp_dir/frontend.zip"
-    
-    log_success "Frontend deployment completed."
+    log_success "Deployment package prepared successfully"
 }
 
-# Deploy Backend with azd-style Python deployment
-deploy_backend() {
-    log_info "⚙️ Deploying backend..."
+# Create deployment zip
+create_deployment_zip() {
+    local temp_dir="$1"
     
-    local project_dir="rtagents/$AGENT/backend"
-    local temp_dir=".azure/$AZD_ENV/backend"
+    log_info "Creating deployment zip..."
     
-    # Validate project directory
-    if [[ ! -d "$project_dir" ]]; then
-        log_error "Backend project directory not found: $project_dir"
-        return 1
+    cd "$temp_dir"
+    
+    # Build zip exclusion arguments
+    local zip_exclude_args=()
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        zip_exclude_args+=(-x "$pattern")
+    done
+    
+    zip -rq backend.zip . "${zip_exclude_args[@]}"
+    
+    if [[ ! -f "backend.zip" ]]; then
+        log_error "Failed to create backend.zip"
+        exit 1
     fi
     
-    # Clean and create temp deployment directory
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir/rtagents/$AGENT/backend"
+    local zip_size
+    zip_size=$(du -h backend.zip | cut -f1)
+    log_success "Deployment zip created successfully (size: $zip_size)"
     
-    # Copy backend code structure (preserving azd conventions)
-    log_info "Copying backend code..."
-    rsync -av --exclude='__pycache__' --exclude='*.pyc' --exclude='.pytest_cache' \
-        --exclude='*.log' --exclude='.coverage' --exclude='htmlcov' \
-        "$project_dir/" "$temp_dir/rtagents/$AGENT/backend/"
-    
-    # Copy shared modules
-    rsync -av --exclude='__pycache__' --exclude='*.pyc' \
-        src/ "$temp_dir/src/"
-    
-    rsync -av --exclude='__pycache__' --exclude='*.pyc' \
-        utils/ "$temp_dir/utils/"
-    
-    # Copy requirements
-    cp requirements.txt "$temp_dir/requirements.txt"
-    
-    # Create deployment package
-    log_info "Creating deployment package..."
-    (
-        cd "$temp_dir"
-        zip -r backend.zip . \
-            -x "__pycache__" \
-            -x "*/__pycache__/*" \
-            -x "*.pyc" \
-            -x ".DS_Store" \
-            -x "*.log"
-    )
-    
-    # Deploy to App Service
-    log_info "Deploying to App Service..."
-    az webapp deploy \
-        --resource-group "$RG" \
-        --name "$BACKEND_APP" \
-        --src-path "$temp_dir/backend.zip" \
-        --type zip
-    
-    # Configure startup and environment (azd-compatible)
-    log_info "Configuring App Service..."
+    cd - > /dev/null
+}
+
+# Configure App Service settings
+configure_app_service() {
+    log_info "Configuring App Service settings..."
+
+    # Get current backend app service URL from azd
+    BACKEND_APP_SERVICE_URL=$(azd env get-value BACKEND_APP_SERVICE_URL)
+    if [[ -z "$BACKEND_APP_SERVICE_URL" ]]; then
+        log_warning "BACKEND_APP_SERVICE_URL not set in azd environment"
+        BACKEND_APP_SERVICE_URL="https://$BACKEND_APP.azurewebsites.net"
+    fi
+
+    # Set startup command
     az webapp config set \
         --resource-group "$RG" \
         --name "$BACKEND_APP" \
-        --startup-file "python -m uvicorn rtagents.$AGENT.backend.main:app --host 0.0.0.0 --port 8000"
-    
-    # Set environment variables (including azd injected ones)
+        --startup-file "python -m uvicorn main:app --host 0.0.0.0 --port 8000" \
+        --output none
+
+    # Set BASE_URL environment variable for the web app
     az webapp config appsettings set \
         --resource-group "$RG" \
         --name "$BACKEND_APP" \
@@ -204,81 +237,206 @@ deploy_backend() {
             "PYTHONPATH=/home/site/wwwroot" \
             "SCM_DO_BUILD_DURING_DEPLOYMENT=true" \
             "ENABLE_ORYX_BUILD=true" \
-            "AZURE_ENV_NAME=$AZD_ENV" \
+            "ORYX_APP_TYPE=webapps" \
+            "WEBSITES_PORT=8000" \
+            "BASE_URL=$BACKEND_APP_SERVICE_URL" \
         --output none
-    
-    # Clean up
-    rm -f "$temp_dir/backend.zip"
-    
-    log_success "Backend deployment completed."
-}
 
-# Health check post-deployment
-health_check() {
-    log_info "Performing health checks..."
+    log_success "App Service configured successfully"
+}
+deploy_to_app_service() {
+    local temp_dir="$1"
     
-    local backend_url frontend_url
+    log_info "Deploying to Azure App Service..."
     
-    # Get app URLs
-    backend_url=$(az webapp show --resource-group "$RG" --name "$BACKEND_APP" --query "defaultHostName" -o tsv)
-    frontend_url=$(az webapp show --resource-group "$RG" --name "$FRONTEND_APP" --query "defaultHostName" -o tsv)
+    cd "$temp_dir"
     
-    # Simple health check for backend
-    if curl -f -s "https://$backend_url/health" >/dev/null; then
-        log_success "Backend health check passed: https://$backend_url"
+    # Attempt deployment with timeout handling
+    local deployment_status=0
+    local deployment_output
+    
+    if deployment_output=$(az webapp deploy \
+        --resource-group "$RG" \
+        --name "$BACKEND_APP" \
+        --src-path "backend.zip" \
+        --type zip 2>&1); then
+        log_success "Deployment command completed successfully"
+        deployment_status=0
     else
-        log_warning "Backend health check failed or endpoint not available."
+        local exit_code=$?
+        log_warning "Deployment command returned exit code: $exit_code"
+        
+        # Check if it's likely a timeout or server-side issue
+        if echo "$deployment_output" | grep -qi -E "(timeout|timed out|request timeout|gateway timeout|502|503|504)"; then
+            log_warning "Deployment appears to have timed out on client side"
+            log_info "This doesn't necessarily mean the deployment failed on the server"
+            log_info "Will continue to check deployment status..."
+            deployment_status=2  # Timeout/uncertain status
+        elif echo "$deployment_output" | grep -qi -E "(conflict|409|deployment.*progress|another deployment)"; then
+            log_warning "Another deployment may be in progress"
+            log_info "Will continue to check deployment status..."
+            deployment_status=2  # Concurrent deployment
+        else
+            log_error "Deployment command failed with actual error:"
+            echo "$deployment_output" | head -10  # Show first 10 lines of error
+            deployment_status=1  # Actual failure
+        fi
     fi
     
-    # Simple check for frontend
-    if curl -f -s "https://$frontend_url" >/dev/null; then
-        log_success "Frontend health check passed: https://$frontend_url"
+    cd - > /dev/null
+    return $deployment_status
+}
+
+# Wait for app to be ready and verify deployment
+wait_for_app_ready() {
+    log_info "Waiting for app to be ready..."
+    
+    local max_attempts=30
+    local deployment_verified=false
+    
+    for i in $(seq 1 $max_attempts); do
+        local app_state
+        app_state=$(az webapp show --resource-group "$RG" --name "$BACKEND_APP" --query "state" -o tsv 2>/dev/null || echo "Unknown")
+        
+        if [[ "$app_state" == "Running" ]]; then
+            log_success "App is running and ready"
+            deployment_verified=true
+            break
+        elif [[ "$app_state" == "Stopped" ]]; then
+            log_warning "App is stopped, attempting to start..."
+            az webapp start --resource-group "$RG" --name "$BACKEND_APP" --output none 2>/dev/null || true
+        fi
+        
+        echo "   App state: $app_state (attempt $i/$max_attempts)"
+        sleep 5
+    done
+    
+    if [[ "$deployment_verified" == "true" ]]; then
+        return 0
     else
-        log_warning "Frontend health check failed or endpoint not available."
+        log_warning "App state verification timed out after $((max_attempts * 5)) seconds"
+        return 1
     fi
 }
 
-# Main execution
-main() {
-    validate_azd_environment
-    get_azd_vars
+# Perform health check
+perform_health_check() {
+    local app_url="$1"
     
-    # Deploy based on mode
-    case "$MODE" in
-        frontend) 
-            deploy_frontend 
+    log_info "Performing health check..."
+    
+    if curl -sf --max-time 5 "https://$app_url/health" >/dev/null 2>&1; then
+        log_success "Health endpoint is responding"
+    else
+        log_warning "Health endpoint not responding (application may be starting up)"
+    fi
+}
+
+# Cleanup deployment artifacts
+cleanup_deployment() {
+    local temp_dir="$1"
+    
+    log_info "Cleaning up deployment artifacts..."
+    
+    if [[ -f "$temp_dir/backend.zip" ]]; then
+        rm "$temp_dir/backend.zip"
+    fi
+    
+    log_success "Cleanup completed"
+}
+
+# Display deployment summary
+show_deployment_summary() {
+    local app_url="$1"
+    local deployment_status="$2"
+    
+    echo ""
+    echo "========================================================================="
+    
+    case "$deployment_status" in
+        "success")
+            log_success "Deployment completed successfully!"
             ;;
-        backend) 
-            deploy_backend 
+        "uncertain")
+            log_warning "Deployment completed with uncertain status"
+            echo "   The deployment command timed out, but the app appears to be running."
+            echo "   This is common with large deployments and usually indicates success."
             ;;
-        both) 
-            deploy_backend
-            deploy_frontend 
-            ;;
-        *) 
-            log_error "Invalid mode. Use: frontend, backend, or both"
-            exit 1 
+        *)
+            log_success "Deployment process completed!"
             ;;
     esac
     
-    # Post-deployment validation
-    health_check
-    
-    echo "========================================================================="
-    log_success "Deployment completed successfully!"
     echo ""
-    echo "📝 Deployed apps:"
-    if [[ "$MODE" == "backend" || "$MODE" == "both" ]]; then
-        echo "   Backend:  https://$(az webapp show --resource-group "$RG" --name "$BACKEND_APP" --query "defaultHostName" -o tsv)"
-    fi
-    if [[ "$MODE" == "frontend" || "$MODE" == "both" ]]; then
-        echo "   Frontend: https://$(az webapp show --resource-group "$RG" --name "$FRONTEND_APP" --query "defaultHostName" -o tsv)"
-    fi
+    echo "📊 Deployment Summary:"
+    echo "   Agent: $AGENT"
+    echo "   App Service: $BACKEND_APP"
+    echo "   Resource Group: $RG"
+    echo "   Environment: $AZD_ENV"
+    echo "   App URL: https://$app_url"
+    echo "   Status: $deployment_status"
+    echo ""
+    echo "🌐 Test your deployment at: https://$app_url"
     echo "========================================================================="
 }
 
+# Main function
+main() {
+    echo "========================================================================="
+    echo "🚀 Azure App Service Deployment"
+    echo "========================================================================="
+    
+    # Check dependencies
+    check_dependencies
+    
+    # Validate configuration
+    validate_deployment_config
+    
+    # Set deployment directory
+    local temp_dir=".azure/$AZD_ENV/backend"
+    log_info "Using deployment directory: $temp_dir"
+    
+    # Prepare deployment
+    prepare_deployment_package "$temp_dir"
+    create_deployment_zip "$temp_dir"
+    
+    # Configure and deploy
+    configure_app_service
+    
+    # Attempt deployment with error handling
+    local deployment_result
+    if deploy_to_app_service "$temp_dir"; then
+        deployment_result="success"
+        log_success "Deployment completed successfully"
+    else
+        local deploy_exit_code=$?
+        if [[ $deploy_exit_code -eq 2 ]]; then
+            deployment_result="uncertain"
+            log_warning "Deployment status uncertain due to timeout/server issues"
+            log_info "Continuing with verification steps..."
+        else
+            deployment_result="failed"
+            log_error "Deployment failed with actual error"
+            log_error "Exiting due to deployment failure"
+            exit 1
+        fi
+    fi
+    
+    # Wait for app and get URL
+    wait_for_app_ready
+    local app_url
+    app_url=$(az webapp show --resource-group "$RG" --name "$BACKEND_APP" --query "defaultHostName" -o tsv)
+    
+    # Health check and cleanup
+    perform_health_check "$app_url"
+    cleanup_deployment "$temp_dir"
+    
+    # Show summary
+    show_deployment_summary "$app_url" "$deployment_result"
+}
+
 # Handle script interruption
-trap 'log_error "Deployment interrupted by user"; exit 130' INT
+trap 'log_error "Script interrupted by user"; exit 130' INT
 
 # Run main function
 main "$@"

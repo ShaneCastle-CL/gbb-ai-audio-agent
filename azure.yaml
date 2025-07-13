@@ -7,12 +7,13 @@ infra:
   provider: terraform
   path: ./infra-tf
 
-# services:
-#   rtaudio-client:
-#     project: rtagents/RTAgent/frontend
-#     host: appservice
-#     language: js
-    
+services:
+  rtaudio-client:
+    project: rtagents/RTAgent/frontend
+    host: staticwebapp
+    language: js
+
+# For app service, deploy using the postdeploy hook
 #   rtaudio-server:
 #     project: rtagents/RTAgent/backend
 #     host: appservice
@@ -21,20 +22,41 @@ infra:
 
 hooks:
   preprovision:
-    shell: sh
-    run: ./scripts/azd/preprovision.sh terraform
-    interactive: true
-    continueOnError: false
-  predeploy:
-    shell: sh
-    run: ./scripts/azd/predeploy.sh RTAgent appservice
-    interactive: false
-    continueOnError: false
+    # Cross-platform hook - automatically selects appropriate shell and script
+    posix:
+      shell: sh
+      run: ./scripts/azd/preprovision.sh terraform
+      interactive: true
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/preprovision.ps1 terraform
+      interactive: true
+      continueOnError: false
+  postdeploy:
+    # Cross-platform hook with timeout handling
+    posix:
+      shell: sh
+      run: ./scripts/azd/helpers/appsvc-deploy.sh RTAgent
+      interactive: false
+      continueOnError: true
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/helpers/appsvc-deploy.ps1 RTAgent
+      interactive: false
+      continueOnError: true
   postprovision:
-    shell: sh
-    run: ./scripts/azd/postprovision.sh
-    interactive: true
-    continueOnError: false
+    # Cross-platform hook for post-provision setup
+    posix:
+      shell: sh
+      run: ./scripts/azd/postprovision.sh
+      interactive: true
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/postprovision.ps1
+      interactive: true
+      continueOnError: false
 
 # For container app deploy
 # services:

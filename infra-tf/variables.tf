@@ -10,7 +10,15 @@ variable "environment_name" {
     error_message = "Environment name must be between 1 and 64 characters."
   }
 }
-
+variable "acs_source_phone_number" {
+  description = "Azure Communication Services phone number for outbound calls (E.164 format)"
+  type        = string
+  default     = null
+  validation {
+    condition = var.acs_source_phone_number == null || can(regex("^\\+[1-9]\\d{1,14}$", var.acs_source_phone_number))
+    error_message = "ACS source phone number must be in E.164 format (e.g., +1234567890) or null."
+  }
+}
 variable "name" {
   description = "Base name for the real-time audio agent application"
   type        = string

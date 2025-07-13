@@ -72,23 +72,27 @@ output "AZURE_STORAGE_BLOB_ENDPOINT" {
 
 output "AZURE_STORAGE_CONTAINER_URL" {
     description = "Azure Storage Container URL"
-    value       = "${azurerm_storage_account.main.primary_blob_endpoint}/${azurerm_storage_container.audioagent.name}"
+    value       = "${azurerm_storage_account.main.primary_blob_endpoint}${azurerm_storage_container.audioagent.name}"
 }
 
-# output "AZURE_COSMOS_DB_ENDPOINT" {
-#   description = "Azure Cosmos DB endpoint"
-#   value       = azurerm_cosmosdb_account.main.endpoint
-# }
+output "AZURE_COSMOS_DATABASE_NAME" {
+  description = "Azure Cosmos DB database name"
+  value       = var.mongo_database_name
+}
 
-# output "AZURE_COSMOS_DB_DATABASE_NAME" {
-#   description = "Azure Cosmos DB database name"
-#   value       = azurerm_cosmosdb_mongo_database.main.name
-# }
+output "AZURE_COSMOS_COLLECTION_NAME" {
+  description = "Azure Cosmos DB collection name"
+  value       = var.mongo_collection_name
+}
 
-# output "AZURE_COSMOS_DB_COLLECTION_NAME" {
-#   description = "Azure Cosmos DB collection name"
-#   value       = azurerm_cosmosdb_mongo_collection.main.name
-# }
+output "AZURE_COSMOS_CONNECTION_STRING" {
+  description = "Azure Cosmos DB connection string"
+  value = replace(
+    data.azapi_resource.mongo_cluster_info.output.properties.connectionString,
+    "/mongodb\\+srv:\\/\\/[^@]+@([^?]+)\\?(.*)$/",
+    "mongodb+srv://$1?tls=true&authMechanism=MONGODB-OIDC&retrywrites=false&maxIdleTimeMS=120000"
+  )
+}
 
 # Redis
 output "REDIS_HOSTNAME" {
