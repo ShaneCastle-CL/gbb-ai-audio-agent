@@ -26,6 +26,7 @@ resource "azurerm_service_plan" "main" {
 resource "random_password" "frontend_swa_password" {
   length  = 16
   special = true
+  numeric = true
 }
 
 # Store the password in Azure Key Vault

@@ -59,10 +59,13 @@ case "$PROVIDER" in
             echo "Error: AZURE_LOCATION environment variable is not set"
             exit 1
         fi
-
-        # Get optional ACS phone number from AZD environment
-        ACS_SOURCE_PHONE_NUMBER=$(azd env get-value ACS_SOURCE_PHONE_NUMBER 2>/dev/null || echo "")
-        
+        # Get optional ACS phone number from AZD environment and cleanse error output
+        ACS_SOURCE_PHONE_NUMBER_RAW=$(azd env get-value ACS_SOURCE_PHONE_NUMBER 2>&1)
+        if [[ "$ACS_SOURCE_PHONE_NUMBER_RAW" == *"not found"* || "$ACS_SOURCE_PHONE_NUMBER_RAW" == *"No value"* ]]; then
+            ACS_SOURCE_PHONE_NUMBER=""
+        else
+            ACS_SOURCE_PHONE_NUMBER="$ACS_SOURCE_PHONE_NUMBER_RAW"
+        fi
         # Generate tfvars.json
         TFVARS_FILE="./infra-tf/main.tfvars.json"
         echo "Generating $TFVARS_FILE..."

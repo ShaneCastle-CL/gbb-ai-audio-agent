@@ -77,11 +77,11 @@ switch ($Provider.ToLower()) {
         
         # Get optional ACS phone number from AZD environment
         $AcsSourcePhoneNumber = ""
-        try {
-            $AcsSourcePhoneNumber = azd env get-value ACS_SOURCE_PHONE_NUMBER 2>$null
-            if ($LASTEXITCODE -ne 0) { $AcsSourcePhoneNumber = "" }
+        $azdValue = azd env get-value ACS_SOURCE_PHONE_NUMBER 2>$null
+        if ($LASTEXITCODE -eq 0 -and $azdValue) {
+            $AcsSourcePhoneNumber = $azdValue
         }
-        catch {
+        else {
             $AcsSourcePhoneNumber = ""
         }
         
