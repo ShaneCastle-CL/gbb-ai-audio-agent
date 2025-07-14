@@ -226,7 +226,7 @@ configure_app_service() {
     az webapp config set \
         --resource-group "$RG" \
         --name "$BACKEND_APP" \
-        --startup-file "python -m uvicorn main:app --host 0.0.0.0 --port 8000" \
+        --startup-file "python -m uvicorn rtagents.${AGENT}.backend.main:app --host 0.0.0.0 --port 8000" \
         --output none
 
     # Set BASE_URL environment variable for the web app
@@ -386,9 +386,14 @@ show_deployment_summary() {
 # Main function
 main() {
     echo "========================================================================="
-    echo "🚀 Azure App Service Deployment"
+    echo "🚀 Azure App Service Deployment for $AGENT backend"
     echo "========================================================================="
-    
+    # Prompt user for confirmation before deploying
+    read -p "Are you sure you want to deploy '$AGENT' to App Service '$BACKEND_APP' in resource group '$RG'? [y/N]: " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        log_warning "$AGENT backend deployment cancelled by user."
+        exit 0
+    fi
     # Check dependencies
     check_dependencies
     

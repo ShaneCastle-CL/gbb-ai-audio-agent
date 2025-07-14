@@ -199,7 +199,7 @@ create_storage_account() {
             --enable-hierarchical-namespace false \
             --allow-blob-public-access false \
             --min-tls-version TLS1_2 \
-            --tags "tfstate=hidden,env=${AZURE_ENV_NAME}" \
+            --tags "hidden-title=TFState Real Time Audio ${AZURE_ENV_NAME}" \
             --output none
 
         log_success "Storage account created successfully."

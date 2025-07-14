@@ -111,7 +111,7 @@ if (-not $SkipPhoneCreation) {
                 Write-Host "✅ Successfully updated container app environment variable." -ForegroundColor Green
             }
         }
-        elseif ($BackendAppServiceName -and $BackendResourceGroupName) {
+        if ($BackendAppServiceName -and $BackendResourceGroupName) {
             Write-Host "🌐 Updating ACS_SOURCE_PHONE_NUMBER in app service: $BackendAppServiceName" -ForegroundColor Cyan
             az webapp config appsettings set `
                 --name $BackendAppServiceName `
@@ -122,9 +122,7 @@ if (-not $SkipPhoneCreation) {
                 Write-Host "✅ Successfully updated app service environment variable." -ForegroundColor Green
             }
         }
-        else {
-            Write-Host "⚠️ Warning: Could not update backend service - missing container app or app service name, or AZURE_RESOURCE_GROUP" -ForegroundColor Yellow
-        }
+
     }
     catch {
         Write-Host "⚠️ Warning: ACS phone number creation failed, but continuing with the rest of the script..." -ForegroundColor Yellow

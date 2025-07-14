@@ -216,8 +216,7 @@ resource "azapi_resource" "cosmos_backend_db_user" {
       output["properties"]["provisioningState"],
       output["properties"]["roles"],
       output["id"],
-      output["type"],
-      output,
+      output["type"]
     ]
   }
 }
@@ -243,6 +242,15 @@ resource "azapi_resource" "cosmos_principal_user" {
         }
       ]
     }
+  }
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["identityProvider"]["properties"]["principalType"],
+      output["properties"]["provisioningState"],
+      output["properties"]["roles"],
+      output["id"],
+      output["type"]
+    ]
   }
 }
 

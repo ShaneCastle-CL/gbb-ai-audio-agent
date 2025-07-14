@@ -179,13 +179,29 @@ resource "azurerm_monitor_diagnostic_setting" "backend_app_service" {
   enabled_log {
     category = "AppServiceConsoleLogs"
   }
-  
+
   enabled_log {
     category = "AppServiceHTTPLogs"
   }
-  
+
   enabled_log {
     category = "AppServicePlatformLogs"
+  }
+
+  enabled_log {
+    category = "AppServiceApplicationLogs"
+  }
+
+  enabled_log {
+    category = "AppServiceAccessAuditLogs"
+  }
+
+  enabled_log {
+    category = "AppServiceIPSecurityAuditLogs"
+  }
+
+  enabled_log {
+    category = "AppServiceAuthenticationLogs"
   }
 
 }
