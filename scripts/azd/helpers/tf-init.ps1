@@ -164,18 +164,18 @@ function New-ResourceNames {
 
 function New-ResourceGroup {
     $location = Get-AzdEnvValue -Key 'AZURE_LOCATION' -Default $script:DefaultLocation
-    
+
     if (-not $location) {
         Write-ColorOutput "AZURE_LOCATION not set, using default: $location" -Type Warning
     }
-    
+
     Write-ColorOutput "Creating resource group: $script:ResourceGroupName" -Type Info
-    
-    try {
-        az group show --name $script:ResourceGroupName *>$null
+
+    $rgExists = az group show --name $script:ResourceGroupName --query "name" -o tsv 2>$null
+    if ($rgExists -eq $script:ResourceGroupName) {
         Write-ColorOutput "Resource group already exists." -Type Success
     }
-    catch {
+    else {
         az group create --name $script:ResourceGroupName --location $location --output none
         Write-ColorOutput "Resource group created successfully." -Type Success
     }
@@ -183,12 +183,12 @@ function New-ResourceGroup {
 
 function New-StorageAccount {
     Write-ColorOutput "Creating storage account: $script:StorageAccountName" -Type Info
-    
-    try {
-        az storage account show --name $script:StorageAccountName --resource-group $script:ResourceGroupName *>$null
+
+    $saExists = az storage account show --name $script:StorageAccountName --resource-group $script:ResourceGroupName --query "name" -o tsv 2>$null
+    if ($saExists -eq $script:StorageAccountName) {
         Write-ColorOutput "Storage account already exists." -Type Success
     }
-    catch {
+    else {
         az storage account create `
             --name $script:StorageAccountName `
             --resource-group $script:ResourceGroupName `
@@ -198,10 +198,10 @@ function New-StorageAccount {
             --allow-blob-public-access false `
             --min-tls-version TLS1_2 `
             --output none
-            
+
         Write-ColorOutput "Storage account created successfully." -Type Success
     }
-    
+
     # Enable versioning and change feed
     Write-ColorOutput "Enabling blob versioning..." -Type Info
     az storage account blob-service-properties update `
@@ -210,7 +210,7 @@ function New-StorageAccount {
         --enable-versioning true `
         --enable-change-feed true `
         --output none
-        
+
     Write-ColorOutput "Storage account configured with versioning and change feed." -Type Success
 }
 
