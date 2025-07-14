@@ -216,21 +216,22 @@ function New-StorageAccount {
 
 function New-StorageContainer {
     Write-ColorOutput "Creating storage container: $script:ContainerName" -Type Info
-    
-    try {
-        az storage container show `
-            --name $script:ContainerName `
-            --account-name $script:StorageAccountName `
-            --auth-mode login *>$null
+    $containerExists = az storage container show `
+        --name $script:ContainerName `
+        --account-name $script:StorageAccountName `
+        --auth-mode login `
+        --query "name" -o tsv 2>$null
+
+    if ($containerExists -eq $script:ContainerName) {
         Write-ColorOutput "Storage container already exists." -Type Success
     }
-    catch {
+    else {
         az storage container create `
             --name $script:ContainerName `
             --account-name $script:StorageAccountName `
             --auth-mode login `
             --output none
-            
+
         Write-ColorOutput "Storage container created successfully." -Type Success
     }
 }
