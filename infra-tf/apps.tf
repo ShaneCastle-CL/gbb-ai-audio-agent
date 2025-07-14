@@ -24,9 +24,10 @@ resource "azurerm_service_plan" "main" {
 # The app_settings here are available at build time and runtime
 # Generate a random password for the frontend Static Web App
 resource "random_password" "frontend_swa_password" {
-  length  = 16
-  special = true
-  numeric = true
+  length     = 16
+  special    = true
+  numeric    = true
+  min_numeric = 1
 }
 
 # Store the password in Azure Key Vault

@@ -33,7 +33,7 @@ hooks:
       run: ./scripts/azd/preprovision.ps1 terraform
       interactive: true
       continueOnError: false
-  postdeploy:
+  predeploy:
     # Cross-platform hook with timeout handling
     posix:
       shell: sh

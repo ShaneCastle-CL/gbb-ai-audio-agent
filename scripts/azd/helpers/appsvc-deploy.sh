@@ -335,11 +335,14 @@ perform_health_check() {
 # Cleanup deployment artifacts
 cleanup_deployment() {
     local temp_dir="$1"
-    
     log_info "Cleaning up deployment artifacts..."
-    
+
     if [[ -f "$temp_dir/backend.zip" ]]; then
         rm "$temp_dir/backend.zip"
+    fi
+
+    if [[ -d "$temp_dir" ]]; then
+        rm -rf "$temp_dir"
     fi
     
     log_success "Cleanup completed"
@@ -403,13 +406,32 @@ main() {
     # Configure and deploy
     configure_app_service
     
-    # Attempt deployment with error handling
+    # Attempt deployment with spinner for long-running operation
     local deployment_result
+    local spinner_pid
+
+    # Spinner function
+    spinner() {
+        local chars="/-\|"
+        local i=0
+        while :; do
+            printf "\r⏳ Deploying... %c" "${chars:i++%${#chars}:1}"
+            sleep 0.2
+        done
+    }
+
+    spinner &
+    spinner_pid=$!
+
     if deploy_to_app_service "$temp_dir"; then
         deployment_result="success"
+        kill "$spinner_pid" >/dev/null 2>&1
+        printf "\r"
         log_success "Deployment completed successfully"
     else
         local deploy_exit_code=$?
+        kill "$spinner_pid" >/dev/null 2>&1
+        printf "\r"
         if [[ $deploy_exit_code -eq 2 ]]; then
             deployment_result="uncertain"
             log_warning "Deployment status uncertain due to timeout/server issues"
@@ -421,7 +443,6 @@ main() {
             exit 1
         fi
     fi
-    
     # Wait for app and get URL
     wait_for_app_ready
     local app_url
