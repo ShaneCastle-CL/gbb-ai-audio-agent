@@ -60,17 +60,38 @@ function Test-Dependencies {
 
 # Get azd environment variable value
 function Get-AzdEnvValue {
-    param([string]$Key)
+    param(
+        [Parameter(Mandatory)]
+        [string]$Key,
+        
+        [string]$Default = $null
+    )
     
     try {
-        $value = azd env get-value $Key 2>$null
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($value)) {
-            return $null
+        # Capture both stdout and stderr, then check exit code
+        $output = & azd env get-value $Key 2>&1
+        
+        # Check if the command succeeded (exit code 0)
+        if ($LASTEXITCODE -eq 0) {
+            # Convert output to string and trim whitespace
+            $value = $output | Out-String | ForEach-Object { $_.Trim() }
+            
+            # Return the value if it's not empty, null, or an error message
+            if ($value -and 
+                $value -ne 'null' -and 
+                $value -ne '' -and
+                -not $value.StartsWith('ERROR') -and
+                -not $value.Contains('not found')) {
+                return $value
+            }
         }
-        return $value
+        
+        # Return default if command failed or value is invalid
+        return $Default
     }
     catch {
-        return $null
+        # Return default on any exception
+        return $Default
     }
 }
 
@@ -81,15 +102,21 @@ function Test-DeploymentConfig {
     $errors = @()
     
     # Get AZD variables
-    $script:ResourceGroup = Get-AzdEnvValue "AZURE_RESOURCE_GROUP"
-    $script:BackendApp = Get-AzdEnvValue "BACKEND_APP_SERVICE_NAME"
-    $script:AzdEnv = Get-AzdEnvValue "AZURE_ENV_NAME"
+    $script:ResourceGroup = Get-AzdEnvValue -Key "AZURE_RESOURCE_GROUP"
+    $script:BackendApp = Get-AzdEnvValue -Key "BACKEND_APP_SERVICE_NAME"
+    $script:AzdEnv = Get-AzdEnvValue -Key "AZURE_ENV_NAME"
     $script:AgentBackend = "rtagents/$AgentName/backend"
     
     # Check required AZD variables
     if ([string]::IsNullOrEmpty($script:ResourceGroup)) { $errors += "AZURE_RESOURCE_GROUP" }
     if ([string]::IsNullOrEmpty($script:BackendApp)) { $errors += "BACKEND_APP_SERVICE_NAME" }
     if ([string]::IsNullOrEmpty($script:AzdEnv)) { $errors += "AZURE_ENV_NAME" }
+    
+    # Debug output
+    Write-LogInfo "Debug: Retrieved environment values:"
+    Write-Host "  AZURE_RESOURCE_GROUP: '$script:ResourceGroup'" -ForegroundColor Gray
+    Write-Host "  BACKEND_APP_SERVICE_NAME: '$script:BackendApp'" -ForegroundColor Gray
+    Write-Host "  AZURE_ENV_NAME: '$script:AzdEnv'" -ForegroundColor Gray
     
     # Check agent backend directory
     if (-not (Test-Path $script:AgentBackend -PathType Container)) {
@@ -467,6 +494,7 @@ function Main {
         
         # Show summary
         Show-DeploymentSummary -AppUrl $appUrl -DeploymentStatus $deploymentResult
+        exit 0
     }
     catch {
         Write-LogError "Deployment failed: $($_.Exception.Message)"

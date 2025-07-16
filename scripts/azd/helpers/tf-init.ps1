@@ -104,10 +104,29 @@ function Get-AzdEnvValue {
     )
     
     try {
-        $value = azd env get-value $Key 2>$null
-        return if ($value -and $value -ne 'null' -and -not $value.StartsWith('ERROR')) { $value } else { $Default }
+        # Capture both stdout and stderr, then check exit code
+        $output = & azd env get-value $Key 2>&1
+        
+        # Check if the command succeeded (exit code 0)
+        if ($LASTEXITCODE -eq 0) {
+            # Convert output to string and trim whitespace
+            $value = $output | Out-String | ForEach-Object { $_.Trim() }
+            
+            # Return the value if it's not empty, null, or an error message
+            if ($value -and 
+                $value -ne 'null' -and 
+                $value -ne '' -and
+                -not $value.StartsWith('ERROR') -and
+                -not $value.Contains('not found')) {
+                return $value
+            }
+        }
+        
+        # Return default if command failed or value is invalid
+        return $Default
     }
     catch {
+        # Return default on any exception
         return $Default
     }
 }
@@ -120,9 +139,16 @@ function Test-ExistingStateConfig {
     $containerName = Get-AzdEnvValue -Key 'RS_CONTAINER_NAME'
     $resourceGroup = Get-AzdEnvValue -Key 'RS_RESOURCE_GROUP'
     
+    # Debug output to show what we're getting
+    Write-ColorOutput "Debug: Retrieved values:" -Type Info
+    Write-Host "  RS_STORAGE_ACCOUNT: '$storageAccount'" -ForegroundColor Gray
+    Write-Host "  RS_CONTAINER_NAME: '$containerName'" -ForegroundColor Gray
+    Write-Host "  RS_RESOURCE_GROUP: '$resourceGroup'" -ForegroundColor Gray
+    
     # Fall back to old TERRAFORM_STATE_* variables for backward compatibility
     if (-not $storageAccount) {
         $resourceGroup = Get-AzdEnvValue -Key 'TERRAFORM_STATE_RESOURCE_GROUP'
+        Write-Host "  TERRAFORM_STATE_RESOURCE_GROUP: '$resourceGroup'" -ForegroundColor Gray
     }
     
     if ($storageAccount -and $containerName -and $resourceGroup) {
@@ -139,6 +165,11 @@ function Test-ExistingStateConfig {
 function New-ResourceNames {
     $envName = Get-AzdEnvValue -Key 'AZURE_ENV_NAME' -Default $script:DefaultEnvName
     $subscriptionId = (az account show --query id -o tsv)
+    
+    # Debug output
+    Write-ColorOutput "Debug: Environment values for resource naming:" -Type Info
+    Write-Host "  AZURE_ENV_NAME: '$envName'" -ForegroundColor Gray
+    Write-Host "  Using default env name: $($envName -eq $script:DefaultEnvName)" -ForegroundColor Gray
     
     # Create deterministic but unique suffix
     $hashInput = "$subscriptionId$envName"
@@ -306,11 +337,16 @@ function Update-TerraformVars {
     $location = Get-AzdEnvValue -Key 'AZURE_LOCATION' -Default $script:DefaultLocation
     $subscriptionId = az account show --query id -o tsv
     
-    if (-not $envName) {
+    # Debug output
+    Write-ColorOutput "Debug: Environment values for Terraform vars:" -Type Info
+    Write-Host "  AZURE_ENV_NAME: '$envName' (using default: $($envName -eq $script:DefaultEnvName))" -ForegroundColor Gray
+    Write-Host "  AZURE_LOCATION: '$location' (using default: $($location -eq $script:DefaultLocation))" -ForegroundColor Gray
+    
+    if ($envName -eq $script:DefaultEnvName) {
         Write-ColorOutput "AZURE_ENV_NAME not set, using default: $envName" -Type Warning
     }
     
-    if (-not $location) {
+    if ($location -eq $script:DefaultLocation) {
         Write-ColorOutput "AZURE_LOCATION not set, using default: $location" -Type Warning
     }
     
@@ -371,7 +407,7 @@ function New-ProviderConfig {
         resource_group_name = "`${RS_RESOURCE_GROUP}"
         storage_account_name = "`${RS_STORAGE_ACCOUNT}"
         container_name = "`${RS_CONTAINER_NAME}"
-        key = "azd/`${AZURE_ENV_NAME}.tfstate"
+        key = "azd/$((Get-AzdEnvValue -Key 'AZURE_ENV_NAME' -Default $script:DefaultEnvName)).tfstate"
     } | ConvertTo-Json -Depth 3
     
     $providerConfig | Set-Content $providerConfigFile
@@ -478,6 +514,7 @@ function Main {
         else {
             Write-ColorOutput "Setup completed with warnings. Please verify configuration manually." -Type Warning
         }
+        exit 0
     }
     catch {
         Write-ColorOutput "Setup failed: $($_.Exception.Message)" -Type Error

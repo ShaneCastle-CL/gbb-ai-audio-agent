@@ -23,7 +23,7 @@ switch ($Provider.ToLower()) {
         Write-Host "Bicep deployment detected"
         
         # Call ssl-preprovision.sh from helpers directory (no PS1 equivalent exists)
-        $SslPreprovisionScript = Join-Path $ScriptDir "helpers/ssl-preprovision.sh"
+        $SslPreprovisionScript = Join-Path $ScriptDir "helpers/ssl-preprovision.ps1"
         if (Test-Path $SslPreprovisionScript) {
             Write-Host "Running SSL pre-provisioning setup..."
             & bash $SslPreprovisionScript
@@ -33,7 +33,7 @@ switch ($Provider.ToLower()) {
             }
         }
         else {
-            Write-Error "ssl-preprovision.sh not found at $SslPreprovisionScript"
+            Write-Error "ssl-preprovision.ps1 not found at $SslPreprovisionScript"
             exit 1
         }
     }
@@ -58,8 +58,15 @@ switch ($Provider.ToLower()) {
         Write-Host "Setting Terraform variables from Azure environment..."
         
         # Validate required variables
-        $EnvironmentName = $env:AZURE_ENV_NAME
-        $Location = $env:AZURE_LOCATION
+        $EnvironmentName = azd env get-value AZURE_ENV_NAME 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $EnvironmentName) {
+            $EnvironmentName = $env:AZURE_ENV_NAME
+        }
+
+        $Location = azd env get-value AZURE_LOCATION 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $Location) {
+            $Location = $env:AZURE_LOCATION
+        }
         
         if (-not $EnvironmentName) {
             Write-Error "AZURE_ENV_NAME environment variable is not set"
@@ -114,6 +121,7 @@ switch ($Provider.ToLower()) {
             Write-Host "   ACS Phone: null (not set)"
         }
         Write-Host "   Config file: $TfVarsFile"
+        exit 0
     }
     
     default {

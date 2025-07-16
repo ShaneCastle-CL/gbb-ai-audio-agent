@@ -10,23 +10,48 @@ Write-Host ""
 
 # Function to safely get azd environment value
 function Get-AzdEnvValue {
-    param([string]$Name)
+    param(
+        [Parameter(Mandatory)]
+        [string]$Name,
+        
+        [string]$Default = ""
+    )
+    
     try {
-        $result = azd env get-value $Name 2>$null
+        # Capture both stdout and stderr, then check exit code
+        $output = & azd env get-value $Name 2>&1
+        
+        # Check if the command succeeded (exit code 0)
         if ($LASTEXITCODE -eq 0) {
-            return $result
+            # Convert output to string and trim whitespace
+            $value = $output | Out-String | ForEach-Object { $_.Trim() }
+            
+            # Return the value if it's not empty, null, or an error message
+            if ($value -and 
+                $value -ne 'null' -and 
+                $value -ne '' -and
+                -not $value.StartsWith('ERROR') -and
+                -not $value.Contains('not found')) {
+                return $value
+            }
         }
-        return ""
+        
+        # Return default if command failed or value is invalid
+        return $Default
     }
     catch {
-        return ""
+        # Return default on any exception
+        return $Default
     }
 }
 
 # Check ACS_SOURCE_PHONE_NUMBER
 Write-Host "🔍 Checking ACS_SOURCE_PHONE_NUMBER..." -ForegroundColor Yellow
-$ExistingAcsPhoneNumber = Get-AzdEnvValue "ACS_SOURCE_PHONE_NUMBER"
+$ExistingAcsPhoneNumber = Get-AzdEnvValue -Name "ACS_SOURCE_PHONE_NUMBER"
 $SkipPhoneCreation = $false
+
+# Debug output
+Write-Host "Debug: Retrieved ACS_SOURCE_PHONE_NUMBER: '$ExistingAcsPhoneNumber'" -ForegroundColor Gray
 
 if ($ExistingAcsPhoneNumber -and $ExistingAcsPhoneNumber -ne "null" -and $ExistingAcsPhoneNumber -match '^\+[0-9]+$') {
     Write-Host "✅ ACS_SOURCE_PHONE_NUMBER already exists: $ExistingAcsPhoneNumber" -ForegroundColor Green
@@ -60,7 +85,7 @@ if (-not $SkipPhoneCreation) {
 
         # Retrieve ACS endpoint
         Write-Host "🔍 Retrieving ACS_ENDPOINT from environment..." -ForegroundColor Cyan
-        $AcsEndpoint = Get-AzdEnvValue "ACS_ENDPOINT"
+        $AcsEndpoint = Get-AzdEnvValue -Name "ACS_ENDPOINT"
         if (-not $AcsEndpoint) {
             throw "ACS_ENDPOINT is not set in the environment"
         }
@@ -96,9 +121,9 @@ if (-not $SkipPhoneCreation) {
         
         # Update the backend container app or app service environment variable
         Write-Host "🔄 Updating backend environment variable..." -ForegroundColor Cyan
-        $BackendContainerAppName = Get-AzdEnvValue "BACKEND_CONTAINER_APP_NAME"
-        $BackendAppServiceName = Get-AzdEnvValue "BACKEND_APP_SERVICE_NAME"
-        $BackendResourceGroupName = Get-AzdEnvValue "AZURE_RESOURCE_GROUP"
+        $BackendContainerAppName = Get-AzdEnvValue -Name "BACKEND_CONTAINER_APP_NAME"
+        $BackendAppServiceName = Get-AzdEnvValue -Name "BACKEND_APP_SERVICE_NAME"
+        $BackendResourceGroupName = Get-AzdEnvValue -Name "AZURE_RESOURCE_GROUP"
 
         if ($BackendContainerAppName -and $BackendResourceGroupName) {
             Write-Host "📱 Updating ACS_SOURCE_PHONE_NUMBER in container app: $BackendContainerAppName" -ForegroundColor Cyan
@@ -139,11 +164,12 @@ Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Get the azd environment name
-$AzdEnvName = Get-AzdEnvValue "AZURE_ENV_NAME"
-if (-not $AzdEnvName) {
-    $AzdEnvName = "dev"
-}
+$AzdEnvName = Get-AzdEnvValue -Name "AZURE_ENV_NAME" -Default "dev"
 $EnvFile = ".env.$AzdEnvName"
+
+# Debug output
+Write-Host "Debug: Using environment name: '$AzdEnvName'" -ForegroundColor Gray
+Write-Host "Debug: Environment file will be: '$EnvFile'" -ForegroundColor Gray
 
 # Get the script directory to locate helper scripts
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -176,6 +202,7 @@ try {
             throw "No environment generation script found"
         }
     }
+    exit 0
 }
 catch {
     Write-Error "❌ Environment file generation failed: $($_.Exception.Message)"

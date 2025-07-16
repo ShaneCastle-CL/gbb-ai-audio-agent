@@ -79,28 +79,6 @@ resource "azurerm_role_assignment" "storage_principal_contributor" {
 #     tags = local.tags
 # }
 
-/*
-Note: This is a generated HCL content from the JSON input which is based on the latest API version available.
-To import the resource, please run the following command:
-terraform import azapi_resource.mongoCluster /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2023-03-01-preview
-
-Or add the below config:
-import {
-  id = "/subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2023-03-01-preview"
-  to = azapi_resource.mongoCluster
-}
-*/
-/*
-Note: This is a generated HCL content from the JSON input which is based on the latest API version available.
-To import the resource, please run the following command:
-terraform import azapi_resource.mongoCluster /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2025-04-01-preview
-
-Or add the below config:
-import {
-  id = "/subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2025-04-01-preview"
-  to = azapi_resource.mongoCluster
-}
-*/
 resource "azapi_resource" "mongoCluster" {
   type      = "Microsoft.DocumentDB/mongoClusters@2025-04-01-preview"
   parent_id = azurerm_resource_group.main.id
