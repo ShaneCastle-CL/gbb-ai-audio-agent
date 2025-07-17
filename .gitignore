@@ -131,6 +131,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -138,6 +139,9 @@ ENV/
 env.bak/
 venv.bak/
 .env.bak/
+
+!.env.sample
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -188,7 +192,7 @@ rtagents/RTAgent/backend/agents/agent_store/auth_agent.yaml
 *.tfstate
 *.tfstate.*
 *.tfvars
-*.tfvars.json
+main.tfvars.json
 .terraform/
 .terraform.lock.hcl
 crash.log
@@ -199,3 +203,6 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
+# Terraform backend config (contains environment-specific values)
+infra-tf/backend.tf
+main.tfvars.json

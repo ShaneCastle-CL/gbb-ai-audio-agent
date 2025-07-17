@@ -227,4 +227,3 @@ echo ""
 #     echo "   Please check your Application Gateway deployment."
 # fi
 
-

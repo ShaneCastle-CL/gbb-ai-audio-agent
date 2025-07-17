@@ -9,7 +9,7 @@ services:
     env_file:
       - ./rtagents/RTAgent/frontend/.env
     ports:
-      - "5173:5173"
+      - "8080:8080"
     
   # Be sure to run the devtunnel if developing locally
   # and to update the root .env file with the tunnel URL
