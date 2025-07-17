@@ -35,6 +35,11 @@ resource "azurerm_key_vault_secret" "frontend_swa_password" {
   name         = "frontend-swa-password"
   value        = random_password.frontend_swa_password.result
   key_vault_id = azurerm_key_vault.main.id
+
+  depends_on = [
+    azurerm_key_vault.main,
+    azurerm_role_assignment.keyvault_admin
+  ]
 }
 
 resource "azurerm_static_web_app" "frontend" {
