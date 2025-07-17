@@ -131,6 +131,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
 .venv
 env/
 venv/
@@ -138,6 +139,9 @@ ENV/
 env.bak/
 venv.bak/
 .env.bak/
+
+!.env.sample
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -196,7 +200,7 @@ pyproject.toml
 *.tfstate
 *.tfstate.*
 *.tfvars
-*.tfvars.json
+main.tfvars.json
 .terraform/
 .terraform.lock.hcl
 crash.log
@@ -208,3 +212,7 @@ override.tf.json
 .terraformrc
 terraform.rc
 >>>>>>> c69811b11fe96796a358ec523535479ee65b6cb3
+
+# Terraform backend config (contains environment-specific values)
+infra-tf/backend.tf
+main.tfvars.json
