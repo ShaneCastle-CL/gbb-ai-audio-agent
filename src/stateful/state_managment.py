@@ -233,7 +233,37 @@ class MemoManager:
         self.history.clear(agent_name)
 
     # --- PROMPT INJECTION ---------------------------------------------
-    #TODO this is wrong
+    # TODO this is wrong and needs to be fixed after close refactor [P.S]
+    
+    def get_context(self, key: str, default: Any = None) -> Any:
+        """
+        Shorthand for self.corememory.get().
+        Returns *default* when the key is absent.
+        """
+        return self.corememory.get(key, default)
+
+    def set_context(self, key: str, value: Any) -> None:
+        """
+        Overwrite *key* with *value* in core memory.
+        Use `await self.persist()` afterwards if you need the change
+        flushed to Redis immediately.
+        """
+        self.corememory.set(key, value)
+
+
+    def update_context(self, key: str, value: Any) -> None:
+        """
+        Merge *value* into an existing dict stored under *key*.
+        If the current value is not a mapping, it is replaced.
+        """
+        current = self.corememory.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            current.update(value)
+            self.corememory.set(key, current)
+        else:
+            # Either no entry yet or not a dict → replace
+            self.corememory.set(key, value)
+
     def ensure_system_prompt(
         self, agent_name: str, prompt_manager: PromptManager, prompt_path: str
     ) -> None:
@@ -249,7 +279,7 @@ class MemoManager:
             history.insert(0, {"role": "system", "content": prompt})
         elif history[0].get("content") != prompt:
             history[0]["content"] = prompt
-    
+
     def get_value_from_corememory(self, key: str, default: Any = None) -> Any:
         """
         Get a value from core memory.

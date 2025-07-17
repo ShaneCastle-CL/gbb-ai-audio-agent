@@ -11,9 +11,9 @@ from typing import Any, Dict, Optional
 
 import yaml
 from fastapi import WebSocket
-from rtagent.backend.agents.prompt_store.prompt_manager import PromptManager
-from rtagent.backend.agents.tool_store import tools as tool_store
-from rtagent.backend.orchestration.gpt_flow import process_gpt_response
+from apps.rtagent.backend.src.agents.prompt_store.prompt_manager import PromptManager
+from apps.rtagent.backend.src.agents.tool_store import tools as tool_store
+from apps.rtagent.backend.src.orchestration.gpt_flow import process_gpt_response
 
 from utils.ml_logging import get_logger
 

@@ -1,89 +1,115 @@
+############################################################
+# Makefile for gbb-ai-audio-agent
+# Purpose: Manage code quality, environment, and app tasks
+# Each target is documented for clarity and maintainability
+############################################################
+
+# Python interpreter to use
 PYTHON_INTERPRETER = python
+# Conda environment name (default: audioagent)
 CONDA_ENV ?= audioagent
+# Ensure current directory is in PYTHONPATH
 export PYTHONPATH=$(PWD):$PYTHONPATH;
 
-# Target for setting up pre-commit and pre-push hooks
+
+# Install pre-commit and pre-push git hooks
 set_up_precommit_and_prepush:
 	pre-commit install -t pre-commit
 	pre-commit install -t pre-push
 
-# The 'check_code_quality' command runs a series of checks to ensure the quality of your code.
+
+# Run all code quality checks (formatting, linting, typing, security, etc.)
 check_code_quality:
-	# Running 'ruff' to automatically fix common Python code quality issues.
+	# Ruff: auto-fix common Python code issues
 	@pre-commit run ruff --all-files
 
-	# Running 'black' to ensure consistent code formatting.
+	# Black: enforce code formatting
 	@pre-commit run black --all-files
 
-	# Running 'isort' to sort and organize your imports.
+	# isort: sort and organize imports
 	@pre-commit run isort --all-files
 
-	# # Running 'flake8' for linting.
+	# flake8: linting
 	@pre-commit run flake8 --all-files
 
-	# Running 'mypy' for static type checking.
+	# mypy: static type checking
 	@pre-commit run mypy --all-files
 
-	# Running 'check-yaml' to validate YAML files.
+	# check-yaml: validate YAML files
 	@pre-commit run check-yaml --all-files
 
-	# Running 'end-of-file-fixer' to ensure files end with a newline.
+	# end-of-file-fixer: ensure newline at EOF
 	@pre-commit run end-of-file-fixer --all-files
 
-	# Running 'trailing-whitespace' to remove unnecessary whitespaces.
+	# trailing-whitespace: remove trailing whitespace
 	@pre-commit run trailing-whitespace --all-files
 
-	# Running 'interrogate' to check docstring coverage in your Python code.
+	# interrogate: check docstring coverage
 	@pre-commit run interrogate --all-files
 
-	# Running 'bandit' to identify common security issues in your Python code.
+	# bandit: scan for Python security issues
 	bandit -c pyproject.toml -r .
 
+
+# Auto-fix code quality issues (formatting, imports, lint)
 fix_code_quality:
-	# Automatic fixes for code quality (not doing in production only dev cycles)
+	# Only use in development, not production
 	black .
 	isort .
 	ruff --fix .
 
-# Targets for running tests
+
+# Run unit tests with coverage report
 run_unit_tests:
 	$(PYTHON_INTERPRETER) -m pytest --cov=my_module --cov-report=term-missing --cov-config=.coveragerc
 
+
+# Convenience targets for full code/test quality cycle
 check_and_fix_code_quality: fix_code_quality check_code_quality
 check_and_fix_test_quality: run_unit_tests
 
-# Colored text
+
+# ANSI color codes for pretty output
 RED = \033[0;31m
 NC = \033[0m # No Color
 GREEN = \033[0;32m
 
-# Helper function to print section titles
+
+# Helper function: print section titles in green
 define log_section
 	@printf "\n${GREEN}--> $(1)${NC}\n\n"
 endef
 
+
+# Create the conda environment from environment.yaml
 create_conda_env:
 	@echo "Creating conda environment"
 	conda env create -f environment.yaml
 
+
+# Activate the conda environment
 activate_conda_env:
 	@echo "Creating conda environment"
 	conda activate $(CONDA_ENV)
 
+
+# Remove the conda environment
 remove_conda_env:
 	@echo "Removing conda environment"
 	conda env remove --name $(CONDA_ENV)
 
-# Target to run the Streamlit app locally
-stt_aoai_tts_server: 
-	python rtagent/backend/main.py
 
-stt_aoai_tts_browser: 
-	cd rtagent/frontend && npm install && npm run dev
+# Start the backend server (FastAPI/Uvicorn)
+starts_rtagent_server: 
+	python apps/rtagent/backend/main.py
 
-stt_aoai_transcribe_microphone: 
-	python rtagents/acs_gpt4o_transcribe/app/microphone_transcribe.py
 
+# Start the frontend (Vite + React dev server)
+starts_rtagent_browser: 
+	cd apps/rtagent/frontend && npm install && npm run dev
+
+
+# Run pylint on all Python files (excluding tests), output to report file
 run_pylint:
 	@echo "Running linter"
 	find . -type f -name "*.py" ! -path "./tests/*" | xargs pylint -disable=logging-fstring-interpolation > utils/pylint_report/pylint_report.txt

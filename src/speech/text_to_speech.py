@@ -18,7 +18,6 @@ logger = get_logger()
 
 _SENTENCE_END = re.compile(r"([.!?；？！。]+|\n)")
 
-
 def split_sentences(text: str) -> List[str]:
     """Very small sentence splitter that keeps delimiters."""
     parts, buf = [], []
@@ -78,6 +77,18 @@ def ssml_voice_wrap(
         "</speak>"
     )
 
+def _is_headless() -> bool:
+    """
+    Very light‑weight heuristics:
+      • Linux & no DISPLAY   ➜ container / server
+      • CI env variable set  ➜ pipeline runner
+    Extend if you need Windows detection (e.g. `%SESSIONNAME%`)
+    """
+    import sys
+    return (
+        sys.platform.startswith("linux")
+        and not os.environ.get("DISPLAY")
+    ) or bool(os.environ.get("CI"))
 
 class SpeechSynthesizer:
     def __init__(
@@ -87,6 +98,7 @@ class SpeechSynthesizer:
         language: str = "en-US",
         voice: str = "en-US-JennyMultilingualNeural",
         format: speechsdk.SpeechSynthesisOutputFormat = speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm,
+        playback: str = "auto",  # "auto" | "always" | "never"
     ):
         # Retrieve Azure Speech credentials from parameters or environment variables
         self.key = key or os.getenv("AZURE_SPEECH_KEY")
@@ -94,11 +106,12 @@ class SpeechSynthesizer:
         self.language = language
         self.voice = voice
         self.format = format
+        self.playback = playback
 
         # DON'T initialize speaker synthesizer during __init__ to avoid audio library issues
         # Only create it when actually needed for speaker playback
         self._speaker = None
-        
+
         # Create base speech config for other operations
         self.cfg = None
         try:
@@ -107,7 +120,7 @@ class SpeechSynthesizer:
         except Exception as e:
             logger.error(f"Failed to initialize speech config: {e}")
             # Don't fail completely - allow for memory-only synthesis
-    
+
     def _create_speech_config(self):
         """
         Helper method to create and configure the SpeechConfig object.
@@ -169,23 +182,57 @@ class SpeechSynthesizer:
 
     def _create_speaker_synthesizer(self):
         """
-        Create a SpeechSynthesizer instance for playing audio through the server's default speaker.
-        Only call this when actually needed and in environments with audio support.
+        Build a SpeechSynthesizer for speaker playback, honoring the `playback` flag.
+
+            playback = "never"   ➜ always return None (no attempt)
+            playback = "auto"    ➜ create only if a speaker is likely present
+            playback = "always"  ➜ always create (falls back to null‑sink in head‑less env)
+
+        Returns:
+            speechsdk.SpeechSynthesizer | None
         """
-        if self._speaker is None:
-            try:
-                speech_config = self._create_speech_config()
-                # Try to create with null audio output first for headless environments
-                audio_config = speechsdk.audio.AudioOutputConfig(filename=None)
+        # 1. Never mode: do not create a speaker synthesizer
+        if self.playback == "never":
+            logger.debug("playback='never' – speaker creation skipped")
+            return None
+
+        # 2. If already created, return cached instance
+        if self._speaker is not None:
+            return self._speaker
+
+        # 3. Create the speaker synthesizer according to playback mode
+        try:
+            speech_config = self._create_speech_config()
+            headless = _is_headless()
+
+            if self.playback == "always":
+                # Always create, use null sink if headless
+                if headless:
+                    audio_config = speechsdk.audio.AudioOutputConfig(filename=None)
+                    logger.debug("playback='always' – headless: using null audio output")
+                else:
+                    audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+                    logger.debug("playback='always' – using default system speaker output")
                 self._speaker = speechsdk.SpeechSynthesizer(
                     speech_config=speech_config, audio_config=audio_config
                 )
-                logger.debug("Created speaker synthesizer with null audio output")
-            except Exception as e:
-                logger.warning(f"Could not create speaker synthesizer: {e}")
-                # Fall back to memory-only synthesis
-                self._speaker = None
+            elif self.playback == "auto":
+                # Only create if not headless
+                if headless:
+                    logger.debug("playback='auto' – headless: speaker not created")
+                    self._speaker = None
+                else:
+                    audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+                    logger.debug("playback='auto' – using default system speaker output")
+                    self._speaker = speechsdk.SpeechSynthesizer(
+                        speech_config=speech_config, audio_config=audio_config
+                    )
+        except Exception as exc:
+            logger.warning("Could not create speaker synthesizer: %s", exc)
+            self._speaker = None  # fall back to memory-only synthesis
+
         return self._speaker
+
     
     @staticmethod
     def _sanitize(text: str) -> str:
@@ -203,19 +250,24 @@ class SpeechSynthesizer:
         try:
             speaker = self._create_speaker_synthesizer()
             if speaker is None:
-                logger.warning("Speaker not available in headless environment, skipping playback")
+                logger.warning(
+                    "Speaker not available in headless environment, skipping playback"
+                )
                 return
-                
-            logger.info("[🔊] Starting streaming speech synthesis for text: %s", text[:50] + "...")
-            
+
+            logger.info(
+                "[🔊] Starting streaming speech synthesis for text: %s",
+                text[:50] + "...",
+            )
+
             ssml = f"""
-<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-    <voice name="{self.voice}">
-        <prosody rate="15%" pitch="default">
-            {self._sanitize(text)}
-        </prosody>
-    </voice>
-</speak>"""
+                <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+                    <voice name="{self.voice}">
+                        <prosody rate="15%" pitch="default">
+                            {self._sanitize(text)}
+                        </prosody>
+                    </voice>
+                </speak>"""
             speaker.speak_ssml_async(ssml)
         except Exception as exc:
             logger.warning("TTS playback not available in this environment: %s", exc)
@@ -252,7 +304,7 @@ class SpeechSynthesizer:
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 audio_data_stream = speechsdk.AudioDataStream(result)
                 wav_bytes = audio_data_stream.read_data()
-                return bytes(wav_bytes) 
+                return bytes(wav_bytes)
             else:
                 logger.error(f"Speech synthesis failed: {result.reason}")
                 return b""
@@ -297,13 +349,13 @@ class SpeechSynthesizer:
             ##  If you would like to speed up the speech, you can increase the `prosody rate`% accordingly.
 
             ssml = f"""
-<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-    <voice name="en-US-AvaMultilingualNeural">
-        <prosody rate="15%" pitch="default">
-            {text}
-        </prosody>
-    </voice>
-</speak>"""
+                <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+                    <voice name="en-US-AvaMultilingualNeural">
+                        <prosody rate="15%" pitch="default">
+                            {text}
+                        </prosody>
+                    </voice>
+                </speak>"""
 
             # 4) Synthesize
             logger.debug(f"Starting TTS synthesis for text: {text[:50]}...")
@@ -340,7 +392,10 @@ class SpeechSynthesizer:
 
             # 6) Split into 20ms frames and convert to base64
             import base64
-            frame_size = int(0.02 * sample_rate * 2)  # 20ms * sample_rate * 2 bytes/sample
+
+            frame_size = int(
+                0.02 * sample_rate * 2
+            )  # 20ms * sample_rate * 2 bytes/sample
             frames = []
 
             for i in range(0, len(pcm_bytes), frame_size):
@@ -448,7 +503,9 @@ class SpeechSynthesizer:
 </speak>"""
 
         # Use audio_config=None for memory synthesis - NO AUDIO HARDWARE NEEDED
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+        synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=speech_config, audio_config=None
+        )
         result = synthesizer.speak_ssml_async(ssml).get()
 
         if result.reason == speechsdk.ResultReason.Canceled:
@@ -462,7 +519,9 @@ class SpeechSynthesizer:
         return result.audio_data  # raw PCM bytes
 
     @staticmethod
-    def split_pcm_to_base64_frames(pcm_bytes: bytes, sample_rate: int = 16000) -> list[str]:
+    def split_pcm_to_base64_frames(
+        pcm_bytes: bytes, sample_rate: int = 16000
+    ) -> list[str]:
         import base64
 
         frame_size = int(0.02 * sample_rate * 2)  # 20ms * sample_rate * 2 bytes/sample
