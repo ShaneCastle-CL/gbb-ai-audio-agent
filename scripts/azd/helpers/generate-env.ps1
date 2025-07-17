@@ -74,13 +74,29 @@ function Get-AzdValue {
     )
     
     try {
-        $value = azd env get-value $Key 2>$null
-        if ($LASTEXITCODE -ne 0 -or $value -eq "null" -or $value.StartsWith("ERROR") -or [string]::IsNullOrEmpty($value)) {
-            return $Fallback
+        # Capture both stdout and stderr, then check exit code
+        $output = & azd env get-value $Key 2>&1
+        
+        # Check if the command succeeded (exit code 0)
+        if ($LASTEXITCODE -eq 0) {
+            # Convert output to string and trim whitespace
+            $value = $output | Out-String | ForEach-Object { $_.Trim() }
+            
+            # Return the value if it's not empty, null, or an error message
+            if ($value -and 
+                $value -ne 'null' -and 
+                $value -ne '' -and
+                -not $value.StartsWith('ERROR') -and
+                -not $value.Contains('not found')) {
+                return $value
+            }
         }
-        return $value
+        
+        # Return fallback if command failed or value is invalid
+        return $Fallback
     }
     catch {
+        # Return fallback on any exception
         return $Fallback
     }
 }
@@ -95,14 +111,18 @@ function Test-AzdEnvironment {
     
     # Test if we can access azd environment
     try {
-        azd env get-value AZURE_ENV_NAME *>$null
+        $testValue = & azd env get-value AZURE_ENV_NAME 2>&1
         if ($LASTEXITCODE -ne 0) {
-            throw "No active AZD environment"
+            Write-ColorOutput "No active AZD environment found. Output: $testValue" -Type Error
+            Write-ColorOutput "Please run 'azd env select' or 'azd init' to set up an environment" -Type Error
+            exit 1
         }
         Write-ColorOutput "AZD environment validation passed" -Type Success
+        Write-ColorOutput "Active environment: $testValue" -Type Info
     }
     catch {
-        Write-ColorOutput "No active AZD environment found. Please run 'azd env select' or 'azd init'" -Type Error
+        Write-ColorOutput "No active AZD environment found. Error: $($_.Exception.Message)" -Type Error
+        Write-ColorOutput "Please run 'azd env select' or 'azd init' to set up an environment" -Type Error
         exit 1
     }
 }
@@ -117,6 +137,8 @@ function New-EnvironmentFile {
     
     # Define configuration mappings
     $configMappings = [ordered]@{
+        # Application Insights Configuration
+        'APPLICATIONINSIGHTS_CONNECTION_STRING' = @{ Key = 'APPLICATIONINSIGHTS_CONNECTION_STRING'; Default = '' }
         # Azure OpenAI Configuration
         'AZURE_OPENAI_KEY' = @{ Key = 'AZURE_OPENAI_KEY'; Default = '' }
         'AZURE_OPENAI_ENDPOINT' = @{ Key = 'AZURE_OPENAI_ENDPOINT'; Default = '' }
@@ -333,6 +355,7 @@ function Main {
         Write-Host ""
         Write-ColorOutput "Environment file generation complete!" -Type Success
         Write-ColorOutput "Generated: $script:OutputFile" -Type Success -Prefix "📄"
+        exit 0
     }
     catch {
         Write-ColorOutput "Environment file generation failed: $($_.Exception.Message)" -Type Error
