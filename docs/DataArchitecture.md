@@ -112,7 +112,7 @@ TTL_POLICIES = {
 ### Core Components
 1. **RedisKeyManager**: Hierarchical key structure and TTL management
 2. **AsyncAzureRedisManager**: High-level async operations for conversation and call management  
-3. **MemoManager**: Conversation state with automatic legacy migration
+3. **ConversationManager**: Conversation state with automatic legacy migration
 
 ### Usage Examples
 
@@ -122,10 +122,10 @@ async def handle_call_connected(call_connection_id: str):
     session_key = redis_manager.key_manager.call_key(call_connection_id, Component.SESSION)
     await redis_manager.store_call_session(call_connection_id, session_data)
 
-# Conversation Management with MemoManager
+# Conversation Management with ConversationManager
 async def setup_conversation(session_id: str = None):
-    cm = MemoManager(session_id=session_id, environment="prod")
-    cm = await MemoManager.from_redis(session_id, redis_mgr)
+    cm = ConversationManager(session_id=session_id, environment="prod")
+    cm = await ConversationManager.from_redis(session_id, redis_mgr)
     await cm.update_context({"user_authenticated": True})
     await cm.append_to_history("user", "Hello")
 
@@ -141,14 +141,14 @@ async def cache_tts_response(phrase_hash: str, audio_data: bytes):
 sequenceDiagram
     participant ACS as Azure Communication Services
     participant Memory as App Memory
-    participant CM as MemoManager
+    participant CM as ConversationManager
     participant Redis as Redis Cache
     participant AI as AI Service
     participant Cosmos as Cosmos DB
     
     Note over ACS,Cosmos: Call Initialization
     ACS->>Memory: CallConnected Event
-    Memory->>CM: new MemoManager(call_connection_id)
+    Memory->>CM: new ConversationManager(call_connection_id)
     CM->>Redis: Initialize session context
     
     Note over ACS,Cosmos: Active Conversation
