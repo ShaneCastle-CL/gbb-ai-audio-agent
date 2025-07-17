@@ -5,55 +5,66 @@ metadata:
 
 infra:
   provider: terraform
-  path: ./infra-tf
+  path: ./infra/terraform
 
 services:
   rtaudio-client:
-    project: apps/rtagent/frontend
-    host: staticwebapp
+    project: apps/RTAgent/frontend
+    host: appservice
     language: js
 
-# For app service, deploy using the postdeploy hook
+# For app service-hosted backend, deploy using the predeploy hook
 #   rtaudio-server:
-#     project: rtagents/RTAgent/backend
+#     project: apps/RTAgent/backend
 #     host: appservice
 #     language: python
-    
+
+  # rtaudio-server-aca:
+  #   project: apps/RTAgent/backend
+  #   host: containerapp
+  #   language: python
+  #   docker:
+  #     path: ./Dockerfile
+  #     context: ../../../
+  #     platform: linux/amd64
+
+
+
 hooks:
   preprovision:
     # Cross-platform hook - automatically selects appropriate shell and script
     posix:
       shell: sh
-      run: ./devops/scripts/azd/preprovision.sh terraform
+      run: devops/scripts/azd/preprovision.sh terraform
       interactive: true
       continueOnError: false
     windows:
       shell: pwsh
-      run: ./devops/scripts/azd/preprovision.ps1 terraform
+      run: devops/scripts/azd/preprovision.ps1 terraform
       interactive: true
       continueOnError: false
   predeploy:
-    # Cross-platform hook with timeout handling
+    # Deploy the app service using the predeploy hook
     posix:
       shell: sh
-      run: ./devops/scripts/azd/helpers/appsvc-deploy.sh RTAgent
-      interactive: false
+      run: devops/scripts/azd/helpers/appsvc-deploy.sh RTAgent
+      interactive: true
       continueOnError: true
     windows:
       shell: pwsh
-      run: ./devops/scripts/azd/helpers/appsvc-deploy.ps1 RTAgent
+      run: devops/scripts/azd/helpers/appsvc-deploy.ps1 RTAgent
       interactive: false
       continueOnError: true
   postprovision:
     # Cross-platform hook for post-provision setup
     posix:
       shell: sh
-      run: ./devops/scripts/azd/postprovision.sh
+      run: ./scripts/azd/postprovision.sh
       interactive: true
       continueOnError: false
     windows:
       shell: pwsh
-      run: ./devops/scripts/azd/postprovision.ps1
+      run: ./scripts/azd/postprovision.ps1
       interactive: true
       continueOnError: false
 

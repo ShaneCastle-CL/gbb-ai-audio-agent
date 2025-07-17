@@ -48,16 +48,27 @@ output "AZURE_SPEECH_REGION" {
   value       = azurerm_cognitive_account.speech.location
 }
 
+output "AZURE_SPEECH_DOMAIN_ENDPOINT" {
+  description = "Azure Speech Services domain endpoint for ACS integration"
+  value       = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
+}
+
 # Communication Services
 output "ACS_ENDPOINT" {
   description = "Azure Communication Services endpoint"
-  value       = azurerm_communication_service.main.hostname
+  value       = azapi_resource.acs.output.properties.hostName
 }
 
 output "ACS_RESOURCE_ID" {
   description = "Azure Communication Services resource ID"
-  value       = azurerm_communication_service.main.id
+  value       = azapi_resource.acs.id
 }
+
+
+# output "ACS_MANAGED_IDENTITY_PRINCIPAL_ID" {
+#   description = "Azure Communication Services system-assigned managed identity principal ID"
+#   value = data.azapi_resource.acs_identity_details.identity.principalId
+# }
 
 # Data Services
 output "AZURE_STORAGE_ACCOUNT_NAME" {

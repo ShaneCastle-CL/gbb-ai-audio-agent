@@ -112,7 +112,7 @@
 #   }
 
 #   tags = merge(local.tags, {
-#     "azd-service-name" = "rtaudio-client"
+#     "azd-service-name" = "rtaudio-client-aca"
 #   })
 # }
 
@@ -191,11 +191,22 @@
 #       cpu    = 1.0
 #       memory = "2.0Gi"
 
-#       # Environment variables from secrets
-#       env {
+#     # Environment variables from secrets or managed identity
+#     dynamic "env" {
+#       for_each = var.disable_local_auth ? [1] : []
+#       content {
+#         name  = "ACS_ENDPOINT"
+#         value = azurerm_communication_service.main.hostname
+#       }
+#     }
+
+#     dynamic "env" {
+#       for_each = var.disable_local_auth ? [] : [1]
+#       content {
 #         name        = "ACS_CONNECTION_STRING"
 #         secret_name = "acs-connection-string"
 #       }
+#     }
 
 #     #   dynamic "env" {
 #     #     for_each = var.disable_local_auth ? [] : [1]
@@ -244,7 +255,7 @@
 
 #       env {
 #         name  = "AZURE_SPEECH_ENDPOINT"
-#         value = azurerm_cognitive_account.speech.endpoint
+#         value = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
 #       }
 
 #       env {
@@ -304,7 +315,7 @@
 #   }
 
 #   tags = merge(local.tags, {
-#     "azd-service-name" = "rtaudio-server"
+#     "azd-service-name" = "rtaudio-server-aca"
 #   })
 
 #   depends_on = [
