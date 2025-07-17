@@ -10,7 +10,6 @@ import VoiceSphere from './components/VoiceSphere';
 import "reactflow/dist/style.css";
 import { useHealthMonitor } from "./hooks/useHealthMonitor";
 import HealthStatusIndicator from "./components/HealthStatusIndicator";
-import VoiceSphere from './components/VoiceSphere';
 
 /* ------------------------------------------------------------------ *
  *  ENV VARS
@@ -142,13 +141,6 @@ export default function RealTimeVoiceApp() {
   // const [nodes, setNodes] = useState([rootUser, rootAssistant]);
   // const [edges, setEdges] = useState([]);
 
-<<<<<<< HEAD
-=======
-  // /* helpers for unique ids */
-  // const nextId = () => `n-${Date.now()}-${idRef.current++}`;
-  // const lastUserId      = useRef(null);
-  // const lastAssistantId = useRef(null);
->>>>>>> 5c1822ad7a781ddfab7c3c7217ae91e78c1f10d1
   // all of our former “mind-map” state now lives here:
   const [functionCalls, setFunctionCalls] = useState([]);
   const [callResetKey, setCallResetKey]   = useState(0);
@@ -427,11 +419,7 @@ export default function RealTimeVoiceApp() {
           <div style={{ textAlign: 'center' }}>
             <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
             <p style={styles.headerSubtitle}>
-<<<<<<< HEAD
-          Transforming patient care with real-time, intelligent voice interactions
-=======
               Transforming patient care with real-time, intelligent voice interactions
->>>>>>> 5c1822ad7a781ddfab7c3c7217ae91e78c1f10d1
             </p>
           </div>
           <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
