@@ -7,6 +7,9 @@ import {
   PropertyId,
 } from 'microsoft-cognitiveservices-speech-sdk';
 import VoiceSphere from './components/VoiceSphere';
+import "reactflow/dist/style.css";
+import { useHealthMonitor } from "./hooks/useHealthMonitor";
+import HealthStatusIndicator from "./components/HealthStatusIndicator";
 
 /* ------------------------------------------------------------------ *
  *  ENV VARS
@@ -16,6 +19,8 @@ const {
   VITE_AZURE_REGION:     AZURE_REGION,
   VITE_BACKEND_BASE_URL: API_BASE_URL,
 } = import.meta.env;
+
+
 const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
 
 /* ------------------------------------------------------------------ *
@@ -113,12 +118,35 @@ export default function RealTimeVoiceApp() {
   const [callActive, setCallActive]   = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
 
+  /* ---------- health monitoring ---------- */
+  const { 
+    healthStatus = { isHealthy: null, lastChecked: null, responseTime: null, error: null },
+    readinessStatus = { status: null, timestamp: null, responseTime: null, checks: [], lastChecked: null, error: null },
+    overallStatus = { isHealthy: false, hasWarnings: false, criticalErrors: [] },
+    refresh = () => {} 
+  } = useHealthMonitor({
+    baseUrl: API_BASE_URL,
+    healthInterval: 30000,
+    readinessInterval: 15000,
+    enableAutoRefresh: true,
+  });
+
+
+  /* ---------- mind‑map state ---------- */
+  // const rootUser      = { id:"user-root",      data:{label:"👤 User"},      position:{x:-220,y:0},
+  //                         style:{background:"#0F766E",color:"#fff"} };
+  // const rootAssistant = { id:"assistant-root", data:{label:"🤖 Assistant"}, position:{x: 220,y:0},
+  //                         style:{background:"#4338CA",color:"#fff"} };
+
+  // const [nodes, setNodes] = useState([rootUser, rootAssistant]);
+  // const [edges, setEdges] = useState([]);
+
   // all of our former “mind-map” state now lives here:
   const [functionCalls, setFunctionCalls] = useState([]);
   const [callResetKey, setCallResetKey]   = useState(0);
 
   /* ---------- refs ---------- */
-  const idRef        = useRef(0);
+  // const idRef        = useRef(0);
   const chatRef      = useRef(null);
   const socketRef    = useRef(null);
   const recognizerRef= useRef(null);
@@ -386,10 +414,24 @@ export default function RealTimeVoiceApp() {
     <div style={styles.root}>
       {/* HEADER */}
       <header style={styles.header}>
-        <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
-        <p style={styles.headerSubtitle}>
-          Transforming patient care with real-time, intelligent voice interactions
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div style={{ flex: 1 }} />
+          <div style={{ textAlign: 'center' }}>
+            <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
+            <p style={styles.headerSubtitle}>
+              Transforming patient care with real-time, intelligent voice interactions
+            </p>
+          </div>
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+            <HealthStatusIndicator
+              healthStatus={healthStatus}
+              readinessStatus={readinessStatus}
+              overallStatus={overallStatus}
+              onRefresh={refresh}
+              compact={true}
+            />
+          </div>
+        </div>
       </header>
 
       {/* CHAT */}

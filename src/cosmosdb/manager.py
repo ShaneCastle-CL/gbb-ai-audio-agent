@@ -67,7 +67,6 @@ class CosmosDBMongoCoreManager:
                 connection_string = f"mongodb+srv://{cluster_name}.global.mongocluster.cosmos.azure.com/"
                 
                 logger.info(f"Using OIDC authentication for cluster: {cluster_name}")
-                clusterName = "<azure-cosmos-db-mongodb-vcore-cluster-name>"
 
                 self.client = pymongo.MongoClient(
                     connection_string,

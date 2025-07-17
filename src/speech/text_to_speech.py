@@ -94,23 +94,18 @@ class SpeechSynthesizer:
         self.voice = voice
         self.format = format
 
-        # Initialize the speech synthesizer for speaker playback
-        # self._speaker = self._create_synth()
-        self.cfg = self._create_speech_config()
-        self._speaker = speechsdk.SpeechSynthesizer(
-            speech_config=self.cfg, 
-            audio_config=speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
-            )
-
-    # Duplicative, consolidating into _create_speech_config
-    # def _create_synth(self):
-    #     cfg = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
-    #     cfg.speech_synthesis_voice_name = self.voice
-    #     cfg.speech_synthesis_language = self.language
-    #     cfg.set_speech_synthesis_output_format(self.format)
-
-    #     audio_cfg = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
-    #     return speechsdk.SpeechSynthesizer(cfg, audio_cfg)
+        # DON'T initialize speaker synthesizer during __init__ to avoid audio library issues
+        # Only create it when actually needed for speaker playback
+        self._speaker = None
+        
+        # Create base speech config for other operations
+        self.cfg = None
+        try:
+            self.cfg = self._create_speech_config()
+            logger.info("Speech synthesizer initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize speech config: {e}")
+            # Don't fail completely - allow for memory-only synthesis
     
     def _create_speech_config(self):
         """
@@ -163,16 +158,26 @@ class SpeechSynthesizer:
             speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm
         )
         return speech_config
-        
+
     def _create_speaker_synthesizer(self):
         """
         Create a SpeechSynthesizer instance for playing audio through the server's default speaker.
+        Only call this when actually needed and in environments with audio support.
         """
-        speech_config = self._create_speech_config()
-        audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
-        return speechsdk.SpeechSynthesizer(
-            speech_config=speech_config, audio_config=audio_config
-        )
+        if self._speaker is None:
+            try:
+                speech_config = self._create_speech_config()
+                # Try to create with null audio output first for headless environments
+                audio_config = speechsdk.audio.AudioOutputConfig(filename=None)
+                self._speaker = speechsdk.SpeechSynthesizer(
+                    speech_config=speech_config, audio_config=audio_config
+                )
+                logger.debug("Created speaker synthesizer with null audio output")
+            except Exception as e:
+                logger.warning(f"Could not create speaker synthesizer: {e}")
+                # Fall back to memory-only synthesis
+                self._speaker = None
+        return self._speaker
     
     @staticmethod
     def _sanitize(text: str) -> str:
@@ -184,39 +189,37 @@ class SpeechSynthesizer:
 
     def start_speaking_text(self, text: str) -> None:
         """
-        Queue `text` for playback on the server speaker.
-
-        • If ≤100 chars AND same language as default → quick plain mode
-        • Otherwise → build multi-sentence SSML with per-sentence lang/style
+        Synthesize and play text through the server's speakers (if available).
+        In headless environments, this will log a warning and skip playback.
         """
         try:
-            text = text.strip()
-            if not text:
+            speaker = self._create_speaker_synthesizer()
+            if speaker is None:
+                logger.warning("Speaker not available in headless environment, skipping playback")
                 return
-
-            if (len(text) <= 100 and
-                detect(text).startswith(self.language[:2])):
-                self._speaker.start_speaking_text_async(text)
-                logger.debug("Quick TTS (plain) – %d chars", len(text))
-                return
-
-            # SSML path
-            sentences = split_sentences(text)
-            ssml = ssml_voice_wrap(self.voice, self.language,
-                                   sentences, self._sanitize)
-            self._speaker.start_speaking_ssml_async(ssml)
-            logger.debug("SSML TTS – %d sentences", len(sentences))
-
+                
+            logger.info("[🔊] Starting streaming speech synthesis for text: %s", text[:50] + "...")
+            
+            ssml = f"""
+<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="{self.voice}">
+        <prosody rate="15%" pitch="default">
+            {self._sanitize(text)}
+        </prosody>
+    </voice>
+</speak>"""
+            speaker.speak_ssml_async(ssml)
         except Exception as exc:
-            logger.error("TTS failed: %s", exc, exc_info=False)
+            logger.warning("TTS playback not available in this environment: %s", exc)
 
     def stop_speaking(self) -> None:
         """Stop current playback (if any)."""
-        try:
-            self._speaker.stop_speaking_async()
-        except Exception as exc:
-            logger.error("stop_speaking error: %s", exc, exc_info=False)
-
+        if self._speaker:
+            try:
+                logger.info("[🛑] Stopping speech synthesis...")
+                self._speaker.stop_speaking_async()
+            except Exception as e:
+                logger.warning(f"Could not stop speech synthesis: {e}")
 
     def synthesize_speech(self, text: str) -> bytes:
         """
@@ -224,34 +227,30 @@ class SpeechSynthesizer:
         Does NOT play audio on server speakers.
         """
         try:
-            # speech_config = speechsdk.SpeechConfig(
-            #     subscription=self.key, region=self.region
-            # )
-            # speech_config = self._create_speech_config()
-            # speech_config.speech_synthesis_language = self.language
-            # speech_config.speech_synthesis_voice_name = self.voice
-            # speech_config.set_speech_synthesis_output_format(
-            #     speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm
-            # )
+            # Create speech config for memory synthesis
+            speech_config = self._create_speech_config()
+            speech_config.speech_synthesis_language = self.language
+            speech_config.speech_synthesis_voice_name = self.voice
+            speech_config.set_speech_synthesis_output_format(
+                speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm
+            )
 
-            # synthesizer = speechsdk.SpeechSynthesizer(
-            #     speech_config=speech_config, audio_config=None
-            # )
-            result = self.speaker_synthesizer.synthesizer.speak_text_async(text).get()
+            # Use None for audio_config to synthesize to memory
+            synthesizer = speechsdk.SpeechSynthesizer(
+                speech_config=speech_config, audio_config=None
+            )
+            result = synthesizer.speak_text_async(text).get()
 
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 audio_data_stream = speechsdk.AudioDataStream(result)
                 wav_bytes = audio_data_stream.read_data()
-                return bytes(
-                    wav_bytes
-                ) 
+                return bytes(wav_bytes) 
             else:
                 logger.error(f"Speech synthesis failed: {result.reason}")
                 return b""
         except Exception as e:
             logger.error(f"Error synthesizing speech: {e}")
             return b""
-
 
     def synthesize_to_base64_frames(
         self, text: str, sample_rate: int = 16000
@@ -281,7 +280,7 @@ class SpeechSynthesizer:
             speech_config.speech_synthesis_voice_name = self.voice
             speech_config.set_speech_synthesis_output_format(sdk_format)
 
-            # 2) Synthesize to memory (audio_config=None)
+            # 2) Synthesize to memory (audio_config=None) - NO AUDIO HARDWARE NEEDED
             synth = speechsdk.SpeechSynthesizer(
                 speech_config=speech_config, audio_config=None
             )
@@ -323,7 +322,6 @@ class SpeechSynthesizer:
 
             # 6) Split into 20ms frames and convert to base64
             import base64
-            
             frame_size = int(0.02 * sample_rate * 2)  # 20ms * sample_rate * 2 bytes/sample
             frames = []
             
@@ -391,7 +389,6 @@ class SpeechSynthesizer:
             logger.error(f"Error during configuration validation: {e}")
             return False
 
-
     ## Cleaned up methods
     def synthesize_to_pcm(self, text: str, sample_rate: int = 16000) -> bytes:
         speech_config = self._create_speech_config()
@@ -409,16 +406,8 @@ class SpeechSynthesizer:
         </prosody>
     </voice>
 </speak>"""
-        # ssml = f"""<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-        #     <voice name="{speech_config.speech_synthesis_voice_name}">
-        #         <mstts:express-as style="chat">
-        #             <prosody rate="15%" pitch="default">{text}</prosody>
-        #         </mstts:express-as>
-        #     </voice>
-        # </speak>"""
 
-        # print("TTS SSML:", ssml)
-
+        # Use audio_config=None for memory synthesis - NO AUDIO HARDWARE NEEDED
         synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
         result = synthesizer.speak_ssml_async(ssml).get()
         
@@ -431,7 +420,8 @@ class SpeechSynthesizer:
             raise RuntimeError(f"TTS failed: {result.reason}")
 
         return result.audio_data  # raw PCM bytes
-    
+
+    @staticmethod
     def split_pcm_to_base64_frames(pcm_bytes: bytes, sample_rate: int = 16000) -> list[str]:
         import base64
         frame_size = int(0.02 * sample_rate * 2)  # 20ms * sample_rate * 2 bytes/sample
@@ -440,4 +430,3 @@ class SpeechSynthesizer:
             for i in range(0, len(pcm_bytes), frame_size)
             if len(pcm_bytes[i:i+frame_size]) == frame_size
         ]
-    

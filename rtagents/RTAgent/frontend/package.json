@@ -7,8 +7,8 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview --host 0.0.0.0 --port 5173",
-    "start": "serve -s dist -l tcp://0.0.0.0:5173"
+    "preview": "vite preview --host 0.0.0.0 --port 8080",
+    "start": "serve -s dist -l tcp://0.0.0.0:8080"
   },
   "dependencies": {
     "@azure/communication-calling": "^1.34.1",
@@ -21,6 +21,7 @@
     "react-dom": "^19.0.0",
     "reactflow": "^11.11.4",
     "serve": "^14.2.4",
+    "styled-components": "^6.1.19",
     "vite": "^6.3.5"
   },
   "devDependencies": {

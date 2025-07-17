@@ -1,46 +1,48 @@
-## microservices
-fastapi
-fastapi[standard]
-fastapi-users[beanie]
-gradio
-uvicorn
-pydantic-settings
-starlette
-redis
-aiohttp==3.11.10
-azure-cosmos==4.7.0
+## Core FastAPI microservices stack
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+starlette>=0.27.0
+redis>=5.0.0
+aiohttp>=3.9.0
+python-multipart>=0.0.6
+
+# Azure services - Linux App Service compatible versions
+azure-cosmos>=4.5.0
+azure-identity>=1.15.0
+azure-storage-blob>=12.19.0
+azure-cognitiveservices-speech>=1.45.0
+azure-communication-callautomation>=1.4.0
+azure-keyvault-secrets>=4.7.0
+azure-eventgrid>=4.10.0
 
 # AI and OpenAI integration
-openai
-azure-identity==1.19.0
-azure-mgmt-resource==23.1.1
-azure-storage-blob
-azure-cognitiveservices-speech==1.43.0 # Large dependency, can remove once code refactor complete
+openai>=1.50.0
 
-# HTTPX fix for OpenAI
-httpx==0.27.2
+# HTTP clients - stable versions
+httpx>=0.27.0
+aiofiles>=23.0.0
 
-# Async and event loop tools
-asyncio==3.4.3
-tenacity==8.5.0
-websockets
-pyaudio
-python-socks
-pipwin
-backoff
-sounddevice
-numpy
-dateparser
+# Async and networking tools
+tenacity>=8.5.0
+websockets>=12.0
+backoff>=2.0.0
 
-# python helpers
-yfinance
-plotly
-python-dotenv
+# Data processing
+numpy>=1.24.0
+python-dotenv>=1.0.0
+python-json-logger>=2.0.0
+jinja2>=3.1.0
+typing-extensions>=4.8.0
+langdetect>=1.0.9
 
-# ui
-streamlit==1.39.0
-streamlit-chat==0.1.1
+# Database drivers
+pymongo>=4.6.0
 
-# ACS
-azure-communication-callautomation==1.4.0
-langdetect==1.0.9
+# Production deployment notes:
+# - Removed asyncio package (conflicts with Python 3.11 stdlib)
+# - Removed audio packages (pyaudio, sounddevice) not needed for web service
+# - Removed UI frameworks (streamlit, gradio) not needed for backend API
+# - Removed development/local packages incompatible with Linux App Service
+# - Speech SDK audio dependencies handled by deployment script system packages

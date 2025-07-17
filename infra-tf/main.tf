@@ -3,7 +3,9 @@
 # ============================================================================
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.1.7, < 2.0.0"
+  backend "azurerm" {
+  }
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -32,6 +34,7 @@ provider "azurerm" {
       prevent_deletion_if_contains_resources = false
     }
   }
+  storage_use_azuread = true
 }
 
 provider "azuread" {}
@@ -77,6 +80,7 @@ locals {
   # Resource naming with abbreviations
   resource_names = {
     resource_group    = "rg-${var.name}-${var.environment_name}"
+    app_service_plan = "${var.name}sp${local.resource_token}"
     key_vault        = "kv${local.resource_token}"
     speech           = "speech-${var.environment_name}-${local.resource_token}"
     openai           = "openai${local.resource_token}"

@@ -12,11 +12,6 @@ output "AZURE_LOCATION" {
   value       = azurerm_resource_group.main.location
 }
 
-output "AZURE_CONTAINER_REGISTRY_ENDPOINT" {
-  description = "Azure Container Registry endpoint"
-  value       = azurerm_container_registry.main.login_server
-}
-
 # AI Services
 output "AZURE_OPENAI_ENDPOINT" {
   description = "Azure OpenAI endpoint"
@@ -56,7 +51,7 @@ output "AZURE_SPEECH_REGION" {
 # Communication Services
 output "ACS_ENDPOINT" {
   description = "Azure Communication Services endpoint"
-  value       = "https://${azurerm_communication_service.main.data_location}.communication.azure.com"
+  value       = azurerm_communication_service.main.hostname
 }
 
 output "ACS_RESOURCE_ID" {
@@ -77,23 +72,27 @@ output "AZURE_STORAGE_BLOB_ENDPOINT" {
 
 output "AZURE_STORAGE_CONTAINER_URL" {
     description = "Azure Storage Container URL"
-    value       = "${azurerm_storage_account.main.primary_blob_endpoint}/${azurerm_storage_container.audioagent.name}"
+    value       = "${azurerm_storage_account.main.primary_blob_endpoint}${azurerm_storage_container.audioagent.name}"
 }
 
-# output "AZURE_COSMOS_DB_ENDPOINT" {
-#   description = "Azure Cosmos DB endpoint"
-#   value       = azurerm_cosmosdb_account.main.endpoint
-# }
+output "AZURE_COSMOS_DATABASE_NAME" {
+  description = "Azure Cosmos DB database name"
+  value       = var.mongo_database_name
+}
 
-# output "AZURE_COSMOS_DB_DATABASE_NAME" {
-#   description = "Azure Cosmos DB database name"
-#   value       = azurerm_cosmosdb_mongo_database.main.name
-# }
+output "AZURE_COSMOS_COLLECTION_NAME" {
+  description = "Azure Cosmos DB collection name"
+  value       = var.mongo_collection_name
+}
 
-# output "AZURE_COSMOS_DB_COLLECTION_NAME" {
-#   description = "Azure Cosmos DB collection name"
-#   value       = azurerm_cosmosdb_mongo_collection.main.name
-# }
+output "AZURE_COSMOS_CONNECTION_STRING" {
+  description = "Azure Cosmos DB connection string"
+  value = replace(
+    data.azapi_resource.mongo_cluster_info.output.properties.connectionString,
+    "/mongodb\\+srv:\\/\\/[^@]+@([^?]+)\\?(.*)$/",
+    "mongodb+srv://$1?tls=true&authMechanism=MONGODB-OIDC&retrywrites=false&maxIdleTimeMS=120000"
+  )
+}
 
 # Redis
 output "REDIS_HOSTNAME" {
@@ -148,51 +147,4 @@ output "APPLICATIONINSIGHTS_CONNECTION_STRING" {
 output "LOG_ANALYTICS_WORKSPACE_ID" {
   description = "Log Analytics workspace ID"
   value       = azurerm_log_analytics_workspace.main.id
-}
-
-# Container Apps Environment
-output "CONTAINER_APPS_ENVIRONMENT_ID" {
-  description = "Container Apps Environment resource ID"
-  value       = azurerm_container_app_environment.main.id
-}
-
-output "CONTAINER_APPS_ENVIRONMENT_NAME" {
-  description = "Container Apps Environment name"
-  value       = azurerm_container_app_environment.main.name
-}
-
-# Container Apps
-output "FRONTEND_CONTAINER_APP_NAME" {
-  description = "Frontend Container App name"
-  value       = azurerm_container_app.frontend.name
-}
-
-output "BACKEND_CONTAINER_APP_NAME" {
-  description = "Backend Container App name"
-  value       = azurerm_container_app.backend.name
-}
-
-output "FRONTEND_CONTAINER_APP_FQDN" {
-  description = "Frontend Container App FQDN"
-  value       = azurerm_container_app.frontend.ingress[0].fqdn
-}
-
-output "BACKEND_CONTAINER_APP_FQDN" {
-  description = "Backend Container App FQDN"
-  value       = azurerm_container_app.backend.ingress[0].fqdn
-}
-
-output "FRONTEND_CONTAINER_APP_URL" {
-  description = "Frontend Container App URL"
-  value       = "https://${azurerm_container_app.frontend.ingress[0].fqdn}"
-}
-
-output "BACKEND_CONTAINER_APP_URL" {
-  description = "Backend Container App URL"
-  value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
-}
-
-output "BASE_URL" { 
-    description = "Base URL for the application"
-    value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
 }

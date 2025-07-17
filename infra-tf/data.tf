@@ -79,29 +79,6 @@ resource "azurerm_role_assignment" "storage_principal_contributor" {
 #     tags = local.tags
 # }
 
-/*
-Note: This is a generated HCL content from the JSON input which is based on the latest API version available.
-To import the resource, please run the following command:
-terraform import azapi_resource.mongoCluster /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2023-03-01-preview
-
-Or add the below config:
-import {
-  id = "/subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2023-03-01-preview"
-  to = azapi_resource.mongoCluster
-}
-*/
-/*
-Note: This is a generated HCL content from the JSON input which is based on the latest API version available.
-To import the resource, please run the following command:
-terraform import azapi_resource.mongoCluster /subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2025-04-01-preview
-
-Or add the below config:
-import {
-  id = "/subscriptions/63862159-43c8-47f7-9f6f-6c63d56b0e17/resourceGroups/rg-rtaudioagent-tfdev/providers/Microsoft.DocumentDB/mongoClusters/cosmosjzarqvbp?api-version=2025-04-01-preview"
-  to = azapi_resource.mongoCluster
-}
-*/
-
 resource "azapi_resource" "mongoCluster" {
   type      = "Microsoft.DocumentDB/mongoClusters@2025-04-01-preview"
   parent_id = azurerm_resource_group.main.id
@@ -114,9 +91,10 @@ resource "azapi_resource" "mongoCluster" {
         password = random_password.cosmos_admin.result
       }
       authConfig = {
+        # Ensure the order is always the same and matches the API's default
         allowedModes = [
-          "NativeAuth",
-          "MicrosoftEntraID"
+          "MicrosoftEntraID",
+          "NativeAuth"
         ]
       }
       backup = {}
@@ -142,6 +120,22 @@ resource "azapi_resource" "mongoCluster" {
     }
   }
   tags = local.tags
+
+  # Suppress diffs for allowedModes array ordering
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["authConfig"]["allowedModes"],
+      output["properties"]["authConfig"]["allowedModes"],
+      output["properties"]["backup"]["earliestRestoreTime"],
+      output["properties"]["clusterStatus"],
+      output["properties"]["connectionString"],
+      output["properties"]["infrastructureVersion"],
+      output["properties"]["provisioningState"],
+      output["properties"]["replica"]["replicationState"],
+      output["properties"]["replica"]["role"],
+      output["tags"]
+    ]
+  }
 }
 
 
@@ -170,7 +164,6 @@ resource "azurerm_key_vault_secret" "cosmos_admin_password" {
 
     depends_on = [azurerm_role_assignment.keyvault_admin]
 }
-
 # RBAC assignments for Cosmos DB vCore cluster
 resource "azapi_resource" "cosmos_backend_db_user" {
   type = "Microsoft.DocumentDB/mongoClusters/users@2025-04-01-preview"
@@ -180,7 +173,7 @@ resource "azapi_resource" "cosmos_backend_db_user" {
     properties = {
       identityProvider = {
         properties = {
-          principalType = "servicePrincipal"
+          principalType = "ServicePrincipal"
         }
         type = "MicrosoftEntraID"
         // For remaining properties, see IdentityProvider objects
@@ -192,6 +185,17 @@ resource "azapi_resource" "cosmos_backend_db_user" {
         }
       ]
     }
+  }
+
+  # Suppress diffs for output and principalType casing
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["identityProvider"]["properties"]["principalType"],
+      output["properties"]["provisioningState"],
+      output["properties"]["roles"],
+      output["id"],
+      output["type"]
+    ]
   }
 }
 
@@ -216,6 +220,15 @@ resource "azapi_resource" "cosmos_principal_user" {
         }
       ]
     }
+  }
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["identityProvider"]["properties"]["principalType"],
+      output["properties"]["provisioningState"],
+      output["properties"]["roles"],
+      output["id"],
+      output["type"]
+    ]
   }
 }
 

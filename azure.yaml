@@ -10,30 +10,71 @@ infra:
 services:
   rtaudio-client:
     project: rtagents/RTAgent/frontend
-    host: containerapp
+    host: staticwebapp
     language: js
-    docker:
-      path: ./Dockerfile
-      context: .
-      platform: linux/amd64
-      
-  rtaudio-server:
-    project: rtagents/RTAgent/backend
-    host: containerapp
-    language: python
-    docker:
-      path: ./Dockerfile
-      context: ../../../
-      platform: linux/amd64
 
-# hooks:
-#   preprovision:
-#     shell: sh
-#     run: ./scripts/azd-preprovision.sh
-#     interactive: true
-#     continueOnError: false
-#   postprovision:
-#     shell: sh
-#     run: ./scripts/azd-postprovision.sh
-#     interactive: true
-#     continueOnError: false
+# For app service, deploy using the postdeploy hook
+#   rtaudio-server:
+#     project: rtagents/RTAgent/backend
+#     host: appservice
+#     language: python
+    
+
+hooks:
+  preprovision:
+    # Cross-platform hook - automatically selects appropriate shell and script
+    posix:
+      shell: sh
+      run: ./scripts/azd/preprovision.sh terraform
+      interactive: true
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/preprovision.ps1 terraform
+      interactive: true
+      continueOnError: false
+  predeploy:
+    # Cross-platform hook with timeout handling
+    posix:
+      shell: sh
+      run: ./scripts/azd/helpers/appsvc-deploy.sh RTAgent
+      interactive: false
+      continueOnError: true
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/helpers/appsvc-deploy.ps1 RTAgent
+      interactive: false
+      continueOnError: true
+  postprovision:
+    # Cross-platform hook for post-provision setup
+    posix:
+      shell: sh
+      run: ./scripts/azd/postprovision.sh
+      interactive: true
+      continueOnError: false
+    windows:
+      shell: pwsh
+      run: ./scripts/azd/postprovision.ps1
+      interactive: true
+      continueOnError: false
+
+# For container app deploy
+# services:
+#   rtaudio-client:
+#     project: rtagents/RTAgent/frontend
+#     host: containerapp
+#     language: js
+#     docker:
+#       path: ./Dockerfile
+#       context: .
+#       platform: linux/amd64
+      
+#   rtaudio-server:
+#     project: rtagents/RTAgent/backend
+#     host: containerapp
+#     language: python
+#     docker:
+#       path: ./Dockerfile
+#       context: ../../../
+#       platform: linux/amd64
+
