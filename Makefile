@@ -99,14 +99,9 @@ remove_conda_env:
 	conda env remove --name $(CONDA_ENV)
 
 
-<<<<<<< HEAD
-stt_aoai_tts_server: 
-	python rtagents/RTAgent/backend/main.py
-=======
 # Start the backend server (FastAPI/Uvicorn)
 starts_rtagent_server: 
 	python apps/rtagent/backend/main.py
->>>>>>> 868ccd897823eb97008e00d11f238e0b6ea91b48
 
 
 # Start the frontend (Vite + React dev server)
