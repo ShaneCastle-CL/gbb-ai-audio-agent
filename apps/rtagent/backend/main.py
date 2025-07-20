@@ -63,8 +63,7 @@ async def lifespan(app: FastAPI):
     app.state.greeted_call_ids = set()  # to avoid double greetings
 
     # Speech SDK
-    app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS, 
-                                             playback="always")
+    app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS, playback="always")
     app.state.stt_client = StreamingSpeechRecognizerFromBytes(
         vad_silence_timeout_ms=SILENCE_DURATION_MS,
         candidate_languages=RECOGNIZED_LANGUAGE,

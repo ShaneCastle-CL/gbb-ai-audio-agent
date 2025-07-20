@@ -43,9 +43,9 @@ class StreamingSpeechRecognizerFromBytes:
 
         self.final_callback: Optional[Callable[[str, str], None]] = None
         self.partial_callback: Optional[Callable[[str, str], None]] = None
-        self.cancel_callback: Optional[
-            Callable[[speechsdk.SessionEventArgs], None]
-        ] = None
+        self.cancel_callback: Optional[Callable[[speechsdk.SessionEventArgs], None]] = (
+            None
+        )
 
         self.push_stream = None
         self.speech_recognizer = None
