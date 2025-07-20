@@ -14,6 +14,8 @@
 6. [Getting Started](#getting-started)
     1. [Local Quick-Start](#local-quick-start)
 7. [Deployment on Azure](#deployment-on-azure)
+    1. [Standard Deployment (Recommended)](#standard-deployment-recommended)
+    2. [Alternative Deployment (Without azd)](#alternative-deployment-without-azd)
 8. [Load & Chaos Testing](#load--chaos-testing)
 9. [Repository Layout](#repository-layout)
 10. [Roadmap](#roadmap)
@@ -163,10 +165,49 @@ Dial-in from a real phone? Expose your backend with **Azure Dev Tunnels**, updat
 
 ## **Deployment on Azure**
 
+### Standard Deployment (Recommended)
+
 ```bash
 azd auth login
 azd up         # full infra + code (~15 min)
 ```
+
+### Alternative Deployment (Without azd)
+
+For environments where Azure Developer CLI cannot be used, we provide make targets that emulate azd functionality:
+
+```bash
+# Set required environment variables
+export AZURE_SUBSCRIPTION_ID="<your-subscription-id>"
+export AZURE_ENV_NAME="dev"
+export AZURE_LOCATION="eastus2"
+
+# Full deployment
+make azure_up
+```
+
+**Alternative methods:**
+
+1. **Using the azd emulator script:**
+   ```bash
+   # Unix/Linux/macOS
+   ./devops/scripts/azd-emulator.sh up
+   
+   # Windows PowerShell
+   .\devops\scripts\azd-emulator.ps1 up
+   ```
+
+2. **Step-by-step deployment:**
+   ```bash
+   make azure_init        # Initialize environment
+   make azure_plan        # Review infrastructure plan
+   make azure_provision   # Deploy infrastructure
+   make azure_deploy      # Deploy applications
+   ```
+
+For detailed instructions, see: [`docs/AzdEmulation.md`](docs/AzdEmulation.md)
+
+### Deployment Features
 
 • SSL via Key Vault ‑> App Gateway  
 • Container Apps auto-scale (KEDA)  

@@ -84,12 +84,12 @@ resource "azurerm_linux_web_app" "backend" {
     always_on = true
     
     # FastAPI startup command matching deployment script expectations
-    app_command_line = "python -m uvicorn rtagents.RTAgent.backend.main:app --host 0.0.0.0 --port 8000"
+    app_command_line = "python -m uvicorn apps.rtagent.backend.main:app --host 0.0.0.0 --port 8000"
     
     # CORS configuration - will be updated after frontend is created
     cors {
       allowed_origins     = ["*"]  # Temporary - will be updated via lifecycle
-      support_credentials = true
+      support_credentials = false  # Must be false when allowed_origins includes "*"
     }
   }
 
@@ -97,7 +97,10 @@ resource "azurerm_linux_web_app" "backend" {
     var.acs_source_phone_number != null && var.acs_source_phone_number != "" ? {
     "ACS_SOURCE_PHONE_NUMBER" = var.acs_source_phone_number
   } : {}, {
+    "ACS_ENDPOINT" = "https://${azapi_resource.acs.output.properties.hostName}"
+    "ACS_STREAMING_MODE"                  = "media"
     "PORT"                                  = "8000"
+
 
     # Regular environment variables
     "AZURE_CLIENT_ID"                       = azurerm_user_assigned_identity.backend.client_id
@@ -126,11 +129,14 @@ resource "azurerm_linux_web_app" "backend" {
     "AZURE_OPENAI_ENDPOINT"           = azurerm_cognitive_account.openai.endpoint
     "AZURE_OPENAI_CHAT_DEPLOYMENT_ID" = "gpt-4o"
     "AZURE_OPENAI_API_VERSION"        = "2025-01-01-preview"
-    
+    "AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION" = "2024-10-01-preview"
+
     # Python-specific settings
     "PYTHONPATH"                    = "/home/site/wwwroot"
     "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
     "ENABLE_ORYX_BUILD"             = "true"
+    "ORYX_APP_TYPE"                 = "webapps"
+    "WEBSITES_PORT"                 = "8000"
   }, var.backend_app_registration_client_id != null ? {
     # Use EasyAuth with existing Azure AD app registration
     "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID" = azurerm_user_assigned_identity.backend.client_id
@@ -189,7 +195,7 @@ resource "azurerm_linux_web_app" "backend" {
   
   lifecycle {
     ignore_changes = [
-      app_settings,
+      # app_settings,
       site_config[0].app_command_line,
       site_config[0].cors,  # Ignore CORS changes to prevent cycles
       tags
@@ -232,7 +238,7 @@ resource "azurerm_linux_web_app" "frontend" {
 
   site_config {
     application_stack {
-      node_version = "20-lts"  # Latest LTS Node.js for Vite
+      node_version = "22-lts"  # Latest LTS Node.js for Vite
     }
     
     always_on = true
@@ -252,6 +258,7 @@ resource "azurerm_linux_web_app" "frontend" {
     # Build-time environment variables for Vite
     "VITE_AZURE_REGION"         = azurerm_cognitive_account.speech.location
     "VITE_BACKEND_BASE_URL"     = "https://${azurerm_linux_web_app.backend.default_hostname}"
+    "VITE_ALLOWED_HOSTS"        = "https://${azurerm_linux_web_app.backend.default_hostname}"
     
     # Azure Client ID for managed identity authentication
     "AZURE_CLIENT_ID"           = azurerm_user_assigned_identity.frontend.client_id
@@ -353,7 +360,7 @@ resource "null_resource" "update_backend_cors" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      az webapp cors add --resource-group ${azurerm_resource_group.main.name} --name ${azurerm_linux_web_app.backend.name} --allowed-origins https://${azurerm_linux_web_app.frontend.default_hostname} https://${azapi_resource.acs.output.properties.hostName} --allow-credentials true
+      az webapp cors add --resource-group ${azurerm_resource_group.main.name} --name ${azurerm_linux_web_app.backend.name} --allowed-origins https://${azurerm_linux_web_app.frontend.default_hostname} https://${azapi_resource.acs.output.properties.hostName}
     EOT
   }
 
@@ -405,8 +412,9 @@ resource "azurerm_monitor_diagnostic_setting" "frontend_app_service" {
   }
 
   # Metrics for performance monitoring
-  enabled_metric {
+  metric {
     category = "AllMetrics"
+    enabled  = true
   }
 }
 
@@ -444,7 +452,6 @@ resource "azurerm_monitor_diagnostic_setting" "backend_app_service" {
   # Metrics for performance monitoring
   metric {
     category = "AllMetrics"
-    enabled  = true
   }
 }
 

@@ -5,4 +5,4 @@ repos:
       - id: terraform_fmt
       - id: terraform_docs
         args:
-          - --args=--config=.terraform-docs.yml
+          - --args=--config=devops/.terraform-docs.yml

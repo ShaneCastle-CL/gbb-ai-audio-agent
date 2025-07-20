@@ -18,7 +18,7 @@ acs_data_location = "United States"
 disable_local_auth = true
 
 # Redis Enterprise SKU (adjust based on your needs and regional availability)
-redis_sku = "Enterprise_E10"
+redis_sku = "MemoryOptimized_M10"
 
 # OpenAI model deployments
 openai_models = [

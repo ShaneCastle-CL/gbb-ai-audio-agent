@@ -1,6 +1,10 @@
 # ============================================================================
 # OUTPUTS FOR AZD INTEGRATION AND APPLICATION CONFIGURATION
 # ============================================================================
+output "ENVIRONMENT_NAME" {
+  description = "Deployment environment name (e.g., dev, staging, prod)"
+  value       = var.environment_name
+}
 
 output "AZURE_RESOURCE_GROUP" {
   description = "Azure Resource Group name"
@@ -56,7 +60,7 @@ output "AZURE_SPEECH_DOMAIN_ENDPOINT" {
 # Communication Services
 output "ACS_ENDPOINT" {
   description = "Azure Communication Services endpoint"
-  value       = azapi_resource.acs.output.properties.hostName
+  value       = "https://${azapi_resource.acs.output.properties.hostName}"
 }
 
 output "ACS_RESOURCE_ID" {
