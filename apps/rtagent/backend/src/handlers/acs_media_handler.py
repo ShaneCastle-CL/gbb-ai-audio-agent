@@ -42,6 +42,7 @@ class ACSMediaHandler:
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         self.playback_task: Optional[asyncio.Task] = None
         self.route_turn_task: Optional[asyncio.Task] = None
+        self.greeting_check_task: Optional[asyncio.Task] = None
         self.stopped = False
 
         self.latency_tool = getattr(ws.state, "lt", None)
@@ -77,6 +78,13 @@ class ACSMediaHandler:
             self.route_turn_task = asyncio.create_task(self.route_turn_loop())
             logger.info("✅ Route turn loop started")
 
+            # Check for and play pending greeting when media streaming is ready
+            await self.check_and_play_pending_greeting()
+
+            # Start periodic greeting check task in case MediaStreamingStarted event comes later
+            self.greeting_check_task = asyncio.create_task(self.periodic_greeting_check())
+            logger.info("✅ Periodic greeting check started")
+
         except Exception as e:
             logger.error(f"❌ Failed to start recognizer: {e}", exc_info=True)
             raise
@@ -102,6 +110,86 @@ class ACSMediaHandler:
                         self.recognizer.write_bytes(audio_bytes)
         except Exception as e:
             logger.error(f"Error processing WebSocket message: {e}", exc_info=True)
+
+    async def check_and_play_pending_greeting(self):
+        """
+        Check if there's a pending greeting and play it when media streaming is ready.
+        This is called after the recognizer starts and the WebSocket is confirmed ready.
+        """
+        try:
+            if not self.cm or not self.redis_mgr:
+                logger.warning("⚠️ MemoManager or Redis not available for greeting check")
+                return
+
+            # Check if media streaming is ready and there's a pending greeting
+            media_ready = await self.cm.get_live_context_value(self.redis_mgr, "media_streaming_ready")
+            pending_greeting = await self.cm.get_live_context_value(self.redis_mgr, "pending_greeting")
+            ready_for_greeting = await self.cm.get_live_context_value(self.redis_mgr, "ready_for_media_greeting")
+            already_greeted = await self.cm.get_live_context_value(self.redis_mgr, "greeted")
+
+            if media_ready and pending_greeting and ready_for_greeting and not already_greeted:
+                logger.info("🎤 Media streaming is ready, playing pending greeting")
+                
+                # Add a small delay to ensure WebSocket is fully ready
+                await asyncio.sleep(0.5)
+                
+                # Play the greeting
+                self.play_greeting(pending_greeting)
+                
+                # Mark as greeted and clear pending greeting
+                await self.cm.set_live_context_value(self.redis_mgr, "greeted", True)
+                await self.cm.set_live_context_value(self.redis_mgr, "pending_greeting", None)
+                
+                logger.info("✅ Pending greeting played successfully")
+            else:
+                logger.info(f"No pending greeting to play - media_ready: {media_ready}, "
+                          f"pending_greeting: {bool(pending_greeting)}, "
+                          f"ready_for_greeting: {ready_for_greeting}, "
+                          f"already_greeted: {already_greeted}")
+
+        except Exception as e:
+            logger.error(f"❌ Error checking for pending greeting: {e}", exc_info=True)
+
+    async def periodic_greeting_check(self):
+        """
+        Periodically check if media streaming becomes ready and play greeting if needed.
+        This handles cases where MediaStreamingStarted event arrives after WebSocket connection.
+        """
+        max_attempts = 20  # Check for up to 10 seconds (20 * 0.5s)
+        attempt = 0
+        
+        while attempt < max_attempts and not self.stopped:
+            try:
+                await asyncio.sleep(0.5)  # Check every 500ms
+                
+                if await self.should_play_greeting():
+                    await self.check_and_play_pending_greeting()
+                    break  # Stop checking once greeting is played or not needed
+                    
+                attempt += 1
+                
+            except Exception as e:
+                logger.error(f"❌ Error in periodic greeting check: {e}", exc_info=True)
+                break
+                
+        logger.info(f"Periodic greeting check completed after {attempt} attempts")
+
+    async def should_play_greeting(self) -> bool:
+        """Check if greeting should be played based on current state."""
+        try:
+            if not self.cm or not self.redis_mgr:
+                return False
+                
+            media_ready = await self.cm.get_live_context_value(self.redis_mgr, "media_streaming_ready")
+            pending_greeting = await self.cm.get_live_context_value(self.redis_mgr, "pending_greeting")
+            ready_for_greeting = await self.cm.get_live_context_value(self.redis_mgr, "ready_for_media_greeting")
+            already_greeted = await self.cm.get_live_context_value(self.redis_mgr, "greeted")
+            
+            return (media_ready and pending_greeting and ready_for_greeting and not already_greeted)
+            
+        except Exception as e:
+            logger.error(f"❌ Error checking greeting conditions: {e}", exc_info=True)
+            return False
 
     def play_greeting(
         self,
@@ -387,6 +475,14 @@ class ACSMediaHandler:
                     await self.route_turn_task
                 except asyncio.CancelledError:
                     logger.info("✅ Route turn task cancelled")
+
+            # Cancel greeting check task
+            if self.greeting_check_task and not self.greeting_check_task.done():
+                self.greeting_check_task.cancel()
+                try:
+                    await self.greeting_check_task
+                except asyncio.CancelledError:
+                    logger.info("✅ Greeting check task cancelled")
 
             logger.info("✅ ACS Media Handler stopped successfully")
 

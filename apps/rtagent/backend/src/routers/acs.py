@@ -198,6 +198,7 @@ async def acs_media_ws(ws: WebSocket):
             await ws.close(code=1000)
             return
 
+        # Store greeting readiness state but don't play yet - wait for MediaStreamingStarted event
         greeted: set[str] = ws.app.state.greeted_call_ids
         if cid not in greeted and ACS_STREAMING_MODE == StreamMode.MEDIA:
             greeting = (
@@ -205,9 +206,13 @@ async def acs_media_ws(ws: WebSocket):
                 "I need to verify your identity. "
                 "Could you please provide your full name, and either the last 4 digits of your Social Security Number or your ZIP code?"
             )
-            handler.play_greeting(greeting)
+            # Store the greeting in context to be played when media streaming is ready
+            await cm.set_live_context_value(redis_mgr, "pending_greeting", greeting)
+            await cm.set_live_context_value(redis_mgr, "ready_for_media_greeting", True)
+            await cm.set_live_context_value(redis_mgr, "greeted", False)
             cm.append_to_history("media_ws", "assistant", greeting)
             greeted.add(cid)
+            logger.info(f"🎤 Greeting prepared for call {cid}, waiting for media streaming to be ready")
 
         try:
             while True:
@@ -244,7 +249,8 @@ async def acs_media_ws(ws: WebSocket):
             logger.error(f"Error starting recognizer: {e}", exc_info=True)
     finally:
         # Clean up resources when WebSocket connection ends
-        await ws.close()
+        if ws.client_state == WebSocketState.CONNECTED:
+            await ws.close()
         logger.info("WebSocket connection ended, cleaning up resources")
         if "handler" in locals():
             try:
@@ -253,10 +259,3 @@ async def acs_media_ws(ws: WebSocket):
                 logger.info("Speech recognizer stopped successfully")
             except Exception as e:
                 logger.error(f"Error stopping speech recognizer: {e}", exc_info=True)
-
-        # Close WebSocket if not already closed
-        try:
-            if ws.client_state == WebSocketState.CONNECTED:
-                await ws.close()
-        except Exception as e:
-            logger.error(f"Error closing WebSocket: {e}", exc_info=True)

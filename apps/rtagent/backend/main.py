@@ -44,10 +44,11 @@ from apps.rtagent.backend.src.services import (
 )
 
 from src.agents.base import RTAgent
-from utils.ml_logging import get_logger
+from utils.ml_logging import get_logger, configure_azure_monitor
 
+# ---------------- Monitoring ------------------------------------------------
+configure_azure_monitor(logger_name="rtagent")
 logger = get_logger("main")
-
 
 # --------------------------------------------------------------------------- #
 #  Lifecycle Management
