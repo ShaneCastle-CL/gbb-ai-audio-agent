@@ -31,7 +31,7 @@ const styles = {
     width: "768px",
     maxWidth: "768px", // Expanded from iPad width
     fontFamily: "Segoe UI, Roboto, sans-serif",
-    background: "#f8fafc",
+    background: "transparent",
     minHeight: "100vh",
     display: "flex",
     flexDirection: "column",
@@ -39,8 +39,8 @@ const styles = {
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
-    padding: "10px",
-    border: "5px solid #0e4bf3ff",
+    padding: "8px",
+    border: "0px solid #0e4bf3ff",
   },
   
   // Main iPad-sized container
@@ -52,7 +52,7 @@ const styles = {
     background: "white",
     borderRadius: "20px",
     boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-    border: "5px solid #ce1010ff",
+    border: "0px solid #ce1010ff",
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
@@ -61,14 +61,14 @@ const styles = {
   // Waveform section (top third)
   waveformSection: {
     backgroundColor: "#dbeafe",
-    padding: "40px 20px",
+    padding: "2px 4px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     borderBottom: "1px solid #e2e8f0",
     height: "25%",
-    minHeight: "200px",
+    minHeight: "100px",
     position: "relative",
   },
   
@@ -78,7 +78,7 @@ const styles = {
     color: "#64748b",
     textTransform: "uppercase",
     letterSpacing: "0.5px",
-    marginBottom: "10px",
+    marginBottom: "2px",
   },
   
   // Section divider line
@@ -97,19 +97,19 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     width: "100%",
-    height: "100%",
+    height: "60%",
+    padding: "0 10px", // Add horizontal padding to prevent edge cutoff
   },
   
   waveformSvg: {
     width: "100%",
     height: "60px",
-    maxWidth: "400px",
   },
   
   // Chat section (middle section)
   chatSection: {
     flex: 1,
-    padding: "40px 60px",
+    padding: "15px 20px 15px 5px", // Remove most left padding, keep right padding
     width: "100%",
     overflowY: "auto",
     backgroundColor: "#ffffff",
@@ -147,7 +147,7 @@ const styles = {
     left: "0",
     top: "0",
     bottom: "0",
-    width: "3px",
+    width: "0px", // Removed blue border
     backgroundColor: "#3b82f6",
   },
   
@@ -157,29 +157,38 @@ const styles = {
     gap: "16px",
     flex: 1,
     overflowY: "auto",
+    padding: "0", // Remove all padding for maximum space usage
   },
   
-  // User message (right aligned - gray bubble)
+  // User message (right aligned - blue bubble)
   userMessage: {
     alignSelf: "flex-end",
-    maxWidth: "75%",
+    maxWidth: "75%", // More conservative width
+    marginRight: "15px", // Increased margin for more right padding
+    marginBottom: "4px",
   },
   
   userBubble: {
-    background: "#f1f5f9",
-    color: "#1e293b",
+    background: "#e0f2fe",
+    color: "#0f172a",
     padding: "12px 16px",
     borderRadius: "20px",
     fontSize: "14px",
     lineHeight: "1.5",
-    border: "1px solid #e2e8f0",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+    border: "1px solid #bae6fd",
+    boxShadow: "0 2px 8px rgba(14,165,233,0.15)",
+    wordWrap: "break-word",
+    overflowWrap: "break-word",
+    hyphens: "auto",
+    whiteSpace: "pre-wrap",
   },
   
   // Assistant message (left aligned - teal bubble)
   assistantMessage: {
     alignSelf: "flex-start",
-    maxWidth: "80%",
+    maxWidth: "80%", // Increased width for maximum space usage
+    marginLeft: "0px", // No left margin - flush to edge
+    marginBottom: "4px",
   },
   
   assistantBubble: {
@@ -190,11 +199,15 @@ const styles = {
     fontSize: "14px",
     lineHeight: "1.5",
     boxShadow: "0 2px 8px rgba(103,216,239,0.3)",
+    wordWrap: "break-word",
+    overflowWrap: "break-word",
+    hyphens: "auto",
+    whiteSpace: "pre-wrap",
   },
   
   // Control section (bottom third)
   controlSection: {
-    padding: "20px",
+    padding: "8px",
     backgroundColor: "#dbeafe",
     display: "flex",
     justifyContent: "center",
@@ -207,9 +220,9 @@ const styles = {
   
   controlContainer: {
     display: "flex",
-    gap: "16px",
+    gap: "6px",
     background: "white",
-    padding: "12px 20px",
+    padding: "10px 10px",
     borderRadius: "50px",
     boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
     border: "1px solid #e2e8f0",
@@ -291,20 +304,24 @@ const WaveformVisualization = ({ isActive, speaker }) => {
   const animationRef = useRef();
   
   useEffect(() => {
-    if (!isActive) {
+    // Animation should run when there's an active speaker
+    if (!speaker) {
       setAmplitude(3);
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
       return;
     }
     
-    // Higher amplitude when active
+    // Higher amplitude when someone is speaking
     setAmplitude(15 + Math.random() * 10);
     
     // Animate the wave
     const animate = () => {
       setWaveOffset(prev => (prev + 2) % 360);
       setAmplitude(prev => {
-        const baseAmplitude = isActive ? 15 : 3;
-        const variation = isActive ? Math.random() * 15 : Math.random() * 2;
+        const baseAmplitude = speaker ? 15 : 3;
+        const variation = speaker ? Math.random() * 15 : Math.random() * 2;
         return baseAmplitude + variation;
       });
       animationRef.current = requestAnimationFrame(animate);
@@ -317,7 +334,7 @@ const WaveformVisualization = ({ isActive, speaker }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isActive]);
+  }, [speaker]); // Changed dependency from isActive to speaker
   
   // Generate wave path
   const generateWavePath = () => {
@@ -341,8 +358,11 @@ const WaveformVisualization = ({ isActive, speaker }) => {
   // Generate multiple wave layers for richer visualization
   const generateMultipleWaves = () => {
     const waves = [];
-    const baseColor = isActive ? "#67d8ef" : "#11d483ff";
-    const opacity = isActive ? 0.8 : 0.4;
+    // More distinct colors based on speaker
+    const baseColor = speaker === "User" ? "#ef4444" :  // Red for user
+                     speaker === "Assistant" ? "#67d8ef" :  // Teal for assistant
+                     "#11d483ff"; // fallback color
+    const opacity = !!speaker ? 0.8 : 0.4; // Simplified opacity logic
     
     // Main wave
     waves.push(
@@ -394,9 +414,11 @@ const WaveformVisualization = ({ isActive, speaker }) => {
   
   return (
     <div style={styles.waveformContainer}>
-      <svg style={styles.waveformSvg} viewBox="0 0 500 80" preserveAspectRatio="xMidYMid meet">
-        {generateMultipleWaves()}
-      </svg>
+      {!!speaker && (
+        <svg style={styles.waveformSvg} viewBox="0 0 750 80" preserveAspectRatio="xMidYMid meet">
+          {generateMultipleWaves()}
+        </svg>
+      )}
     </div>
   );
 };
@@ -441,8 +463,8 @@ const ChatBubble = ({ message }) => {
 export default function RealTimeVoiceApp() {
   /* ---------- state ---------- */
   const [messages, setMessages] = useState([
-    { speaker: "User", text: "What's the weather like today?" },
-    { speaker: "Assistant", text: "The weather is sunny and 72 degrees." }
+    { speaker: "User", text: "Hello, I need help with my insurance claim." },
+    { speaker: "Assistant", text: "I'd be happy to help you with your insurance claim. Can you please provide me with your policy number?" }
   ]);
   const [log, setLog]                 = useState("");
   const [recording, setRecording]     = useState(false);
@@ -483,6 +505,7 @@ export default function RealTimeVoiceApp() {
   const chatRef      = useRef(null);
   const socketRef    = useRef(null);
   const recognizerRef= useRef(null);
+  const activeAudioStreams = useRef(0); // Track number of active audio streams
 
   const appendLog = m => setLog(p => `${p}\n${new Date().toLocaleTimeString()} - ${m}`);
 
@@ -508,6 +531,7 @@ export default function RealTimeVoiceApp() {
 
     setRecording(false);
     setActiveSpeaker(null);
+    activeAudioStreams.current = 0; // Reset audio stream counter
 
     // reset all sphere state
     setFunctionCalls([]);
@@ -539,6 +563,16 @@ export default function RealTimeVoiceApp() {
     setFunctionCalls([]);
     setCallResetKey(k=>k+1);
 
+    // Check if environment variables are available
+    if (!AZURE_SPEECH_KEY || !AZURE_REGION) {
+      console.error("Missing Azure Speech credentials:", {
+        AZURE_SPEECH_KEY: AZURE_SPEECH_KEY ? "✓ Present" : "✗ Missing",
+        AZURE_REGION: AZURE_REGION ? "✓ Present" : "✗ Missing"
+      });
+      appendLog("❌ Azure Speech credentials missing");
+      return;
+    }
+
     /* Azure Speech config */
     const cfg = SpeechConfig.fromSubscription(AZURE_SPEECH_KEY, AZURE_REGION);
     cfg.speechRecognitionLanguage = "en-US";
@@ -549,6 +583,11 @@ export default function RealTimeVoiceApp() {
 
     let lastInterrupt = Date.now();
     rec.recognizing = (_, e) => {
+      // Set active speaker immediately when user starts talking
+      if (e.result.text.trim()) {
+        setActiveSpeaker("User");
+      }
+      
       if (e.result.text.trim() &&
           socketRef.current?.readyState === WebSocket.OPEN &&
           Date.now()-lastInterrupt > 1000)
@@ -560,19 +599,50 @@ export default function RealTimeVoiceApp() {
     };
     rec.recognized = (_, e) => {
       const txt = e.result.text.trim();
-      if (txt) handleUserSpeech(txt);
+      if (txt) {
+        handleUserSpeech(txt);
+      }
+      
+      // Clear active speaker after recognition completes
+      setTimeout(() => {
+        setActiveSpeaker(null);
+      }, 500); // Small delay to allow waveform to show briefly
     };
 
-    rec.startContinuousRecognitionAsync();
-    setRecording(true);
-    appendLog("🎤 Recognition started");
+    // Add error handling
+    rec.canceled = (_, e) => {
+      appendLog(`❌ Recognition canceled: ${e.reason}`);
+      setRecording(false);
+    };
+
+    rec.sessionStopped = (_, e) => {
+      appendLog("🔇 Recognition session stopped");
+    };
+
+    rec.startContinuousRecognitionAsync(
+      () => {
+        setRecording(true);
+        appendLog("🎤 Recognition started");
+      },
+      (err) => {
+        appendLog(`❌ Failed to start recognition: ${err}`);
+        setRecording(false);
+      }
+    );
 
     /* WebSocket for assistant streaming */
     const socket = new WebSocket(`${WS_URL}/realtime`);
     socket.binaryType = "arraybuffer";
     socketRef.current = socket;
-    socket.onopen  = () => appendLog("🔌 WS open");
-    socket.onclose = () => appendLog("🔌 WS closed");
+    socket.onopen  = () => {
+      appendLog("🔌 WS open");
+    };
+    socket.onclose = () => {
+      appendLog("🔌 WS closed");
+    };
+    socket.onerror = (error) => {
+      appendLog("❌ WS error");
+    };
     socket.onmessage = handleSocketMessage;
   };
 
@@ -582,12 +652,30 @@ export default function RealTimeVoiceApp() {
   const handleSocketMessage = async event => {
     // audio
     if (typeof event.data !== "string") {
+      activeAudioStreams.current += 1;
+      
       const ctx = new AudioContext();
       const buf = await event.data.arrayBuffer();
       const audioBuf = await ctx.decodeAudioData(buf);
       const src = ctx.createBufferSource();
       src.buffer = audioBuf;
       src.connect(ctx.destination);
+      
+      // Set active speaker when first audio starts
+      if (activeAudioStreams.current === 1) {
+        setActiveSpeaker("Assistant");
+      }
+      
+      // Clear active speaker when all audio ends
+      src.onended = () => {
+        activeAudioStreams.current -= 1;
+        
+        if (activeAudioStreams.current <= 0) {
+          activeAudioStreams.current = 0; // Ensure it doesn't go negative
+          setActiveSpeaker(null);
+        }
+      };
+      
       src.start();
       appendLog("🔊 Audio played");
       return;
@@ -603,7 +691,7 @@ export default function RealTimeVoiceApp() {
 
     // streaming assistant
     if (type==="assistant_streaming") {
-      setActiveSpeaker("Assistant");
+      // Don't set active speaker here - let audio events handle it
       setMessages(prev => {
         if (prev.at(-1)?.streaming) {
           return prev.map((m,i) =>
@@ -617,7 +705,7 @@ export default function RealTimeVoiceApp() {
 
     // final assistant
     if (type==="assistant"||type==="status") {
-      setActiveSpeaker("Assistant");
+      // Don't set active speaker here - let audio events handle it
       setMessages(prev => {
         if (prev.at(-1)?.streaming) {
           return prev.map((m,i) =>
@@ -746,7 +834,7 @@ export default function RealTimeVoiceApp() {
   return (
     <div style={styles.root}>
       {/* Health Status - Top Right */}
-      <div style={styles.healthIndicator}>
+      <div style={{...styles.healthIndicator, display: "none"}}>
         <HealthStatusIndicator
           healthStatus={healthStatus}
           readinessStatus={readinessStatus}
