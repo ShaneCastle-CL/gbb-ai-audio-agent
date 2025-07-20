@@ -94,11 +94,14 @@ resource "azurerm_linux_web_app" "backend" {
   }
 
   app_settings = merge(
-    var.acs_source_phone_number != null && var.acs_source_phone_number != "" ? {
-    "ACS_SOURCE_PHONE_NUMBER" = var.acs_source_phone_number
-  } : {}, {
+  {
     "ACS_ENDPOINT" = "https://${azapi_resource.acs.output.properties.hostName}"
     "ACS_STREAMING_MODE"                  = "media"
+    "ACS_SOURCE_PHONE_NUMBER" = (
+      var.acs_source_phone_number != null && var.acs_source_phone_number != ""
+      ? var.acs_source_phone_number
+      : "TODO: Acquire an ACS phone number. See https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number?tabs=windows&pivots=platform-azp-new"
+    )
     "PORT"                                  = "8000"
 
 
