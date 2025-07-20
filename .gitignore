@@ -204,7 +204,6 @@ override.tf.json
 .terraformrc
 terraform.rc
 # Terraform backend config (contains environment-specific values)
-infra-tf/backend.tf
 main.tfvars.json
-backend.tf
 .deploy
+infra/terraform/backend.tf
