@@ -1,139 +1,119 @@
-<!-- markdownlint-disable MD033 -->
+# **🚀 Deploying Voice-to-Voice Application Powered by RTAgent**
 
-# **🎙️ RTAgent: Real-Time Voice Intelligence Accelerator**
+This README provides technical instructions for deploying, customizing, and running a real-time voice-to-voice demo application built with the RTAgent framework. Refer to the [RTAgent README](../README.md) for full framework details.
 
-## **Extensibility and Adaptability**
+### **Application Structure**
 
-RTAgent is designed as a base framework that can be extended and adapted to solve domain-specific problems. The modular architecture allows developers to create custom agents and workflows tailored to their unique requirements.
-
-### **How to Extend RTAgent**
-1. **Custom Agents**: Add new agents by implementing the standardized agent interface. For example, create a `LegalAgent` or `HealthcareAgent` with domain-specific logic.
-2. **Tool Integration**: Extend the tool store with custom functions, external API integrations, or document fetchers.
-3. **Memory Enhancements**: Adapt the memory store to include additional context or historical data for personalized interactions.
-4. **Dynamic Routing**: Modify the task router to prioritize agents based on cost, complexity, or latency requirements.
-
-### **Folder Structure for Extensions**
-The RTAgent project is organized into the following folders:
-
-```
+```text
 apps/
-└─ rtagent/
-    ├─ backend/      # FastAPI WebSocket server for real-time transcription and GPT orchestration
-    ├─ frontend/     # React + Vite client leveraging Azure Speech SDK for voice interactions
-    └─ scripts    # Project documentation and setup instructions
+└── rtagent/
+  ├── backend/   # FastAPI WebSocket backend for transcription & GPT orchestration
+  ├── frontend/  # React + Vite frontend using Azure Speech SDK
+  └── scripts/   # Setup and utility scripts
 ```
 
-Each folder serves a specific purpose to ensure modularity and ease of development. For example:
-- **backend/** handles server-side logic, including WebSocket communication and AI orchestration.
-- **frontend/** provides the user interface for interacting with the voice agent.
-- **README.md** (You are here)
+### **Extending RTAgent: Framework-Agnostic Agent Customization**
 
-Refer to the folder descriptions above as you navigate the codebase.
+RTAgent is designed to be modular and extensible, allowing teams to tailor the system for domain-specific deployments and intelligent orchestration.
 
-## **Getting Started**
+To begin customizing, refer to the following key backend components:
 
-### **Prerequisites**
++ `rtagent/backend/src/agents/` – Core agent definitions and logic
 
-1. Local development tools  
-    - Python 3.11+  
-    - Node.js 18+ with npm  
-    - Docker  
-    - Azure Developer CLI (azd)  
-    - Terraform  
-    - Azure CLI with Dev Tunnels extension  
-      ```bash
-      az extension add --name devtunnel
-      ```
+- `rtagent/backend/src/agent_store/` – Persistent store for registered agents and metadata
 
-2. Azure subscription & identity  
-    - An active Azure subscription
-    - The deploying user or service principal must have:  
-      - Subscription RBAC roles  
-         - Contributor  
-         - User Access Administrator  
-      - Microsoft Entra ID roles  
-         - Application Administrator (needed for app registrations / EasyAuth)  
++ `rtagent/backend/src/prompt_store/` – Structured storage for agent-specific prompt templates
 
-3. Provision required Infrastructure
-    - Clone and review the IaC repo (Terraform or azd):  
-      - Audio Agent Deployment (to be merged into the main branch)  
-    - Services deployed:  
-      1. Azure Communication Services  
-      2. Azure Cosmos DB (Mongo vCore)  
-      3. Azure Event Grid  
-      4. Azure Key Vault  
-      5. Azure Managed Redis Enterprise  
-      6. Azure Monitor (Log Analytics / Application Insights)  
-      7. Azure OpenAI  
-      8. Azure Speech Services  
-      9. Azure Storage Account  
-      10. User-Assigned Managed Identities  
-      11. Azure Container Apps & Azure Container Registry  
-      12. App Service Plan / Web Apps
+- `rtagent/backend/src/tool_store/` – Interface for injecting custom tools, APIs, and capabilities
 
-A complete IaC walkthrough—including networking, SSL, scalability, and CI/CD—is available in 📄 **[Deployment Guide](../../docs/DeploymentGuide.md)**. Follow it when you are ready to move beyond local development.
+#### **🔧 Extension Capabilities**
 
+ **🧠 Custom Agents** -> Develop specialized agents such as LegalAgent, HealthcareAgent, or domain-specific copilots.Register them in the agent_store and link them to corresponding prompts in the prompt_store. Define behavior, memory scope, and toolchains specific to their operational goals.
 
-### **🚀 One-Command Azure Deployment**
+ **🔌 Tool Integration** -> Augment agent capabilities with external APIs, document retrieval functions, or third-party services. Extend the tool_store with domain tools—these tools are automatically exposed to agents through function-calling or tool selection logic.
 
-Provision the full solution—including App Gateway, Container Apps, Cosmos DB, Redis, OpenAI, and Key Vault—with a single command:
+ **🧬 Memory Enhancements** -> Implement advanced memory mechanisms for long-term user context, dialogue history, and personalized responses. You can plug in vector memory backends (e.g., Redis, ChromaDB) or use custom embeddings to persist semantic interactions across sessions.
+
+ **🧭 Dynamic Routing (LLM and Agent Orchestration)** -> RTAgent supports dynamic routing strategies that can be modified at multiple abstraction layers:
+
+  + **API Dispatching (Low Latency Pathways)** -> Within the router/ module, adjust the FastAPI-based routing logic to handle cost-aware, latency-sensitive decision trees across model backends or endpoint variants.
+  - **Agentic Orchestration (Cognitive Planning Layer)** -> Within the orchestrator/ module, you can define custom orchestration flows—using heuristics, scoring functions, or embedding similarity—to route queries between agents. You may also substitute this with your own orchestration stack such as Semantic Kernel, Autogen, or OpenAgents-style architectures for more advanced agent-based collaboration. RTAgent doesn’t lock you into a rigid architecture—it provides a principled starting point for building low-latency, stateful, and tool-augmented conversational agents that can evolve to fit your infrastructure, orchestration strategy, and domain-specific requirements.
+
+## **Before to Start..**
+
+### **Setup Your Development Environment**
+
+- Python 3.11+
+- Node.js 18+ (with npm)
+- Docker
+- Terraform
+- Azure CLI (Dev Tunnel extension)
 
 ```bash
-azd auth login
-azd up   # ~15 min for complete infra and code deployment
+az extension add --name devtunnel
 ```
+### **Required Azure Services**
 
-**Key Features:**
-- TLS managed by Key Vault and App Gateway
-- KEDA auto-scales RT Agent workers
-- All outbound calls remain within a private VNet
+- Azure Communication Services  
+- Azure Cosmos DB (Mongo vCore)  
+- Azure Event Grid  
+- Azure Key Vault  
+- Azure Managed Redis Enterprise  
+- Azure Monitor (Log Analytics / Application Insights)  
+- Azure OpenAI  
+- Azure Speech Services  
+- Azure Storage Account  
+- User-Assigned Managed Identities  
+- Azure Container Apps & Registry or App Service Plan / Web Apps  
 
-For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/DeploymentGuide.md).
+#### **Infrastructure Deployment Options**
 
-**Directory Highlights:**
+Provision the required Azure services before deploying:
 
-| Path                | Description                                 |
-|---------------------|---------------------------------------------|
-| apps/rtagent/backend| FastAPI + WebSocket voice pipeline          |
-| apps/rtagent/frontend| Vite + React demo client                   |
-| apps/rtagent/scripts| Helper launchers (backend, frontend, tunnel)|
-| infra/              | Bicep/Terraform IaC                        |
-| docs/               | Architecture, agents, tuning guides         |
-| tests/              | Pytest suite                               |
-| Makefile            | One-line dev commands                       |
-| environment.yaml    | Conda environment spec (name: audioagent)   |
+1. **Manual Provisioning**  
+   Set up each service via the Azure portal.
+2. **Automated Provisioning (Recommended)**  
+   Use IaC for repeatable deployments:
+   - **Terraform:** Provided Terraform scripts  
+   - **Azure Developer CLI (azd):** Provided azd scripts  
 
-### *⚡ Rapid Local Run*
+See the [Infrastructure Deployment Guide](../../docs/DeploymentGuide.md) for detailed steps.
 
-**Prerequisites:** Infra deployed (above), Conda, Node.js ≥ 18, Azure CLI with `dev-tunnel` extension.
+## ⚡ Running the App Locally?
 
-**Backend (FastAPI + Uvicorn):**
+Ensure infrastructure is provisioned before running locally.
+
+### Backend Setup
+
 ```bash
 git clone https://github.com/your-org/gbb-ai-audio-agent.git
-cd gbb-ai-audio-agent/rtagents/RTAgent/backend
-python -m venv .venv && source .venv/bin/activate
+cd gbb-ai-audio-agent/apps/rtagent/backend
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.sample .env   # Configure ACS, Speech, and OpenAI keys
-python server.py      # Starts backend at ws://localhost:8010/realtime
+cp .env.sample .env     # Configure ACS, Speech, and OpenAI credentials
+python server.py        # Backend available at ws://localhost:8010/realtime
 ```
 
-**Frontend (Vite + React):**
+### Frontend Setup
+
 ```bash
 cd ../../frontend
 npm install
-npm run dev           # Starts frontend at http://localhost:5173
+npm run dev            # Frontend available at http://localhost:5173
 ```
-To enable phone dial-in, expose the backend using Azure Dev Tunnels, update `BASE_URL` in both `.env` files, and configure the ACS event subscription.
 
-**You can also run these scripts in the terminal to automate the above:**
+Enabling ACS Call-In and “Call Me” Locally feature: 
 
-| Script                | Purpose                                           |
-|-----------------------|---------------------------------------------------|
-| apps/rtagents/scripts/start_backend.py      | Launches FastAPI pipeline, sets PYTHONPATH, checks env |
-| apps/rtagents/scripts/start_frontend.sh     | Runs Vite dev server at port 5173                   |
-| apps/rtagents/scripts/start_devtunnel_host.sh| Opens Azure Dev Tunnel on port 8010, prints public URL |
+- Expose the backend via Azure Dev Tunnels. How ? Update `BASE_URL` in both `.env` files, and configure the ACS event subscription. 
+- Update the public URL in Azure Communication Services’ event callback.
 
-Copy the public URL from the dev tunnel into Azure Communication Services → Event Callback URL to enable real phone dial-in within minutes. 
+## Need help getting started? Use the Utility Scripts
 
+| Script                          | Purpose                                  |
+| ------------------------------- | ---------------------------------------- |
+| scripts/start_backend.py        | Launch backend & verify environment      |
+| scripts/start_frontend.sh       | Launch React frontend dev server         |
+| scripts/start_devtunnel_host.sh | Open Dev Tunnel & display public URL     |
 
-
+For advanced customization, see the [RTAgent documentation](../README.md).

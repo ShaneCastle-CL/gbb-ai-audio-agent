@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD033 MD041 -->
 
-# 🎙️ **RTAgent**  
+# 🎙️ **RTVoice Accelerator**  
 *Omni-channel, real-time voice-intelligence accelerator framework on Azure*
 
 **RTAgent** is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click “Call Me” in a web app. Built entirely on generally available Azure services—Azure Communication Services, Azure AI, and Azure App Service—it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
@@ -29,7 +29,7 @@ RT Agent is a plug-and-play accelerator, voice-to-voice AI pipeline that slots i
 | **Drop-in YAML agents** | Spin up FNOL claims bots, triage nurses, or legal intake in minutes. |
 | **Micro-service architecture** | Swap models, tune latency, or add new business logic without redeploying the whole stack. |
 
-## Getting Started
+## Deploy and Customize the Demo App Using the RTAgent Framework
 
 ### **🚀 One-Command Azure Deployment**
 
@@ -47,7 +47,7 @@ azd up   # ~15 min for complete infra and code deployment
 
 For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/DeploymentGuide.md).
 
-**Directory Highlights:**
+**Project Structure Highlights:**
 
 | Path                | Description                                 |
 |---------------------|---------------------------------------------|
@@ -60,7 +60,7 @@ For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/Depl
 | Makefile            | One-line dev commands                       |
 | environment.yaml    | Conda environment spec (name: audioagent)   |
 
-### *⚡ Rapid Local Run*
+### *⚡ Run the app Local*
 
 **Prerequisites:** Infra deployed (above), Conda, Node.js ≥ 18, Azure CLI with `dev-tunnel` extension.
 
@@ -80,24 +80,13 @@ cd ../../frontend
 npm install
 npm run dev           # Starts frontend at http://localhost:5173
 ```
-To enable phone dial-in, expose the backend using Azure Dev Tunnels, update `BASE_URL` in both `.env` files, and configure the ACS event subscription.
 
-**You can also run these scripts in the terminal to automate the above:**
-
-| Script                | Purpose                                           |
-|-----------------------|---------------------------------------------------|
-| apps/rtagents/scripts/start_backend.py      | Launches FastAPI pipeline, sets PYTHONPATH, checks env |
-| apps/rtagents/scripts/start_frontend.sh     | Runs Vite dev server at port 5173                   |
-| apps/rtagents/scripts/start_devtunnel_host.sh| Opens Azure Dev Tunnel on port 8010, prints public URL |
-
-Copy the public URL from the dev tunnel into Azure Communication Services → Event Callback URL to enable real phone dial-in within minutes. 
+> Need more help?
+> Refer to [`apps/README.md`](apps/README.md) for a step-by-step walkthrough of the demo app built with the RTAgent framework, along with guidance on how to customize it for your specific use case.
 
 ## **Load and Chaos Testing**
 
-**Performance Targets:**
-- <500 ms STT→TTS
-- 1,000+ concurrent calls
-- >99.5% success rate (in progress)
+Worried about the solution’s ability to scale under your application’s load? Here’s a guide to help you with horizontal scaling tests...
 
 ```bash
 az load test run --test-plan tests/load/azure-load-test.yaml
