@@ -22,8 +22,8 @@ policyholders_db: Dict[str, Dict[str, str]] = {
         "policy_id": "POL-B20417",
     },
     "Carlos Rivera": {
-        "zip": "77002",
-        "ssn4": "7788",
+        "zip": "60601",
+        "ssn4": "1234",
         "policy4": "4455",
         "claim4": "1122",
         "phone4": "9200",

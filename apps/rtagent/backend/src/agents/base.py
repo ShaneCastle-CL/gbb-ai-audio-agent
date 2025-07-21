@@ -76,12 +76,17 @@ class RTAgent:
         ws: WebSocket,
         *,
         is_acs: bool = False,
+        **prompt_kwargs
     ) -> Any:
+        
         # For context-rich prompting
+        system_prompt = self.pm.get_prompt(
+            self.prompt_path,
+            **prompt_kwargs
+        )
         cm.ensure_system_prompt(
             self.name,
-            self.pm,
-            self.prompt_path,
+            system_prompt=system_prompt,
         )
 
         result = await process_gpt_response(
