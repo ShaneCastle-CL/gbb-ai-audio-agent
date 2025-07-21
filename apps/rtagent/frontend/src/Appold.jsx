@@ -1,11 +1,5 @@
 // src/RealTimeVoiceApp.jsx
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  AudioConfig,
-  SpeechConfig,
-  SpeechRecognizer,
-  PropertyId,
-} from 'microsoft-cognitiveservices-speech-sdk';
 import VoiceSphere from './components/VoiceSphere';
 import "reactflow/dist/style.css";
 import { useHealthMonitor } from "./hooks/useHealthMonitor";
@@ -15,11 +9,8 @@ import HealthStatusIndicator from "./components/HealthStatusIndicator";
  *  ENV VARS
  * ------------------------------------------------------------------ */
 const {
-  VITE_AZURE_SPEECH_KEY: AZURE_SPEECH_KEY,
-  VITE_AZURE_REGION:     AZURE_REGION,
   VITE_BACKEND_BASE_URL: API_BASE_URL,
 } = import.meta.env;
-
 
 const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
 
@@ -132,24 +123,20 @@ export default function RealTimeVoiceApp() {
   });
 
 
-  /* ---------- mind‑map state ---------- */
-  // const rootUser      = { id:"user-root",      data:{label:"👤 User"},      position:{x:-220,y:0},
-  //                         style:{background:"#0F766E",color:"#fff"} };
-  // const rootAssistant = { id:"assistant-root", data:{label:"🤖 Assistant"}, position:{x: 220,y:0},
-  //                         style:{background:"#4338CA",color:"#fff"} };
-
-  // const [nodes, setNodes] = useState([rootUser, rootAssistant]);
-  // const [edges, setEdges] = useState([]);
-
-  // all of our former “mind-map” state now lives here:
+  // Function call state (not mind-map)
   const [functionCalls, setFunctionCalls] = useState([]);
   const [callResetKey, setCallResetKey]   = useState(0);
 
   /* ---------- refs ---------- */
-  // const idRef        = useRef(0);
   const chatRef      = useRef(null);
   const socketRef    = useRef(null);
   const recognizerRef= useRef(null);
+
+  // Fix: missing refs for audio and processor
+  const audioContextRef = useRef(null);
+  const processorRef = useRef(null);
+
+
 
   const appendLog = m => setLog(p => `${p}\n${new Date().toLocaleTimeString()} - ${m}`);
 
@@ -166,191 +153,218 @@ export default function RealTimeVoiceApp() {
     if (log.includes("Call connected"))  setCallActive(true);
     if (log.includes("Call ended"))      setCallActive(false);
   },[log]);
-
-  /* ---------- STOP & RESET on end ---------- */
-  const stopRecognition = () => {
-    recognizerRef.current?.stopContinuousRecognitionAsync();
-    if (socketRef.current?.readyState === WebSocket.OPEN)
-      socketRef.current.close();
-
-    setRecording(false);
-    setActiveSpeaker(null);
-
-    // reset all sphere state
-    setFunctionCalls([]);
-    setCallResetKey(k=>k+1);
-
-    appendLog("🛑 Recognition stopped");
-  };
-
-  /* ------------------------------------------------------------------ *
-   *  SEND USER SPEECH → BACKEND
-   * ------------------------------------------------------------------ */
-  const sendToBackend = text => {
-    if (socketRef.current?.readyState === WebSocket.OPEN)
-      socketRef.current.send(JSON.stringify({ text }));
-  };
-
-  const handleUserSpeech = userText => {
-    setMessages(ms => [...ms, { speaker:"User", text:userText }]);
-    setActiveSpeaker("User");
-    appendLog(`User: ${userText}`);
-    sendToBackend(userText);
-  };
-
   /* ------------------------------------------------------------------ *
    *  START RECOGNITION + WS
    * ------------------------------------------------------------------ */
-  const startRecognition = () => {
-    setMessages([]);
-    setFunctionCalls([]);
-    setCallResetKey(k=>k+1);
+  const startRecognition = async () => {
+      // mind-map reset not needed
+      setMessages([]);
+      appendLog("🎤 PCM streaming started");
 
-    /* Azure Speech config */
-    const cfg = SpeechConfig.fromSubscription(AZURE_SPEECH_KEY, AZURE_REGION);
-    cfg.speechRecognitionLanguage = "en-US";
-    const rec = new SpeechRecognizer(cfg, AudioConfig.fromDefaultMicrophoneInput());
-    rec.properties.setProperty(PropertyId.Speech_SegmentationSilenceTimeoutMs, "800");
-    rec.properties.setProperty(PropertyId.Speech_SegmentationStrategy, "Semantic");
-    recognizerRef.current = rec;
+      // 1) open WS
+      const socket = new WebSocket(`${WS_URL}/realtime`);
+      socket.binaryType = "arraybuffer";
 
-    let lastInterrupt = Date.now();
-    rec.recognizing = (_, e) => {
-      if (e.result.text.trim() &&
-          socketRef.current?.readyState === WebSocket.OPEN &&
-          Date.now()-lastInterrupt > 1000)
-      {
-        socketRef.current.send(JSON.stringify({ type:"interrupt" }));
-        appendLog("→ Sent interrupt");
-        lastInterrupt = Date.now();
+      socket.onopen = () => {
+        appendLog("🔌 WS open");
+        console.log("WebSocket connection OPENED to backend!");
+      };
+      socket.onclose = () => {
+        console.log("WebSocket connection CLOSED.");
+      };
+      socket.onerror = (err) => {
+        console.error("WebSocket error:", err);
+      };
+      socket.onmessage = handleSocketMessage;
+      socketRef.current = socket;
+
+      // 2) setup Web Audio for raw PCM @16 kHz
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 16000
+      });
+      audioContextRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+
+      // 3) ScriptProcessor with small buffer for low latency (256 or 512 samples)
+      const bufferSize = 512; 
+      const processor  = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (evt) => {
+        const float32 = evt.inputBuffer.getChannelData(0);
+        // Debug: Log a sample of mic data
+        console.log("Mic data sample:", float32.slice(0, 10)); // Should show non-zero values if your mic is hot
+
+        const int16 = new Int16Array(float32.length);
+        for (let i = 0; i < float32.length; i++) {
+          int16[i] = Math.max(-1, Math.min(1, float32[i])) * 0x7fff;
+        }
+
+        // Debug: Show size before send
+        console.log("Sending int16 PCM buffer, length:", int16.length);
+
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(int16.buffer);
+          // Debug: Confirm data sent
+          console.log("PCM audio chunk sent to backend!");
+        } else {
+          console.log("WebSocket not open, did not send audio.");
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+      setRecording(true);
+    };
+
+    const stopRecognition = () => {
+      if (processorRef.current) {
+        try { processorRef.current.disconnect(); } catch {}
+        processorRef.current = null;
+      }
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch {}
+        audioContextRef.current = null;
+      }
+      if (socketRef.current) {
+        try { socketRef.current.close(); } catch {}
+        socketRef.current = null;
+      }
+      setRecording(false);
+      appendLog("🛑 PCM streaming stopped");
+    };
+
+    // Helper to dedupe consecutive identical messages
+    const pushIfChanged = (arr, msg) => {
+      // Only dedupe if the last message is from the same speaker and has the same text
+      if (arr.length === 0) return [...arr, msg];
+      const last = arr[arr.length - 1];
+      if (last.speaker === msg.speaker && last.text === msg.text) return arr;
+      return [...arr, msg];
+    };
+
+    const handleSocketMessage = async (event) => {
+      if (typeof event.data !== "string") {
+        const ctx = new AudioContext();
+        const buf = await event.data.arrayBuffer();
+        const audioBuf = await ctx.decodeAudioData(buf);
+        const src = ctx.createBufferSource();
+        src.buffer = audioBuf;
+        src.connect(ctx.destination);
+        src.start();
+        appendLog("🔊 Audio played");
+        return;
+      }
+    
+      let payload;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        appendLog("Ignored non‑JSON frame");
+        return;
+      }
+      // --- Handle relay/broadcast messages with {sender, message} ---
+      if (payload.sender && payload.message) {
+        // Route all relay messages through the same logic
+        payload.speaker = payload.sender;
+        payload.content = payload.message;
+        // fall through to unified logic below
+      }
+      const { type, content = "", message = "", function_call, speaker } = payload;
+      const txt = content || message;
+      const msgType = (type || "").toLowerCase();
+
+      /* ---------- USER BRANCH ---------- */
+      if (msgType === "user" || speaker === "User") {
+        setActiveSpeaker("User");
+        // Always append user message immediately, do not dedupe
+        setMessages(prev => [...prev, { speaker: "User", text: txt }]);
+
+        appendLog(`User: ${txt}`);
+        return;
+      }
+
+      /* ---------- ASSISTANT STREAM ---------- */
+      if (type === "assistant_streaming") {
+        setActiveSpeaker("Assistant");
+        setMessages(prev => {
+          if (prev.at(-1)?.streaming) {
+            return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt} : m);
+          }
+          return [...prev, { speaker:"Assistant", text:txt, streaming:true }];
+        });
+        return;
+      }
+
+      /* ---------- ASSISTANT FINAL ---------- */
+      if (msgType === "assistant" || msgType === "status" || speaker === "Assistant") {
+        setActiveSpeaker("Assistant");
+        setMessages(prev => {
+          if (prev.at(-1)?.streaming) {
+            return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt, streaming:false} : m);
+          }
+          return pushIfChanged(prev, { speaker:"Assistant", text:txt });
+        });
+
+        appendLog("🤖 Assistant responded");
+        return;
+      }
+    
+      if (type === "tool_start") {
+
+      
+        setMessages((prev) => [
+          ...prev,
+          {
+            speaker: "Assistant",
+            isTool: true,
+            text: `🛠️ tool ${payload.tool} started 🔄`,
+          },
+        ]);
+      
+        appendLog(`⚙️ ${payload.tool} started`);
+        return;
+      }
+      
+    
+      if (type === "tool_progress") {
+        setMessages((prev) =>
+          prev.map((m, i, arr) =>
+            i === arr.length - 1 && m.text.startsWith(`🛠️ tool ${payload.tool}`)
+              ? { ...m, text: `🛠️ tool ${payload.tool} ${payload.pct}% 🔄` }
+              : m,
+          ),
+        );
+        appendLog(`⚙️ ${payload.tool} ${payload.pct}%`);
+        return;
+      }
+    
+      if (type === "tool_end") {
+
+      
+        const finalText =
+          payload.status === "success"
+            ? `🛠️ tool ${payload.tool} completed ✔️\n${JSON.stringify(
+                payload.result,
+                null,
+                2,
+              )}`
+            : `🛠️ tool ${payload.tool} failed ❌\n${payload.error}`;
+      
+        setMessages((prev) =>
+          prev.map((m, i, arr) =>
+            i === arr.length - 1 && m.text.startsWith(`🛠️ tool ${payload.tool}`)
+              ? { ...m, text: finalText }
+              : m,
+          ),
+        );
+      
+        appendLog(`⚙️ ${payload.tool} ${payload.status} (${payload.elapsedMs} ms)`);
       }
     };
-    rec.recognized = (_, e) => {
-      const txt = e.result.text.trim();
-      if (txt) handleUserSpeech(txt);
-    };
-
-    rec.startContinuousRecognitionAsync();
-    setRecording(true);
-    appendLog("🎤 Recognition started");
-
-    /* WebSocket for assistant streaming */
-    const socket = new WebSocket(`${WS_URL}/realtime`);
-    socket.binaryType = "arraybuffer";
-    socketRef.current = socket;
-    socket.onopen  = () => appendLog("🔌 WS open");
-    socket.onclose = () => appendLog("🔌 WS closed");
-    socket.onmessage = handleSocketMessage;
-  };
-
-  /* ------------------------------------------------------------------ *
-   *  HANDLE INCOMING SOCKET MESSAGES
-   * ------------------------------------------------------------------ */
-  const handleSocketMessage = async event => {
-    // audio
-    if (typeof event.data !== "string") {
-      const ctx = new AudioContext();
-      const buf = await event.data.arrayBuffer();
-      const audioBuf = await ctx.decodeAudioData(buf);
-      const src = ctx.createBufferSource();
-      src.buffer = audioBuf;
-      src.connect(ctx.destination);
-      src.start();
-      appendLog("🔊 Audio played");
-      return;
-    }
-
-    // JSON frames
-    let payload;
-    try { payload = JSON.parse(event.data); }
-    catch { appendLog("Ignored non-JSON frame"); return; }
-
-    const { type, content="", message="", tool, pct, status, elapsedMs, result, error } = payload;
-    const txt = content || message;
-
-    // streaming assistant
-    if (type==="assistant_streaming") {
-      setActiveSpeaker("Assistant");
-      setMessages(prev => {
-        if (prev.at(-1)?.streaming) {
-          return prev.map((m,i) =>
-            i===prev.length-1 ? { ...m, text: txt } : m
-          );
-        }
-        return [...prev, { speaker:"Assistant", text: txt, streaming:true }];
-      });
-      return;
-    }
-
-    // final assistant
-    if (type==="assistant"||type==="status") {
-      setActiveSpeaker("Assistant");
-      setMessages(prev => {
-        if (prev.at(-1)?.streaming) {
-          return prev.map((m,i) =>
-            i===prev.length-1 ? { speaker:"Assistant", text: txt } : m
-          );
-        }
-        return [...prev, { speaker:"Assistant", text: txt }];
-      });
-      appendLog("🤖 Assistant responded");
-      return;
-    }
-
-    // tool start
-    if (type==="tool_start") {
-      const callId = `${tool}-${Date.now()}`;
-      setFunctionCalls(fc => [...fc, { id:callId, name:tool, status:"running" }]);
-      setMessages(prev => [
-        ...prev,
-        { speaker:"Assistant", isTool:true, text:`🛠️ tool ${tool} started 🔄` }
-      ]);
-      appendLog(`⚙️ ${tool} started`);
-      return;
-    }
-
-    // tool progress
-    if (type==="tool_progress") {
-      setMessages(prev =>
-        prev.map((m,i,arr) =>
-          i===arr.length-1 && m.text.startsWith(`🛠️ tool ${tool}`)
-            ? { ...m, text:`🛠️ tool ${tool} ${pct}% 🔄` }
-            : m
-        )
-      );
-      appendLog(`⚙️ ${tool} ${pct}%`);
-      return;
-    }
-
-    // tool end
-    if (type==="tool_end") {
-      setFunctionCalls(fc =>
-        fc.map(f =>
-          f.name===tool
-            ? { ...f, status: status==="success" ? "completed" : "error" }
-            : f
-        )
-      );
-      // float out then remove
-      setTimeout(() => {
-        setFunctionCalls(fc => fc.filter(f => f.name!==tool));
-      }, 2000);
-
-      const finalText = status==="success"
-        ? `🛠️ tool ${tool} completed ✔️\n${JSON.stringify(result, null,2)}`
-        : `🛠️ tool ${tool} failed ❌\n${error}`;
-      setMessages(prev =>
-        prev.map((m,i,arr) =>
-          i===arr.length-1 && m.text.startsWith(`🛠️ tool ${tool}`)
-            ? { ...m, text: finalText }
-            : m
-        )
-      );
-      appendLog(`⚙️ ${tool} ${status} (${elapsedMs}ms)`);
-      return;
-    }
-  };
-
+  
   /* ------------------------------------------------------------------ *
    *  OUTBOUND ACS CALL
    * ------------------------------------------------------------------ */
