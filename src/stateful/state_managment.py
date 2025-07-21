@@ -14,7 +14,8 @@ from src.agenticmemory.playback_queue import MessageQueue
 from src.agenticmemory.types import ChatHistory, CoreMemory
 from src.agenticmemory.utils import LatencyTracker
 from src.redis.manager import AzureRedisManager
-from src.agents.prompts_loader.base import PromptManager
+#TODO Fix this area
+from src.prompts.prompt_manager import PromptManager
 from utils.ml_logging import get_logger
 
 logger = get_logger("src.stateful.state_managment")
@@ -264,6 +265,7 @@ class MemoManager:
             # Either no entry yet or not a dict → replace
             self.corememory.set(key, value)
 
+    #TODO: fix this area 
     def ensure_system_prompt(
         self, agent_name: str, prompt_manager: PromptManager, prompt_path: str
     ) -> None:

@@ -1,0 +1,29 @@
+2.1 Functional Objectives
+
+Interactions:
+Develop bot capable of acknowledging caller emotions
+Respond with appropriate empathy
+
+Data Collection: Successfully capture all 9 required data points:
+Caller identification
+Driver identification
+Vehicle/policy details
+Number of vehicles involved
+Incident description (loss type)
+Loss date/time
+Loss Location
+Vehicle Drivable
+Passenger information
+Injury assessment
+Trip purpose
+
+
+7. SUCCESS VALIDATION
+
+Demo Scenarios
+
+Happy Path: Complete claim intake with all data collected
+Empathy Test: Handling distressed caller appropriately
+Barge-in Test: Caller interruption handling
+Error Recovery: Handling speech recognition failures
+Integration Test: End-to-end JSON payload delivery

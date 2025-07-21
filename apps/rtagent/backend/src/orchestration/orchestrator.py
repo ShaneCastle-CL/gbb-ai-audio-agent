@@ -80,6 +80,7 @@ async def route_turn(  # noqa: D401, PLR0913 – many params by FastAPI design
                 authenticated=True,
                 caller_name=result.get("caller_name"),
                 policy_id=result.get("policy_id"),
+                call_reason=result.get("call_reason"),
             )
             logger.info(
                 "✅ Session %s authenticated – %s / %s",

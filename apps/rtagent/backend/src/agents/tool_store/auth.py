@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, TypedDict, Optional
 
 from utils.ml_logging import get_logger
 
@@ -34,14 +34,15 @@ policyholders_db: Dict[str, Dict[str, str]] = {
 
 
 class AuthenticateArgs(TypedDict):
-    full_name: str  # required
-    zip_code: str  # required
-    last4_id: str  # required – caller chooses which ID to supply
+    full_name: str            # required
+    zip_code: str             # required
+    last4_id: str             # required – caller chooses which ID to supply
+    call_reason: Optional[str]  # optional – why the caller says they’re calling
 
 
 async def authenticate_caller(args: AuthenticateArgs) -> Dict[str, Any]:
     """
-    Validates caller using (name, zip, last-4 of SSN / policy / claim / phone).
+    Validates caller using (name, ZIP, last‑4 of SSN / policy / claim / phone).
 
     Returns
     -------
@@ -49,14 +50,19 @@ async def authenticate_caller(args: AuthenticateArgs) -> Dict[str, Any]:
         "authenticated": bool,
         "message": str,
         "policy_id": str | None,
-        "caller_name": str | None
+        "caller_name": str | None,
+        "call_reason": str | None   # ← new
     }
     """
     full_name = args["full_name"].strip().title()
     zip_code = args["zip_code"].strip()
-    last4 = args["last4_id"].strip()
+    last4     = args["last4_id"].strip()
+    reason    = args.get("call_reason")  # may be None / not provided
 
-    logger.info(f"🔎 Authenticating {full_name} – ZIP {zip_code}, last-4 {last4}")
+    logger.info(
+        f"🔎 Authenticating {full_name} – ZIP {zip_code}, "
+        f"last‑4 {last4}, reason={reason!r}"
+    )
 
     rec = policyholders_db.get(full_name)
     if not rec:
@@ -66,14 +72,13 @@ async def authenticate_caller(args: AuthenticateArgs) -> Dict[str, Any]:
             "message": f"Name '{full_name}' not found.",
             "policy_id": None,
             "caller_name": None,
+            "call_reason": reason,
         }
 
-    # last-4 may match ANY of the stored identifiers
     last4_fields: List[str] = ["ssn4", "policy4", "claim4", "phone4"]
     last4_match = last4 in [rec[f] for f in last4_fields]
-    zip_match = rec["zip"] == zip_code
+    zip_match   = rec["zip"] == zip_code
 
-    # Approve if either (name + zip) or (name + last-4) matches
     if zip_match or last4_match:
         logger.info(f"✅ Authentication succeeded for {full_name}")
         return {
@@ -81,12 +86,14 @@ async def authenticate_caller(args: AuthenticateArgs) -> Dict[str, Any]:
             "message": f"Authenticated {full_name}.",
             "policy_id": rec["policy_id"],
             "caller_name": full_name,
+            "call_reason": reason,
         }
     else:
-        logger.warning(f"❌ Neither ZIP nor last-4 matched for {full_name}")
+        logger.warning(f"❌ Neither ZIP nor last‑4 matched for {full_name}")
         return {
             "authenticated": False,
-            "message": "Authentication failed – neither ZIP nor last-4 digits matched.",
+            "message": "Authentication failed – neither ZIP nor last‑4 digits matched.",
             "policy_id": None,
             "caller_name": None,
+            "call_reason": reason,
         }

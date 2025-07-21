@@ -44,7 +44,7 @@ from apps.rtagent.backend.src.services import (
     StreamingSpeechRecognizerFromBytes,
 )
 
-from src.agents.base import RTAgent
+from apps.rtagent.backend.src.agents.base import RTAgent
 from utils.ml_logging import get_logger
 
 logger = get_logger("main")

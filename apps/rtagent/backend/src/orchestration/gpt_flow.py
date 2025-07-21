@@ -19,7 +19,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import WebSocket
-from apps.rtagent.backend.src.agents.tool_store.tools import (
+from apps.rtagent.backend.src.agents.tool_store.tool_registry import (
     available_tools as DEFAULT_TOOLS,
 )
 from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
