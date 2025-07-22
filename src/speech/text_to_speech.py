@@ -684,8 +684,8 @@ class SpeechSynthesizer:
             return False
 
     ## Cleaned up methods
-    def synthesize_to_pcm(self, text: str, sample_rate: int = 16000) -> bytes:
-        speech_config = self.cfg
+    def synthesize_to_pcm(self, text: str, voice:str = "en-US-JennyMultilingualNeural", sample_rate: int = 16000) -> bytes:
+        speech_config = self._create_speech_config()
         speech_config.speech_synthesis_voice_name = self.voice
         speech_config.set_speech_synthesis_output_format(
             {
@@ -696,7 +696,7 @@ class SpeechSynthesizer:
 
         ssml = f"""
 <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-    <voice name="{self.voice.split(':')[0]}">
+    <voice name="{voice}">
         <prosody rate="15%" pitch="default">
             {text}
         </prosody>
