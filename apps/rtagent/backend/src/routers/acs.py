@@ -24,6 +24,7 @@ from apps.rtagent.backend.src.handlers.acs_media_handler import ACSMediaHandler
 from apps.rtagent.backend.src.handlers.acs_transcript_handler import (
     TranscriptionHandler,
 )
+from apps.rtagent.backend.src.shared_ws import broadcast_message
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.settings import (
@@ -31,6 +32,7 @@ from apps.rtagent.backend.settings import (
     ACS_CALLBACK_PATH,
     ACS_STREAMING_MODE,
     ACS_WEBSOCKET_PATH,
+    GREETING,
 )
 
 from src.enums.stream_modes import StreamMode
@@ -200,12 +202,10 @@ async def acs_media_ws(ws: WebSocket):
 
         greeted: set[str] = ws.app.state.greeted_call_ids
         if cid not in greeted and ACS_STREAMING_MODE == StreamMode.MEDIA:
-            greeting = (
-                "Hi there from XYZ Insurance! What can I help you with today?"
-            )
-            handler.play_greeting(greeting)
+            handler.play_greeting(GREETING)
             auth_agent = ws.app.state.auth_agent
-            cm.append_to_history(auth_agent.name, "assistant", greeting)
+            cm.append_to_history(auth_agent.name, "assistant", GREETING)
+            await broadcast_message(ws.app.state.clients, GREETING, "Assistant")
             greeted.add(cid)
 
         try:

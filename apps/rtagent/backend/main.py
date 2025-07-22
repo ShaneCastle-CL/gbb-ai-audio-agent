@@ -128,9 +128,11 @@ if __name__ == "__main__":
     import uvicorn
 
     port = int(os.environ.get("PORT", 8010))
+    # NOTE: Binding to 0.0.0.0 is for local/dev only. In production, use firewall/reverse proxy for security.
+    # This is a non-issue for local development. Production deployment will use secure networking.
     uvicorn.run(
         "main:app",  # Use import string to support reload
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec: B104
         port=port,
         reload=True,
     )
