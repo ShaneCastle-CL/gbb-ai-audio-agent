@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-"""FNOL voice‑agent *escalation and hand‑off* utilities.
+"""
+FNOL voice-agent *escalation and hand-off* utilities.
 
-This module exposes **three** async callables that the LLM can invoke to
-redirect the conversation flow:
+This module exposes **three** async callables that the LLM can invoke
+to redirect the conversation flow:
 
-1. ``handoff_general_agent`` – transfer to the *General Insurance Questions*
-   AI agent whenever the caller seeks broad, non‑claim‑specific information
-   (e.g., "What is covered under comprehensive?", "How do deductibles work?").
-2. ``escalate_human`` – cold‑transfer to a live adjuster for fraud,
-   validation loops, backend errors, or customer frustration.
+1. ``handoff_general_agent`` – transfer to the *General Insurance Questions*
+   AI agent whenever the caller seeks broad, non-claim-specific information
+   (e.g., “What is covered under comprehensive?”).
+2. ``handoff_claim_agent`` – transfer to the *Claims Intake* AI agent when
+   the caller wants to start or update a claim.
+3. ``escalate_human`` – cold-transfer to a live adjuster for fraud flags,
+   repeated validation loops, backend errors, or customer frustration.
 
-All functions adhere to the project’s engineering standards (PEP 8 typing,
-structured logging, error handling, and JSON responses via ``_json``).
+All functions follow project standards (PEP 8 typing, structured logging,
+robust error handling, and JSON responses via ``_json``).
 """
 
 from datetime import datetime, timezone
@@ -24,29 +27,27 @@ from utils.ml_logging import get_logger
 logger = get_logger("fnol_escalations")
 
 
+# ────────────────────────────────────────────────────────────────
+# General-info hand-off
+# ────────────────────────────────────────────────────────────────
 class HandoffGeneralArgs(TypedDict):
     """Input schema for :pyfunc:`handoff_general_agent`."""
-
-    topic: str  # e.g. "coverage", "billing", etc.
+    topic: str        # e.g. "coverage", "billing"
     caller_name: str
 
 
 async def handoff_general_agent(args: HandoffGeneralArgs) -> Dict[str, Any]:
-    """Transfer the caller to the *General Insurance Questions* AI agent.
-
-    This path is used when the caller requests information that is **not**
-    claim‑specific (e.g., "How does roadside assistance work?"), allowing the
-    specialised FAQ agent to handle the inquiry.
-
-    Returns a lightweight payload instructing the orchestrator to route the
-    conversation to the named agent.
+    """
+    Transfer the caller to the **General Insurance Questions** AI agent.
     """
     topic = args.get("topic", "").strip()
     caller_name = args.get("caller_name", "").strip()
+
     if not topic or not caller_name:
         return _json(False, "Both 'topic' and 'caller_name' must be provided.")
 
-    logger.info("🤖 Hand‑off to General‑Info agent – topic: %s (caller: %s)", topic, caller_name)
+    logger.info("🤖 Hand-off to General-Info agent – topic=%s caller=%s",
+                topic, caller_name)
     return _json(
         True,
         "Caller transferred to General Insurance Questions agent.",
@@ -56,40 +57,77 @@ async def handoff_general_agent(args: HandoffGeneralArgs) -> Dict[str, Any]:
     )
 
 
+# ────────────────────────────────────────────────────────────────
+# Claims-intake hand-off  🆕
+# ────────────────────────────────────────────────────────────────
+class HandoffClaimArgs(TypedDict):
+    """Input schema for :pyfunc:`handoff_claim_agent`."""
+    caller_name: str
+    policy_id: str
+    claim_intent: str  # e.g. "new_claim", "update_claim"
+
+
+async def handoff_claim_agent(args: HandoffClaimArgs) -> Dict[str, Any]:
+    """
+    Transfer the caller to the **Claims Intake** AI agent.
+
+    Parameters
+    ----------
+    caller_name : str
+    policy_id   : str
+    claim_intent: str   (free-text hint such as "new_claim")
+    """
+    caller_name = args.get("caller_name", "").strip()
+    policy_id   = args.get("policy_id", "").strip()
+    intent      = args.get("claim_intent", "").strip()
+
+    if not caller_name or not policy_id:
+        return _json(False,
+                     "'caller_name' and 'policy_id' are required for claim hand-off.")
+
+    logger.info("📂 Hand-off to Claims agent – %s (%s) intent=%s",
+                caller_name, policy_id, intent or "n/a")
+
+    return _json(
+        True,
+        "Caller transferred to Claims Intake agent.",
+        handoff="ai_agent",
+        target_agent="Claims Intake",
+        claim_intent=intent or "unspecified",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ────────────────────────────────────────────────────────────────
+# Human escalation
+# ────────────────────────────────────────────────────────────────
 class EscalateHumanArgs(TypedDict):
     """Input schema for :pyfunc:`escalate_human`."""
-    route_reason: str  # e.g. "validation_loop", "backend_error", "fraud_flags"
+    route_reason: str   # e.g. "validation_loop", "backend_error", "fraud_flags"
     caller_name: str
     policy_id: str
 
 
 async def escalate_human(args: EscalateHumanArgs) -> Dict[str, Any]:
-    """Escalate *non‑emergency* scenarios to a human insurance adjuster.
-
-    Typical triggers include:
-    • Backend errors after multiple retries.
-    • Repeated validation loops (e.g., missing passenger info).
-    • ≥ 2 high‑risk fraud indicators.
-    • Caller frustration or profanity.
+    """
+    Escalate *non-emergency* scenarios to a human insurance adjuster.
     """
     try:
         route_reason = args["route_reason"].strip()
-        caller_name = args["caller_name"].strip()
-        policy_id = args["policy_id"].strip()
-    except KeyError as exc:  # pragma: no cover – JSON schema validation should catch
-        missing = exc.args[0]
-        return _json(False, f"Missing required field: {missing}.")
+        caller_name  = args["caller_name"].strip()
+        policy_id    = args["policy_id"].strip()
+    except KeyError as exc:   # pragma: no cover – schema validation should catch
+        return _json(False, f"Missing required field: {exc.args[0]}.")
 
     if not route_reason:
-        return _json(False, "route_reason must be provided.")
+        return _json(False, "'route_reason' must be provided.")
 
-    logger.info(
-        "🤝 Human hand‑off for %s (%s) – reason: %s", caller_name, policy_id, route_reason
-    )
+    logger.info("🤝 Human hand-off – %s (%s) reason=%s",
+                caller_name, policy_id, route_reason)
     return _json(
         True,
         "Caller transferred to human insurance agent.",
-        route_reason=route_reason,
         handoff="human_agent",
+        route_reason=route_reason,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )

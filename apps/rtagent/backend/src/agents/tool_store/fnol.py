@@ -136,7 +136,9 @@ async def record_fnol(args: ClaimIntakeFull) -> Dict[str, Any]:
     claims_db.append({**args, "claim_id": claim_id, "status": "OPEN"})
     log.info("📄 FNOL recorded (%s) for %s", claim_id, args["caller_name"])
 
+    # Return all collected parameters in the response
     return {
         "claim_success": True,
         "claim_id": claim_id,
+        "claim_data": {**args},
     }

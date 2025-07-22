@@ -8,6 +8,7 @@ Tools:
 - authenticate_caller
 - escalate_emergency
 - handoff_general_agent
+- handoff_claim_agent          
 - escalate_human
 """
 
@@ -144,32 +145,55 @@ record_fnol_schema: Dict[str, Any] = {
 authenticate_caller_schema: Dict[str, Any] = {
     "name": "authenticate_caller",
     "description": (
-        "Verify the caller’s identity for First-Notice-of-Loss (FNOL) claims by matching their full name, ZIP code, and the last 4 digits of a key identifier. "
-        "Accepted identifiers: SSN, policy number, claim number, or phone number. "
-        "Optionally, provide the caller’s reason for calling. "
-        "Returns: {authenticated: bool, message: str, policy_id?: str, caller_name?: str, call_reason?: str}."
+        "Verify the caller’s identity by matching their full legal name, ZIP code, "
+        "and the last 4 digits of a key identifier (SSN, policy number, claim "
+        "number, or phone number). "
+        "Returns: {authenticated: bool, message: str, policy_id: str | null, "
+        "caller_name: str | null, attempt: int, intent: str | null, "
+        "claim_intent: str | null}. "
+        "At least one of ZIP code or last‑4 must be provided."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "full_name": {
                 "type": "string",
-                "description": "Caller’s full legal name (e.g., 'Alice Brown')."
+                "description": "Caller’s full legal name (e.g., 'Alice Brown').",
             },
             "zip_code": {
                 "type": "string",
-                "description": "Caller’s 5-digit ZIP code."
+                "description": "Caller’s 5‑digit ZIP code. May be blank if last4_id is provided.",
             },
             "last4_id": {
                 "type": "string",
-                "description": "Last 4 digits of SSN, policy number, claim number, or phone number."
+                "description": (
+                    "Last 4 digits of SSN, policy number, claim number, or phone "
+                    "number. May be blank if zip_code is provided."
+                ),
             },
-            "call_reason": {
+            "intent": {
                 "type": "string",
-                "description": "Optional: stated reason for the call (e.g., 'report accident', 'ask about coverage')."
+                "enum": ["claims", "general"],
+                "description": "High‑level reason for the call.",
+            },
+            "claim_intent": {
+                "type": ["string", "null"],
+                "enum": ["new_claim", "existing_claim", "unknown", None],
+                "description": "Sub‑intent when intent == 'claims'. Null for general inquiries.",
+            },
+            "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Nth authentication attempt within the current call (starts at 1).",
             },
         },
-        "required": ["full_name", "zip_code", "last4_id"],
+        "required": [
+            "full_name",
+            "zip_code",
+            "last4_id",
+            "intent",
+            "claim_intent",
+        ],
         "additionalProperties": False,
     },
 }
@@ -204,8 +228,8 @@ escalate_emergency_schema: Dict[str, Any] = {
 handoff_general_schema: Dict[str, Any] = {
     "name": "handoff_general_agent",
     "description": (
-        "Route the call to the General Insurance Questions AI agent. "
-        "Use this tool when the caller requests broad insurance information or assistance not related to a specific claim or policy."
+        "Route the call to the General Insurance Questions AI agent when the "
+        "caller requests broad information not tied to a specific claim."
     ),
     "parameters": {
         "type": "object",
@@ -214,11 +238,46 @@ handoff_general_schema: Dict[str, Any] = {
                 "type": "string",
                 "description": "Full legal name of the caller."
             },
+            "topic": {
+                "type": "string",
+                "description": "Short keyword describing the caller’s question "
+                               "(e.g., 'coverage', 'billing')."
+            },
         },
-        "required": ["caller_name"],
+        "required": ["caller_name", "topic"],
         "additionalProperties": False,
     },
 }
+
+handoff_claim_schema: Dict[str, Any] = {
+    "name": "handoff_claim_agent",
+    "description": (
+        "Route the call to the Claims Intake AI agent when the caller needs to "
+        "start or update a claim."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "caller_name": {
+                "type": "string",
+                "description": "Full legal name of the caller."
+            },
+            "policy_id": {
+                "type": "string",
+                "description": "Unique policy identifier for the caller."
+            },
+            "claim_intent": {
+                "type": "string",
+                "description": (
+                    "Brief intent string (e.g., 'new_claim', 'update_claim')."
+                ),
+            },
+        },
+        "required": ["caller_name", "policy_id", "claim_intent"],
+        "additionalProperties": False,
+    },
+}
+
 
 escalate_human_schema: Dict[str, Any] = {
     "name": "escalate_human",

@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, List
 from apps.rtagent.backend.src.agents.tool_store.auth import authenticate_caller
 from apps.rtagent.backend.src.agents.tool_store.fnol import record_fnol
 from apps.rtagent.backend.src.agents.tool_store.emergency import escalate_emergency
-from apps.rtagent.backend.src.agents.tool_store.handoffs import handoff_general_agent, escalate_human
+from apps.rtagent.backend.src.agents.tool_store.handoffs import handoff_general_agent, escalate_human, handoff_claim_agent
 from utils.ml_logging import get_logger
 
 log = get_logger("tools_helper")
@@ -13,6 +13,7 @@ from apps.rtagent.backend.src.agents.tool_store.schemas import (
     escalate_emergency_schema,
     handoff_general_schema,
     escalate_human_schema,
+    handoff_claim_schema,
 )
 
 
@@ -22,6 +23,7 @@ function_mapping: Dict[str, Callable[..., Any]] = {
     "authenticate_caller": authenticate_caller,
     "handoff_general_agent": handoff_general_agent,
     "escalate_human": escalate_human,
+    "handoff_claim_agent": handoff_claim_agent
 }
 
 
@@ -31,6 +33,7 @@ available_tools: List[Dict[str, Any]] = [
     {"type": "function", "function": escalate_emergency_schema},
     {"type": "function", "function": handoff_general_schema},
     {"type": "function", "function": escalate_human_schema},
+    {"type": "function", "function": handoff_claim_schema},
 ]
 
 TOOL_REGISTRY: dict[str, dict] = {t["function"]["name"]: t for t in available_tools}

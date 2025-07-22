@@ -4,8 +4,6 @@ import threading
 from typing import Optional
 
 from azure.communication.callautomation import (
-    DtmfTone,
-    PhoneNumberIdentifier,
     TextSource,
 )
 from fastapi import WebSocket

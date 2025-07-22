@@ -15,7 +15,7 @@ model:
   deployment_id: gpt-4o
   temperature: 0.60
   top_p: 0.9
-  max_tokens: 1024
+  max_tokens: 2024
 
 prompts:
   path: fnol_intake_agent.jinja
