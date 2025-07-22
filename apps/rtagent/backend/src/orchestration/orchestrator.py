@@ -1,32 +1,28 @@
 from __future__ import annotations
+"""rtagent_orchestrator
+======================
+Main orchestration loop for the XYMZ Insurance **RTAgent** real‑time voice bot.
 
-"""First‑Notice‑of‑Loss (FNOL) router – typed revision with performance tracing.
+* **Intent routing simplified** – the *authentication* tool  echoes back
+  ``intent`` ("claims" | "general") **and** ``claim_intent`` once the caller is
 
-Two‑stage conversational flow:
+* The specialist agents still retain the ability to switch context later via
+  the existing hand‑off mechanism (``handoff: ai_agent``).
 
-1. **AuthAgent** – verifies caller identity.
-2. **FNOLIntakeAgent** – records the claim details.
-
-Assumes a :class:`MemoManager` instance keeps per‑session state in *corememory*
-under keys:
-
-* ``authenticated: bool`` – gate between stages.
-* ``caller_name: str`` and ``policy_id: str`` – set by *AuthAgent*.
-* ``intake_completed: bool`` – set after successful FNOL intake.
 """
 
+from contextlib import asynccontextmanager
 import json
 import os
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 from fastapi import WebSocket
-
 from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
 from src.enums.monitoring import SpanAttr
 
-if TYPE_CHECKING:  # pragma: no cover – typing‑only imports
-    from src.stateful.state_managment import MemoManager  # noqa: F401
+if TYPE_CHECKING:  # pragma: no cover
+    from src.stateful.state_managment import MemoManager  # noqa: N812 – external camel‑case
 
 logger = get_logger(__name__)
 
@@ -48,90 +44,206 @@ def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> tuple[str, str
     return call_connection_id, session_id
 
 
-# ---------------------------------------------------------------------------
-# Helper wrappers – thin, typed accessors to MemoManager
-# ---------------------------------------------------------------------------
+# ────────────────────────────────────────────────────────────────
+# Core‑Memory helpers
+# ────────────────────────────────────────────────────────────────
 
-
-def _cm_get(cm: "MemoManager", key: str, default: Any = None) -> Any:  # noqa: D401
-    """Typed shortcut to *corememory* getter."""
+def _cm_get(cm: "MemoManager", key: str, default: Any = None) -> Any:
+    """Shorthand for ``cm.get_value_from_corememory`` with a default."""
     return cm.get_value_from_corememory(key, default)
 
 
-def _cm_set(cm: "MemoManager", **kwargs: Dict[str, Any]) -> None:  # noqa: D401
-    """Batch update helper for *corememory*."""
+def _cm_set(cm: "MemoManager", **kwargs: Dict[str, Any]) -> None:
+    """Bulk update core‑memory with ``key=value`` pairs."""
     for k, v in kwargs.items():
         cm.update_corememory(k, v)
 
 
-# ---------------------------------------------------------------------------
-# Route turn entry‑point
-# ---------------------------------------------------------------------------
-async def route_turn(  # noqa: D401, PLR0913 – many params by FastAPI design
+@asynccontextmanager
+async def track_latency(timer, label: str, redis_mgr):
+    """Context‑manager that starts/stops a latency timer and stores the metric."""
+    timer.start(label)
+    try:
+        yield
+    finally:
+        timer.stop(label, redis_mgr)
+
+
+async def run_auth_agent(
+    cm: "MemoManager",
+    utterance: str,
+    ws: WebSocket,
+    *,
+    is_acs: bool,
+) -> None:
+    """Execute the AuthAgent.  If it succeeds, prime routing metadata."""
+
+    if _cm_get(cm, "authenticated", False):
+        return  # Already verified
+
+    auth_agent = ws.app.state.auth_agent  # type: ignore[attr-defined]
+    async with track_latency(ws.state.lt, "auth_agent", ws.app.state.redis):
+        result: Dict[str, Any] | Any = await auth_agent.respond(cm, utterance, ws, is_acs=is_acs)
+
+    if not (isinstance(result, dict) and result.get("authenticated")):
+        return
+
+    _cm_set(
+        cm,
+        authenticated=True,
+        caller_name=result.get("caller_name"),
+        policy_id=result.get("policy_id"),
+        call_reason=result.get("call_reason"),
+        claim_intent=result.get("claim_intent"),
+    )
+
+    intent = result.get("intent", "general")
+    active_agent = "Claims" if intent == "claims" else "General"
+    _cm_set(cm, active_agent=active_agent)
+
+    logger.info(
+        "✅ Auth OK – session=%s caller=%s policy=%s → %s agent",
+        cm.session_id,
+        _cm_get(cm, "caller_name"),
+        _cm_get(cm, "policy_id"),
+        active_agent,
+    )
+
+
+# 2.  Specialist agents 
+
+
+async def run_general_agent(
+    cm: "MemoManager",
+    utterance: str,
+    ws: WebSocket,
+    *,
+    is_acs: bool,
+) -> None:
+    agent = ws.app.state.general_info_agent  # type: ignore[attr-defined]
+    async with track_latency(ws.state.lt, "general_agent", ws.app.state.redis):
+        resp = await agent.respond(
+            cm,
+            utterance,
+            ws,
+            is_acs=is_acs,
+            caller_name=_cm_get(cm, "caller_name"),
+            topic=_cm_get(cm, "call_reason"),  # formerly "topic"
+            policy_id=_cm_get(cm, "policy_id"),
+        )
+    await _process_tool_response(cm, resp)
+
+
+async def run_claims_agent(
+    cm: "MemoManager",
+    utterance: str,
+    ws: WebSocket,
+    *,
+    is_acs: bool,
+) -> None:
+    agent = ws.app.state.claim_intake_agent  # type: ignore[attr-defined]
+    async with track_latency(ws.state.lt, "claim_agent", ws.app.state.redis):
+        resp = await agent.respond(
+            cm,
+            utterance,
+            ws,
+            is_acs=is_acs,
+            caller_name=_cm_get(cm, "caller_name"),
+            claim_intent=_cm_get(cm, "claim_intent"),
+            policy_id=_cm_get(cm, "policy_id"),
+        )
+    await _process_tool_response(cm, resp)
+
+
+# ────────────────────────────────────────────────────────────────
+# 3.  Tool‑response handler
+# ────────────────────────────────────────────────────────────────
+
+
+def _get_field(resp: Dict[str, Any], key: str) -> Any:  # noqa: D401 – simple util
+    """Return ``resp[key]`` or ``resp['data'][key]`` if nested."""
+    if key in resp:
+        return resp[key]
+    return resp.get("data", {}).get(key) if isinstance(resp.get("data"), dict) else None
+
+
+async def _process_tool_response(cm: "MemoManager", resp: Any) -> None:  # noqa: C901
+    """Inspect structured tool outputs and update core‑memory accordingly."""
+
+    if not isinstance(resp, dict):
+        return
+
+    handoff_type = _get_field(resp, "handoff")
+    target_agent = _get_field(resp, "target_agent")
+
+    # FNOL‑specific outputs
+    claim_success = resp.get("claim_success")
+
+    # Primary call reason updates (may come from auth agent or later)
+    topic = _get_field(resp, "topic")
+    claim_intent = _get_field(resp, "claim_intent")
+    intent = _get_field(resp, "intent")
+
+    # ─── Unified intent routing (post‑auth) ─────────────
+    if intent in {"claims", "general"} and _cm_get(cm, "authenticated", False):
+        new_agent = "Claims" if intent == "claims" else "General"
+        _cm_set(cm, active_agent=new_agent, claim_intent=claim_intent, call_reason=topic)
+        logger.info("🔀 Routed via intent → %s", new_agent)
+        return  # Skip legacy hand‑off logic if present
+
+    # ─── hand‑off (non‑auth transfers) ──────
+    if handoff_type == "ai_agent" and target_agent:
+        if "Claim" in target_agent:
+            _cm_set(cm, active_agent="Claims", claim_intent=claim_intent)
+        else:
+            _cm_set(cm, active_agent="General", call_reason=topic)
+        logger.info("🔀 Hand‑off → %s", _cm_get(cm, "active_agent"))
+
+    elif handoff_type == "human_agent":
+        _cm_set(cm, active_agent="HumanEscalation")
+
+    # ─── 3. Claim intake completed ─────────────────────────────
+    elif claim_success:
+        _cm_set(cm, intake_completed=True, latest_claim_id=resp["claim_id"])
+
+
+SPECIALIST_MAP: Dict[str, Callable[..., Any]] = {
+    "General": run_general_agent,
+    "Claims": run_claims_agent,
+}
+
+
+async def route_turn(
     cm: "MemoManager",
     transcript: str,
     ws: WebSocket,
     *,
     is_acs: bool,
 ) -> None:
-    """Handle a single user *turn* in the FNOL flow.
-
-    Args:
-        cm: Active :class:`MemoManager` for this session.
-        transcript: Latest user utterance text.
-        ws: WebSocket connection to caller.
-        is_acs: ``True`` if routed via Azure Communication Services.
-    """
+    """Handle a single user turn end‑to‑end."""
 
     redis_mgr = ws.app.state.redis
-    latency_tool = ws.state.lt
 
-    # ------------------------------------------------------------------
-    # Stage 1 – Authentication
-    # ------------------------------------------------------------------
-    if not _cm_get(cm, "authenticated", False):
-        latency_tool.start("auth_agent")
-        auth_agent = ws.app.state.auth_agent  # type: ignore[attr-defined]
-        result = await auth_agent.respond(cm, transcript, ws, is_acs=is_acs)
-        latency_tool.stop("auth_agent", redis_mgr)
+    try:
+        await run_auth_agent(cm, transcript, ws, is_acs=is_acs)
 
-        if isinstance(result, dict) and result.get("authenticated"):
-            _cm_set(
-                cm,
-                authenticated=True,
-                caller_name=result.get("caller_name"),
-                policy_id=result.get("policy_id"),
-            )
-            logger.info(
-                "✅ Session %s authenticated – %s / %s",
-                cm.session_id,
-                result.get("caller_name"),
-                result.get("policy_id"),
-            )
-        else:
-            # AuthAgent already handled retries/prompts – just persist and exit.
-            cm.persist_to_redis(redis_mgr)
+        if not _cm_get(cm, "authenticated", False):
             return
 
-    # ------------------------------------------------------------------
-    # Stage 2 – FNOL intake
-    # ------------------------------------------------------------------
-    fnol_agent = ws.app.state.claim_intake_agent  # type: ignore[attr-defined]
-    latency_tool.start("fnol_agent")
-    result = await fnol_agent.respond(cm, transcript, ws, is_acs=is_acs)
-    latency_tool.stop("fnol_agent", redis_mgr)
+        if _cm_get(cm, "active_agent") == "HumanEscalation":
+            await ws.send_text(json.dumps({"type": "live_agent_transfer"}))
+            return
 
-    if isinstance(result, dict) and result.get("claim_success"):
-        claim_id: str = result["claim_id"]
-        _cm_set(cm, intake_completed=True)
-        logger.info("📄 FNOL completed – %s – session %s", claim_id, cm.session_id)
-        await ws.send_text(
-            json.dumps({"type": "claim_submitted", "claim_id": claim_id})
-        )
-        # Optionally close the socket here (caller may prefer to hang up).
-        # await ws.close(code=1000)
+        active = _cm_get(cm, "active_agent", "General")
+        handler = SPECIALIST_MAP.get(active)
+        if handler:
+            await handler(cm, transcript, ws, is_acs=is_acs)
+        else:
+            logger.warning("Unknown active_agent=%s session=%s", active, cm.session_id)
 
-    # ------------------------------------------------------------------
-    # Persist session state at end of turn
-    # ------------------------------------------------------------------
-    cm.persist_to_redis(redis_mgr)
+    except Exception:  # pragma: no cover – handled upstream
+        logger.exception("💥 route_turn crash – session=%s", cm.session_id)
+        raise
+
+    finally:
+        cm.persist_to_redis(redis_mgr)

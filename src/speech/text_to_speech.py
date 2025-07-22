@@ -119,6 +119,7 @@ class SpeechSynthesizer:
         self.playback = playback
         self.enable_tracing = enable_tracing
         self.call_connection_id = call_connection_id or "unknown"
+        self.speech_config = None
 
         # Initialize tracing components (matching speech_recognizer pattern)
         self.tracer = None
@@ -233,7 +234,7 @@ class SpeechSynthesizer:
 
         # 3. Create the speaker synthesizer according to playback mode
         try:
-            speech_config = self._create_speech_config()
+            speech_config = self._speech_config
             headless = _is_headless()
 
             if self.playback == "always":
@@ -429,7 +430,7 @@ class SpeechSynthesizer:
                 })
             
             # Create speech config for memory synthesis
-            speech_config = self._create_speech_config()
+            speech_config = self.cfg
             speech_config.speech_synthesis_language = self.language
             speech_config.speech_synthesis_voice_name = self.voice
             speech_config.set_speech_synthesis_output_format(
@@ -550,7 +551,7 @@ class SpeechSynthesizer:
 
             # 1) Configure Speech SDK using class attributes with fresh auth
             logger.debug(f"Creating speech config for TTS synthesis")
-            speech_config = self._create_speech_config()
+            speech_config = self.cfg
             speech_config.speech_synthesis_language = self.language
             speech_config.speech_synthesis_voice_name = self.voice
             speech_config.set_speech_synthesis_output_format(sdk_format)
@@ -684,7 +685,7 @@ class SpeechSynthesizer:
 
     ## Cleaned up methods
     def synthesize_to_pcm(self, text: str, sample_rate: int = 16000) -> bytes:
-        speech_config = self._create_speech_config()
+        speech_config = self.cfg
         speech_config.speech_synthesis_voice_name = self.voice
         speech_config.set_speech_synthesis_output_format(
             {
@@ -695,7 +696,7 @@ class SpeechSynthesizer:
 
         ssml = f"""
 <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-    <voice name="en-US-AvaMultilingualNeural">
+    <voice name="{self.voice.split(':')[0]}">
         <prosody rate="15%" pitch="default">
             {text}
         </prosody>

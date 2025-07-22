@@ -44,6 +44,7 @@ from apps.rtagent.backend.settings import (
     AUDIO_FORMAT,
     AGENT_AUTH_CONFIG,
     AGENT_CLAIM_INTAKE_CONFIG,
+    AGENT_GENERAL_INFO_CONFIG,
     VAD_SEMANTIC_SEGMENTATION
 )
 from apps.rtagent.backend.src.services import (
@@ -53,7 +54,7 @@ from apps.rtagent.backend.src.services import (
     StreamingSpeechRecognizerFromBytes,
 )
 
-from src.agents.base import RTAgent
+from apps.rtagent.backend.src.agents.base import RTAgent
 from opentelemetry import trace
 import time
 # --------------------------------------------------------------------------- #
@@ -89,7 +90,6 @@ async def lifespan(app: FastAPI):
             vad_silence_timeout_ms=SILENCE_DURATION_MS,
             candidate_languages=RECOGNIZED_LANGUAGE,
             audio_format=AUDIO_FORMAT,
-    
         )
 
         # Redis connection
@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI):
         app.state.acs_caller = initialize_acs_caller_instance()
         app.state.auth_agent = RTAgent(config_path=AGENT_AUTH_CONFIG)
         app.state.claim_intake_agent = RTAgent(config_path=AGENT_CLAIM_INTAKE_CONFIG)
+        app.state.general_info_agent = RTAgent(config_path=AGENT_GENERAL_INFO_CONFIG)
 
         elapsed = time.perf_counter() - start_time
         logger.info(f"startup complete in {elapsed:.2f}s")

@@ -84,6 +84,12 @@ class AcsCaller:
         if not (acs_connection_string or acs_endpoint):
             raise ValueError("Provide either acs_connection_string or acs_endpoint")
 
+        if not source_number:
+            raise ValueError(
+            "No source_number provided. You must purchase and configure an Azure Communication Services phone number. "
+            "Set the number in your environment as ACS_SOURCE_PHONE_NUMBER. "
+            "See: https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number?tabs=windows&pivots=platform-azcli"
+            )
         self.source_number = source_number
         self.callback_url = callback_url
         self.cognitive_services_endpoint = cognitive_services_endpoint

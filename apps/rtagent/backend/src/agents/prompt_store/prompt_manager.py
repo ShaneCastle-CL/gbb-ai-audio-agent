@@ -52,32 +52,3 @@ class PromptManager:
         except Exception as e:
             raise ValueError(f"Error rendering template '{template_name}': {e}")
 
-    def create_prompt_system_main(
-        self,
-        prompt_path: str,
-        patient_phone_number: str = "5552971078",
-        patient_name: str = "Alice Brown",
-        patient_dob: str = "1987-04-12",
-        patient_id: str = "P54321",
-    ) -> str:
-        """
-        Create a system prompt for evaluating policy search results.
-
-        Args:
-            query (str): The user's query regarding prior authorization.
-            search_results (List[Dict[str, Any]]): Retrieved policies.
-            patient_phone_number (str): Patient’s phone number.
-            patient_name (str): Patient’s full name.
-            patient_dob (str): Patient’s date of birth.
-            patient_id (str): Patient’s identifier.
-
-        Returns:
-            str: Rendered prompt string.
-        """
-        return self.get_prompt(
-            prompt_path,
-            patient_phone_number=patient_phone_number,
-            patient_name=patient_name,
-            patient_dob=patient_dob,
-            patient_id=patient_id,
-        )

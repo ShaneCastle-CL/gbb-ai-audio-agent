@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-"""OpenAI streaming + tool‑call orchestration layer with performance tracing.
+"""OpenAI streaming + tool-call orchestration layer.
 
-This module handles *all* GPT chat‑completion streaming, Text‑to‑Speech (TTS)
-relay, and tool‑call plumbing for a real‑time voice agent. Behaviour is kept
-1:1 with the original implementation; only code style, typing, logging, and
-error handling have been improved to meet project standards.
+Handles GPT chat-completion streaming, TTS relay, and function-calling for the
+real-time voice agent.
 
 Public API
 ----------
-process_gpt_response() – Stream chat completions, emit TTS chunks, run tools.
+process_gpt_response() – Stream completions, emit TTS chunks, run tools.
 """
 
 import asyncio
@@ -20,7 +18,8 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import WebSocket
-from apps.rtagent.backend.src.agents.tool_store.tools import (
+
+from apps.rtagent.backend.src.agents.tool_store.tool_registry import (
     available_tools as DEFAULT_TOOLS,
 )
 from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
@@ -29,7 +28,9 @@ from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
     push_tool_start,
 )
 from apps.rtagent.backend.src.helpers import add_space
-from apps.rtagent.backend.src.services.openai_services import client as az_openai_client
+from apps.rtagent.backend.src.services.openai_services import (
+    client as az_openai_client,
+)
 from apps.rtagent.backend.settings import AZURE_OPENAI_CHAT_DEPLOYMENT_ID, TTS_END
 from apps.rtagent.backend.src.shared_ws import (
     broadcast_message,
@@ -37,13 +38,12 @@ from apps.rtagent.backend.src.shared_ws import (
     send_response_to_acs,
     send_tts_audio,
 )
-
 from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
 from src.enums.monitoring import SpanAttr
 from opentelemetry.trace import SpanKind
 
-if TYPE_CHECKING:  # pragma: no cover – typing‑only import
+if TYPE_CHECKING:  # pragma: no cover – typing-only import
     from src.stateful.state_managment import MemoManager  # noqa: F401
 
 logger = get_logger("gpt_flow")
@@ -54,10 +54,12 @@ _STREAM_TRACING = os.getenv("STREAM_TRACING", "false").lower() == "true"  # High
 
 
 # ---------------------------------------------------------------------------
-# Main entry‑point
+# Main entry-point
 # ---------------------------------------------------------------------------
+
+
 async def process_gpt_response(  # noqa: D401
-    cm: "MemoManager",  # MemoManager instance (runtime import avoided)
+    cm: "MemoManager",
     user_prompt: str,
     ws: WebSocket,
     *,
@@ -275,7 +277,7 @@ async def _emit_streaming_text(
         trace_ctx.add_event("text_emitted", {"text_length": len(text)})
 
 
-async def _handle_tool_call(  # noqa: D401,E501,PLR0913
+async def _handle_tool_call(  # noqa: PLR0913
     tool_name: str,
     tool_id: str,
     args: str,
@@ -380,7 +382,7 @@ async def _handle_tool_call(  # noqa: D401,E501,PLR0913
         return result
 
 
-async def _process_tool_followup(  # noqa: D401,E501,PLR0913
+async def _process_tool_followup(  # noqa: PLR0913
     cm: "MemoManager",
     ws: WebSocket,
     agent_name: str,

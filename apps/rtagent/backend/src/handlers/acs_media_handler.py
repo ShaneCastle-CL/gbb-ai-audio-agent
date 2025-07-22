@@ -3,11 +3,9 @@ import json
 import threading
 from typing import Optional
 
-# from azure.communication.callautomation import (
-#     DtmfTone,
-#     PhoneNumberIdentifier,
-#     TextSource,
-# )
+from azure.communication.callautomation import (
+    TextSource,
+)
 from fastapi import WebSocket
 from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
@@ -242,7 +240,6 @@ class ACSMediaHandler:
                         stream_mode=StreamMode.MEDIA,
                     )
                 )
-
             except Exception as e:
                 logger.error(f"Failed to play greeting: {e}", exc_info=True)
 

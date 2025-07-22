@@ -67,14 +67,14 @@ class StreamingSpeechRecognizerFromBytes:
         self.vad_silence_timeout_ms = vad_silence_timeout_ms
         self.audio_format = audio_format  # either "pcm" or "any"
         self.use_semantic = use_semantic_segmentation
+
+
         self.call_connection_id = call_connection_id or "unknown"
         self.enable_tracing = enable_tracing
 
         self.final_callback: Optional[Callable[[str, str], None]] = None
         self.partial_callback: Optional[Callable[[str, str], None]] = None
-        self.cancel_callback: Optional[Callable[[speechsdk.SessionEventArgs], None]] = (
-            None
-        )
+        self.cancel_callback: Optional[Callable[[speechsdk.SessionEventArgs], None]] = None
 
         self.push_stream = None
         self.speech_recognizer = None
@@ -91,11 +91,15 @@ class StreamingSpeechRecognizerFromBytes:
             except Exception as e:
                 logger.warning(f"Failed to initialize Azure Monitor tracing: {e}")
                 self.enable_tracing = False
+
+        self.cfg = self._create_speech_config()
+
     def set_call_connection_id(self, call_connection_id: str) -> None:
         """
         Set the call connection ID for correlation in tracing and logging.
         """
         self.call_connection_id = call_connection_id
+
     def _create_speech_config(self) -> speechsdk.SpeechConfig:
         """
         Create SpeechConfig using either API key or Azure Default Credentials
@@ -197,7 +201,7 @@ class StreamingSpeechRecognizerFromBytes:
         logger.info("Starting recognition from byte stream...")
 
         # Create speech config with proper authentication
-        speech_config = self._create_speech_config()
+        speech_config = self.cfg
         # --- segmentation strategy -------------------------------------- #
         if self.use_semantic:
             speech_config.set_property(
@@ -210,6 +214,7 @@ class StreamingSpeechRecognizerFromBytes:
         lid_cfg = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
             languages=self.candidate_languages
         )
+
         speech_config.set_property(
             speechsdk.PropertyId.SpeechServiceResponse_StablePartialResultThreshold,
             "1"
@@ -265,14 +270,12 @@ class StreamingSpeechRecognizerFromBytes:
     def prepare_start(self) -> None:
         logger.info("Starting recognition from byte stream...")
 
-        speech_config = speechsdk.SpeechConfig(
-            subscription=self.key, region=self.region
-        )
+        # Create speech config with proper authentication
+        speech_config = self.cfg
          # --- segmentation strategy -------------------------------------- #
         if self.use_semantic:
             speech_config.set_property(
                 speechsdk.PropertyId.Speech_SegmentationStrategy, "Semantic")
-            
         # switch to continuous LID mode
         speech_config.set_property(
             speechsdk.PropertyId.SpeechServiceConnection_LanguageIdMode, "Continuous"
