@@ -57,7 +57,6 @@ class TraceContext:
         
         # Apply sampling for high-frequency operations
         if self.high_frequency and self.sampling_rate < 1.0:
-            import random
             return random.random() < self.sampling_rate
         
         return True
