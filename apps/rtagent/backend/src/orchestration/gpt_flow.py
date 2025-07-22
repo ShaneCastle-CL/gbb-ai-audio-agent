@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-"""OpenAI streaming + tool‑call orchestration layer.
+"""OpenAI streaming + tool-call orchestration layer.
 
-This module handles *all* GPT chat‑completion streaming, Text‑to‑Speech (TTS)
-relay, and tool‑call plumbing for a real‑time voice agent. Behaviour is kept
-1:1 with the original implementation; only code style, typing, logging, and
-error handling have been improved to meet project standards.
+Handles GPT chat-completion streaming, TTS relay, and function-calling for the
+real-time voice agent.
 
 Public API
 ----------
-process_gpt_response() – Stream chat completions, emit TTS chunks, run tools.
+process_gpt_response() – Stream completions, emit TTS chunks, run tools.
 """
 
 import asyncio
@@ -19,7 +17,8 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import WebSocket
-from apps.rtagent.backend.src.agents.tool_store.tools import (
+
+from apps.rtagent.backend.src.agents.tool_store.tool_registry import (
     available_tools as DEFAULT_TOOLS,
 )
 from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
@@ -28,7 +27,9 @@ from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
     push_tool_start,
 )
 from apps.rtagent.backend.src.helpers import add_space
-from apps.rtagent.backend.src.services.openai_services import client as az_openai_client
+from apps.rtagent.backend.src.services.openai_services import (
+    client as az_openai_client,
+)
 from apps.rtagent.backend.settings import AZURE_OPENAI_CHAT_DEPLOYMENT_ID, TTS_END
 from apps.rtagent.backend.src.shared_ws import (
     broadcast_message,
@@ -36,20 +37,20 @@ from apps.rtagent.backend.src.shared_ws import (
     send_response_to_acs,
     send_tts_audio,
 )
-
 from utils.ml_logging import get_logger
 
-if TYPE_CHECKING:  # pragma: no cover – typing‑only import
+if TYPE_CHECKING:  # pragma: no cover – typing-only import
     from src.stateful.state_managment import MemoManager  # noqa: F401
 
 logger = get_logger("gpt_flow")
 
+# ---------------------------------------------------------------------------
+# Main entry-point
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Main entry‑point
-# ---------------------------------------------------------------------------
+
 async def process_gpt_response(  # noqa: D401
-    cm: "MemoManager",  # MemoManager instance (runtime import avoided)
+    cm: "MemoManager",
     user_prompt: str,
     ws: WebSocket,
     *,
@@ -61,25 +62,7 @@ async def process_gpt_response(  # noqa: D401
     max_tokens: int = 4096,
     available_tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Stream a chat completion, emitting TTS and handling tool calls.
-
-    Args:
-        cm: Active :class:`MemoManager`.
-        user_prompt: The raw user prompt string.
-        ws: WebSocket connection to the client.
-        agent_name: Identifier used to fetch the agent‑specific chat history.
-        is_acs: Flag indicating Azure Communication Services pathway.
-        model_id: Azure OpenAI deployment ID.
-        temperature: Sampling temperature.
-        top_p: Nucleus sampling value.
-        max_tokens: Max tokens for the completion.
-        available_tools: Tool definitions to expose; *None* defaults to the
-            global *DEFAULT_TOOLS* list.
-
-    Returns:
-        Optional tool result dictionary if a tool was executed; otherwise *None*.
-    """
-
+    """Stream a chat completion, emit TTS, and run tools."""
     agent_history: List[Dict[str, Any]] = cm.get_history(agent_name)
     agent_history.append({"role": "user", "content": user_prompt})
 
@@ -95,13 +78,12 @@ async def process_gpt_response(  # noqa: D401
         "tools": tool_set,
         "tool_choice": "auto" if tool_set else "none",
     }
-
-    logger.debug("process_gpt_response – chat kwargs prepared: %s", chat_kwargs)
+    logger.debug("process_gpt_response kwargs: %s", chat_kwargs)
 
     response = az_openai_client.chat.completions.create(**chat_kwargs)
 
-    collected: List[str] = []  # Temporary buffer for partial tokens.
-    final_chunks: List[str] = []  # All streamed assistant chunks.
+    collected: List[str] = []
+    final_chunks: List[str] = []
 
     tool_started = False
     tool_name = ""
@@ -110,10 +92,11 @@ async def process_gpt_response(  # noqa: D401
 
     for chunk in response:
         if not chunk.choices:
-            continue  # Skip empty chunks.
+            continue
 
         delta = chunk.choices[0].delta
 
+        # Function-call streaming
         if delta.tool_calls:
             tc = delta.tool_calls[0]
             tool_id = tc.id or tool_id
@@ -122,9 +105,10 @@ async def process_gpt_response(  # noqa: D401
             tool_started = True
             continue
 
+        # Normal token streaming
         if delta.content:
             collected.append(delta.content)
-            if delta.content in TTS_END:  # Time to flush a sentence.
+            if delta.content in TTS_END:
                 streaming = add_space("".join(collected).strip())
                 await _emit_streaming_text(streaming, ws, is_acs)
                 final_chunks.append(streaming)
@@ -141,9 +125,6 @@ async def process_gpt_response(  # noqa: D401
         agent_history.append({"role": "assistant", "content": full_text})
         await push_final(ws, "assistant", full_text, is_acs=is_acs)
 
-    # ------------------------------------------------------------------
-    # Handle follow‑up tool call (if any)
-    # ------------------------------------------------------------------
     if tool_started:
         agent_history.append(
             {
@@ -181,15 +162,8 @@ async def process_gpt_response(  # noqa: D401
     return None
 
 
-# ===========================================================================
-# Helper routines – kept functionally identical
-# ===========================================================================
-
-
-async def _emit_streaming_text(
-    text: str, ws: WebSocket, is_acs: bool
-) -> None:  # noqa: D401,E501
-    """Emit one assistant text chunk via either ACS or WebSocket + TTS."""
+async def _emit_streaming_text(text: str, ws: WebSocket, is_acs: bool) -> None:
+    """Emit one assistant text chunk via ACS or WebSocket + TTS."""
     if is_acs:
         await broadcast_message(ws.app.state.clients, text, "Assistant")
         await send_response_to_acs(ws, text, latency_tool=ws.state.lt)
@@ -198,7 +172,7 @@ async def _emit_streaming_text(
         await ws.send_text(json.dumps({"type": "assistant_streaming", "content": text}))
 
 
-async def _handle_tool_call(  # noqa: D401,E501,PLR0913
+async def _handle_tool_call(  # noqa: PLR0913
     tool_name: str,
     tool_id: str,
     args: str,
@@ -212,7 +186,7 @@ async def _handle_tool_call(  # noqa: D401,E501,PLR0913
     max_tokens: int,
     available_tools: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Execute a tool, emit telemetry events, and trigger GPT follow‑up."""
+    """Execute a tool, send telemetry, and (conditionally) follow-up with GPT."""
     params: Dict[str, Any] = json.loads(args or "{}")
     fn = function_mapping.get(tool_name)
     if fn is None:
@@ -222,14 +196,14 @@ async def _handle_tool_call(  # noqa: D401,E501,PLR0913
     await push_tool_start(ws, call_id, tool_name, params, is_acs=is_acs)
 
     t0 = time.perf_counter()
-    result_raw = await fn(params)  # Tool functions are expected to be async.
+    result_raw = await fn(params)  # Tool functions are async.
     elapsed_ms = (time.perf_counter() - t0) * 1000
     result: Dict[str, Any] = (
         json.loads(result_raw) if isinstance(result_raw, str) else result_raw
     )
 
-    agent_history = cm.get_history(agent_name)
-    agent_history.append(
+    # Persist tool message in history
+    cm.get_history(agent_name).append(
         {
             "tool_call_id": tool_id,
             "role": "tool",
@@ -244,7 +218,8 @@ async def _handle_tool_call(  # noqa: D401,E501,PLR0913
 
     if is_acs:
         await broadcast_message(ws.app.state.clients, f"🛠️ {tool_name} ✔️", "Assistant")
-
+    
+    # Otherwise, do the normal follow-up with GPT
     await _process_tool_followup(
         cm,
         ws,
@@ -259,7 +234,7 @@ async def _handle_tool_call(  # noqa: D401,E501,PLR0913
     return result
 
 
-async def _process_tool_followup(  # noqa: D401,E501,PLR0913
+async def _process_tool_followup(  # noqa: PLR0913
     cm: "MemoManager",
     ws: WebSocket,
     agent_name: str,

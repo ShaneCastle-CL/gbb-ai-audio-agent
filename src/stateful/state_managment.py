@@ -14,7 +14,8 @@ from src.agenticmemory.playback_queue import MessageQueue
 from src.agenticmemory.types import ChatHistory, CoreMemory
 from src.agenticmemory.utils import LatencyTracker
 from src.redis.manager import AzureRedisManager
-from src.agents.prompts_loader.base import PromptManager
+#TODO Fix this area
+from src.prompts.prompt_manager import PromptManager
 from utils.ml_logging import get_logger
 
 logger = get_logger("src.stateful.state_managment")
@@ -265,20 +266,20 @@ class MemoManager:
             self.corememory.set(key, value)
 
     def ensure_system_prompt(
-        self, agent_name: str, prompt_manager: PromptManager, prompt_path: str
+        self,
+        agent_name: str,
+        system_prompt: str,
     ) -> None:
         """
-        Ensures the system prompt is at the start of the agent's history.
-        Should be called after authentication or context update.
+        Ensure the system prompt is the first message in the agent's history.
+        Always updates it each call.
         """
         history = self.histories.setdefault(agent_name, [])
-        prompt = prompt_manager.get_prompt(
-            prompt_path,
-        )
+
         if not history or history[0].get("role") != "system":
-            history.insert(0, {"role": "system", "content": prompt})
-        elif history[0].get("content") != prompt:
-            history[0]["content"] = prompt
+            history.insert(0, {"role": "system", "content": system_prompt})
+        else:
+            history[0]["content"] = system_prompt
 
     def get_value_from_corememory(self, key: str, default: Any = None) -> Any:
         """

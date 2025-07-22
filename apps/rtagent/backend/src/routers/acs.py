@@ -201,12 +201,11 @@ async def acs_media_ws(ws: WebSocket):
         greeted: set[str] = ws.app.state.greeted_call_ids
         if cid not in greeted and ACS_STREAMING_MODE == StreamMode.MEDIA:
             greeting = (
-                "Hello from XYMZ Insurance! Before I can assist you, "
-                "I need to verify your identity. "
-                "Could you please provide your full name, and either the last 4 digits of your Social Security Number or your ZIP code?"
+                "Hi there from XYZ Insurance! What can I help you with today?"
             )
             handler.play_greeting(greeting)
-            cm.append_to_history("media_ws", "assistant", greeting)
+            auth_agent = ws.app.state.auth_agent
+            cm.append_to_history(auth_agent.name, "assistant", greeting)
             greeted.add(cid)
 
         try:
