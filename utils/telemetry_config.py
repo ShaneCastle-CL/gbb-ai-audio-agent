@@ -69,7 +69,7 @@ def setup_azure_monitor(logger_name: str = None):
         # or if we're in a development environment
         enable_live_metrics = not disable_live_metrics 
         # enable_live_metrics = not disable_live_metrics and _should_enable_live_metrics()
-        print(f"Configuring Azure Monitor with live metrics: {enable_live_metrics}")
+        logger.info(f"Configuring Azure Monitor with live metrics: {enable_live_metrics}")
         
         logger.info(f"🔧 Configuring Azure Monitor with live metrics: {enable_live_metrics}")
                 
