@@ -84,9 +84,6 @@ npm run dev           # Starts frontend at http://localhost:5173
 > Need more help?
 > Refer to [`apps/README.md`](apps/README.md) for a step-by-step walkthrough of the demo app built with the RTAgent framework, along with guidance on how to customize it for your specific use case.
 
-## **Load and Chaos Testing**
-
-Worried about the solution’s ability to scale under your application’s load? Here’s a guide to help you with horizontal scaling tests...
 ## **Deployment on Azure**
 
 ### Standard Deployment (Recommended)
@@ -140,6 +137,8 @@ For detailed instructions, see: [`docs/AzdEmulation.md`](docs/AzdEmulation.md)
 Step-by-step guide: `docs/DeploymentGuide.md`.
 
 ## **Load & Chaos Testing**
+Worried about the solution’s ability to scale under your application’s load? Here’s a guide to help you with horizontal scaling tests...
+
 
 Targets: **<500 ms STT→TTS • 1k+ concurrent calls • >99.5 % success** (WIP)
 

@@ -99,14 +99,16 @@ remove_conda_env:
 	conda env remove --name $(CONDA_ENV)
 
 
-# Start the backend server (FastAPI/Uvicorn)
-starts_rtagent_server: 
-	python apps/rtagent/backend/main.py
+start_backend:
+	python $(SCRIPTS_DIR)/start_backend.py
 
 
-# Start the frontend (Vite + React dev server)
-starts_rtagent_browser: 
-	cd apps/rtagent/frontend && npm install && npm run dev
+start_frontend:
+	bash $(SCRIPTS_DIR)/start_frontend.sh
+
+
+start_tunnel:
+	bash $(SCRIPTS_DIR)/start_devtunnel_host.sh
 
 
 ############################################################
@@ -188,12 +190,14 @@ generate_backend_deployment:
 	@echo ""
 	@echo "🚀 Ready for Azure App Service deployment!"
 
+
 # Clean deployment artifacts
 clean_deployment_artifacts:
 	@echo "🧹 Cleaning deployment artifacts..."
 	@rm -rf .deploy/backend
 	@rm -f .deploy/backend_deployment_*.zip
 	@echo "✅ Deployment artifacts cleaned"
+
 
 # Show deployment package info
 show_deployment_info:
@@ -329,7 +333,6 @@ purchase_acs_phone_number_ps:
 
 # Default target - show help
 .DEFAULT_GOAL := help
-
 # Show help information
 help:
 	@echo ""
@@ -337,20 +340,23 @@ help:
 	@echo "=============================="
 	@echo ""
 	@echo "📋 Code Quality:"
-	@echo "  check_code_quality               Run all code quality checks"
-	@echo "  fix_code_quality                 Auto-fix code quality issues"
+	@echo "  check_code_quality               Run all code quality checks (pre-commit, bandit, etc.)"
+	@echo "  fix_code_quality                 Auto-fix code quality issues (black, isort, ruff)"
 	@echo "  run_unit_tests                   Run unit tests with coverage"
 	@echo "  run_pylint                       Run pylint analysis"
 	@echo "  set_up_precommit_and_prepush     Install git hooks"
 	@echo ""
 	@echo "🐍 Environment Management:"
-	@echo "  create_conda_env                 Create conda environment"
+	@echo "  create_conda_env                 Create conda environment from environment.yaml"
 	@echo "  activate_conda_env               Activate conda environment"
 	@echo "  remove_conda_env                 Remove conda environment"
 	@echo ""
 	@echo "🚀 Application:"
-	@echo "  starts_rtagent_server            Start backend server"
-	@echo "  starts_rtagent_browser           Start frontend dev server"
+	@echo "  starts_rtagent_server            Start backend server (FastAPI/Uvicorn)"
+	@echo "  starts_rtagent_browser           Start frontend dev server (Vite + React)"
+	@echo "  start_backend                    Start backend via script"
+	@echo "  start_frontend                   Start frontend via script"
+	@echo "  start_tunnel                     Start dev tunnel via script"
 	@echo ""
 	@echo "📦 Deployment Artifacts:"
 	@echo "  generate_backend_deployment      Generate backend deployment artifacts and zip"
@@ -381,10 +387,8 @@ help:
 	@echo "  make update_env_with_secrets"
 	@echo ""
 	@echo "💡 Quick Start for ACS Phone Number Purchase:"
-	@echo "  make purchase_acs_phone_number                    # Use complex logic with prompts"
+	@echo "  make purchase_acs_phone_number                    # Bash/Python version"
 	@echo "  make purchase_acs_phone_number_ps                # PowerShell version"
-	@echo "  ./devops/scripts/purchase-acs-phone-number.sh    # Standalone bash script"
-	@echo "  ./devops/scripts/Purchase-AcsPhoneNumber.ps1     # Standalone PowerShell script"
 	@echo ""
 	@echo "📝 Note: ACS endpoint will be retrieved from:"
 	@echo "  1. Environment file (ACS_ENDPOINT variable)"
@@ -393,4 +397,3 @@ help:
 	@echo ""
 
 .PHONY: help
-
