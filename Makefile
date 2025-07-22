@@ -125,6 +125,41 @@ TIMESTAMP = $(shell date +%Y%m%d_%H%M%S)
 GIT_HASH = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DEPLOY_ZIP = backend_deployment_$(GIT_HASH)_$(TIMESTAMP).zip
 
+# Generate frontend deployment artifacts
+generate_frontend_deployment:
+	@echo "🏗️  Generating Frontend Deployment Artifacts"
+	@echo "=============================================="
+	@echo ""
+
+	# Clean and create deployment directory
+	@echo "🧹 Cleaning previous frontend deployment artifacts..."
+	@rm -rf .deploy/frontend
+	@mkdir -p .deploy/frontend
+
+	# Copy frontend directory
+	@echo "📦 Copying frontend directory..."
+	@if [ -d "apps/rtagent/frontend" ]; then \
+		rsync -av --exclude='node_modules' --exclude='.env' --exclude='.DS_Store' apps/rtagent/frontend/ .deploy/frontend/; \
+	else \
+		echo "   ❌ Error: apps/rtagent/frontend directory not found."; \
+		exit 1; \
+	fi
+
+	# Create deployment zip
+	@FRONTEND_DEPLOY_ZIP=frontend_deployment_$(GIT_HASH)_$(TIMESTAMP).zip; \
+	echo "📦 Creating deployment zip: $$FRONTEND_DEPLOY_ZIP"; \
+	cd .deploy/frontend && zip -rq "../$$FRONTEND_DEPLOY_ZIP" .; \
+	echo ""; \
+	echo "✅ Frontend deployment artifacts generated successfully!"; \
+	echo "📊 Deployment Summary:"; \
+	echo "   📁 Artifacts directory: .deploy/frontend"; \
+	echo "   📦 Deployment package: .deploy/$$FRONTEND_DEPLOY_ZIP"; \
+	echo "   📏 Package size: $$(du -h .deploy/$$FRONTEND_DEPLOY_ZIP | cut -f1)"; \
+	echo "   🔢 Git commit: $(GIT_HASH)"; \
+	echo "   🕐 Timestamp: $(TIMESTAMP)"; \
+	echo ""; \
+	echo "🚀 Ready for Azure App Service deployment!"
+
 # Generate backend deployment artifacts
 generate_backend_deployment:
 	@echo "🏗️  Generating Backend Deployment Artifacts"
@@ -270,7 +305,87 @@ update_env_with_secrets_ps:
 	@echo "============================================================"
 	@powershell -ExecutionPolicy Bypass -File devops/scripts/Generate-EnvFromTerraform.ps1 -EnvironmentName $(AZURE_ENV_NAME) -SubscriptionId $(AZURE_SUBSCRIPTION_ID) -Action update-secrets
 
+# Deploy a user-provided directory to Azure Web App using Azure CLI
+# Usage: make deploy_to_webapp WEBAPP_NAME=<your-app-name> DEPLOY_DIR=<directory-to-deploy>
+deploy_to_webapp:
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		if [ -f ".env" ]; then \
+			WEBAPP_NAME_ENV=$$(grep '^BACKEND_APP_SERVICE_URL=' .env | cut -d'=' -f2 | sed 's|https\?://||;s|/.*||'); \
+			if [ -n "$$WEBAPP_NAME_ENV" ]; then \
+				echo "ℹ️  Using BACKEND_APP_SERVICE_URL from .env: $$WEBAPP_NAME_ENV"; \
+				WEBAPP_NAME=$$WEBAPP_NAME_ENV; \
+			else \
+				echo "❌ WEBAPP_NAME not set and BACKEND_APP_SERVICE_URL not found in .env"; \
+				exit 1; \
+			fi \
+		else \
+			echo "❌ WEBAPP_NAME not set and .env file not found"; \
+			exit 1; \
+		fi \
+	fi
+	@if [ -z "$(DEPLOY_DIR)" ]; then \
+		echo "❌ Usage: make deploy_to_webapp WEBAPP_NAME=<your-app-name> DEPLOY_DIR=<directory-to-deploy> AZURE_RESOURCE_GROUP=<your-resource-group>"; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		if [ -f ".env" ]; then \
+			RESOURCE_GROUP_ENV=$$(grep '^AZURE_RESOURCE_GROUP=' .env | cut -d'=' -f2); \
+			if [ -n "$$RESOURCE_GROUP_ENV" ]; then \
+				echo "ℹ️  Using AZURE_RESOURCE_GROUP from .env: $$RESOURCE_GROUP_ENV"; \
+				AZURE_RESOURCE_GROUP=$$RESOURCE_GROUP_ENV; \
+			else \
+				echo "❌ AZURE_RESOURCE_GROUP not set and not found in .env"; \
+				exit 1; \
+			fi \
+		else \
+			echo "❌ AZURE_RESOURCE_GROUP not set and .env file not found"; \
+			exit 1; \
+		fi \
+	fi
+	@echo "🚀 Deploying '$(DEPLOY_DIR)' to Azure Web App '$(WEBAPP_NAME)' in resource group '$(AZURE_RESOURCE_GROUP)'"
+	az webapp deploy --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME) --src-path $(DEPLOY_DIR) --type zip
 
+# Deploy frontend to Azure Web App using Terraform outputs and deployment artifacts
+deploy_frontend:
+	@echo "🚀 Deploying frontend to Azure Web App using Terraform outputs"
+	$(MAKE) generate_frontend_deployment
+	$(eval WEBAPP_NAME := $(shell terraform -chdir=$(TF_DIR) output -raw FRONTEND_APP_SERVICE_NAME 2>/dev/null))
+	$(eval AZURE_RESOURCE_GROUP := $(shell terraform -chdir=$(TF_DIR) output -raw AZURE_RESOURCE_GROUP 2>/dev/null))
+	$(eval DEPLOY_ZIP := $(shell ls -1t .deploy/frontend_deployment_*.zip 2>/dev/null | head -n1))
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		echo "❌ Could not determine frontend web app name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		echo "❌ Could not determine resource group name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(DEPLOY_ZIP)" ]; then \
+		echo "❌ No frontend deployment zip found. Run 'make generate_frontend_deployment' first."; \
+		exit 1; \
+	fi
+	$(MAKE) deploy_to_webapp WEBAPP_NAME=$(WEBAPP_NAME) DEPLOY_DIR=$(DEPLOY_ZIP) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)
+
+# Deploy backend to Azure Web App using Terraform outputs and deployment artifacts
+deploy_backend:
+	@echo "🚀 Deploying backend to Azure Web App using Terraform outputs"
+	$(MAKE) generate_backend_deployment
+	$(eval WEBAPP_NAME := $(shell terraform -chdir=$(TF_DIR) output -raw BACKEND_APP_SERVICE_NAME 2>/dev/null))
+	$(eval AZURE_RESOURCE_GROUP := $(shell terraform -chdir=$(TF_DIR) output -raw AZURE_RESOURCE_GROUP 2>/dev/null))
+	$(eval DEPLOY_ZIP := $(shell ls -1t .deploy/backend_deployment_*.zip 2>/dev/null | head -n1))
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		echo "❌ Could not determine backend web app name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		echo "❌ Could not determine resource group name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(DEPLOY_ZIP)" ]; then \
+		echo "❌ No backend deployment zip found. Run 'make generate_backend_deployment' first."; \
+		exit 1; \
+	fi
+	$(MAKE) deploy_to_webapp WEBAPP_NAME=$(WEBAPP_NAME) DEPLOY_DIR=$(DEPLOY_ZIP) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)
 
 .PHONY: generate_env_from_terraform check_terraform_initialized show_env_file update_env_with_secrets generate_env_from_terraform_ps show_env_file_ps update_env_with_secrets_ps
 

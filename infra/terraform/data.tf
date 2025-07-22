@@ -84,7 +84,8 @@ resource "azapi_resource" "mongoCluster" {
   type      = "Microsoft.DocumentDB/mongoClusters@2025-04-01-preview"
   parent_id = azurerm_resource_group.main.id
   name      = local.resource_names.cosmos
-  location  = var.location
+  location  = "centralus"
+  # location  = var.location
   body = {
     properties = {
       administrator = {

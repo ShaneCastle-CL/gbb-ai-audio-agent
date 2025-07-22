@@ -413,12 +413,6 @@ resource "azurerm_monitor_diagnostic_setting" "frontend_app_service" {
       category = "AppServiceAuthenticationLogs"
     }
   }
-
-  # Metrics for performance monitoring
-  metric {
-    category = "AllMetrics"
-    enabled  = true
-  }
 }
 
 # Diagnostic settings for backend App Service
