@@ -6,8 +6,8 @@ resource "azapi_resource" "acs" {
   name      = local.resource_names.acs
   parent_id = azurerm_resource_group.main.id
 
-  location  = "global"
-  tags      = local.tags
+  location = "global"
+  tags     = local.tags
 
   identity {
     type = "SystemAssigned"
@@ -15,9 +15,9 @@ resource "azapi_resource" "acs" {
 
   body = {
     properties = {
-      dataLocation         = var.acs_data_location
-      disableLocalAuth     = false
-      publicNetworkAccess  = "Enabled"
+      dataLocation        = var.acs_data_location
+      disableLocalAuth    = false
+      publicNetworkAccess = "Enabled"
     }
   }
 }

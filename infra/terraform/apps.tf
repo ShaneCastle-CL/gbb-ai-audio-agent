@@ -42,7 +42,7 @@ resource "azurerm_service_plan" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   os_type             = "Linux"
-  sku_name            = "B1"  # Basic tier - adjust as needed
+  sku_name            = "B1" # Basic tier - adjust as needed
 
   tags = local.tags
 }
@@ -61,7 +61,7 @@ resource "azurerm_linux_web_app" "backend" {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.backend.id]
   }
-  
+
   logs {
     application_logs {
       file_system_level = "Information"
@@ -73,88 +73,88 @@ resource "azurerm_linux_web_app" "backend" {
       }
     }
     detailed_error_messages = true
-    failed_request_tracing = true
+    failed_request_tracing  = true
   }
 
   site_config {
     application_stack {
       python_version = "3.11"
     }
-    
+
     always_on = true
-    
+
     # FastAPI startup command matching deployment script expectations
     app_command_line = "python -m uvicorn apps.rtagent.backend.main:app --host 0.0.0.0 --port 8000"
-    
+
     # CORS configuration - will be updated after frontend is created
     cors {
-      allowed_origins     = ["*"]  # Temporary - will be updated via lifecycle
-      support_credentials = false  # Must be false when allowed_origins includes "*"
+      allowed_origins     = ["*"] # Temporary - will be updated via lifecycle
+      support_credentials = false # Must be false when allowed_origins includes "*"
     }
   }
 
   app_settings = merge(
-  {
-    "ACS_ENDPOINT" = "https://${azapi_resource.acs.output.properties.hostName}"
-    "ACS_STREAMING_MODE"                  = "media"
-    "ACS_SOURCE_PHONE_NUMBER" = (
-      var.acs_source_phone_number != null && var.acs_source_phone_number != ""
-      ? var.acs_source_phone_number
-      : "TODO: Acquire an ACS phone number. See https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number?tabs=windows&pivots=platform-azp-new"
-    )
-    "PORT"                                  = "8000"
+    {
+      "ACS_ENDPOINT"       = "https://${azapi_resource.acs.output.properties.hostName}"
+      "ACS_STREAMING_MODE" = "media"
+      "ACS_SOURCE_PHONE_NUMBER" = (
+        var.acs_source_phone_number != null && var.acs_source_phone_number != ""
+        ? var.acs_source_phone_number
+        : "TODO: Acquire an ACS phone number. See https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number?tabs=windows&pivots=platform-azp-new"
+      )
+      "PORT" = "8000"
 
 
-    # Regular environment variables
-    "AZURE_CLIENT_ID"                       = azurerm_user_assigned_identity.backend.client_id
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
-    
-    # Redis Configuration
-    "REDIS_HOST" = data.azapi_resource.redis_enterprise_fetched.output.properties.hostName
-    "REDIS_PORT" = tostring(var.redis_port)
-    
-    # Azure Speech Services
-    "AZURE_SPEECH_ENDPOINT"       = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
-    "AZURE_SPEECH_DOMAIN_ENDPOINT" = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
-    "AZURE_SPEECH_RESOURCE_ID"    = azurerm_cognitive_account.speech.id
-    "AZURE_SPEECH_REGION"         = azurerm_cognitive_account.speech.location
-    
-    # Azure Cosmos DB
-    "AZURE_COSMOS_DATABASE_NAME"    = var.mongo_database_name
-    "AZURE_COSMOS_COLLECTION_NAME"  = var.mongo_collection_name
-    "AZURE_COSMOS_CONNECTION_STRING" = replace(
-      data.azapi_resource.mongo_cluster_info.output.properties.connectionString,
-      "/mongodb\\+srv:\\/\\/[^@]+@([^?]+)\\?(.*)$/",
-      "mongodb+srv://$1?tls=true&authMechanism=MONGODB-OIDC&retrywrites=false&maxIdleTimeMS=120000"
-    )
-    
-    # Azure OpenAI
-    "AZURE_OPENAI_ENDPOINT"           = azurerm_cognitive_account.openai.endpoint
-    "AZURE_OPENAI_CHAT_DEPLOYMENT_ID" = "gpt-4o"
-    "AZURE_OPENAI_API_VERSION"        = "2025-01-01-preview"
-    "AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION" = "2024-10-01-preview"
+      # Regular environment variables
+      "AZURE_CLIENT_ID"                       = azurerm_user_assigned_identity.backend.client_id
+      "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
 
-    # Python-specific settings
-    "PYTHONPATH"                    = "/home/site/wwwroot"
-    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
-    "ENABLE_ORYX_BUILD"             = "true"
-    "ORYX_APP_TYPE"                 = "webapps"
-    "WEBSITES_PORT"                 = "8000"
-  }, var.backend_app_registration_client_id != null ? {
-    # Use EasyAuth with existing Azure AD app registration
-    "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID" = azurerm_user_assigned_identity.backend.client_id
+      # Redis Configuration
+      "REDIS_HOST" = data.azapi_resource.redis_enterprise_fetched.output.properties.hostName
+      "REDIS_PORT" = tostring(var.redis_port)
+
+      # Azure Speech Services
+      "AZURE_SPEECH_ENDPOINT"        = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
+      "AZURE_SPEECH_DOMAIN_ENDPOINT" = "https://${azurerm_cognitive_account.speech.custom_subdomain_name}.cognitiveservices.azure.com/"
+      "AZURE_SPEECH_RESOURCE_ID"     = azurerm_cognitive_account.speech.id
+      "AZURE_SPEECH_REGION"          = azurerm_cognitive_account.speech.location
+
+      # Azure Cosmos DB
+      "AZURE_COSMOS_DATABASE_NAME"   = var.mongo_database_name
+      "AZURE_COSMOS_COLLECTION_NAME" = var.mongo_collection_name
+      "AZURE_COSMOS_CONNECTION_STRING" = replace(
+        data.azapi_resource.mongo_cluster_info.output.properties.connectionString,
+        "/mongodb\\+srv:\\/\\/[^@]+@([^?]+)\\?(.*)$/",
+        "mongodb+srv://$1?tls=true&authMechanism=MONGODB-OIDC&retrywrites=false&maxIdleTimeMS=120000"
+      )
+
+      # Azure OpenAI
+      "AZURE_OPENAI_ENDPOINT"                = azurerm_cognitive_account.openai.endpoint
+      "AZURE_OPENAI_CHAT_DEPLOYMENT_ID"      = "gpt-4o"
+      "AZURE_OPENAI_API_VERSION"             = "2025-01-01-preview"
+      "AZURE_OPENAI_CHAT_DEPLOYMENT_VERSION" = "2024-10-01-preview"
+
+      # Python-specific settings
+      "PYTHONPATH"                     = "/home/site/wwwroot"
+      "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
+      "ENABLE_ORYX_BUILD"              = "true"
+      "ORYX_APP_TYPE"                  = "webapps"
+      "WEBSITES_PORT"                  = "8000"
+      }, var.backend_app_registration_client_id != null ? {
+      # Use EasyAuth with existing Azure AD app registration
+      "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID" = azurerm_user_assigned_identity.backend.client_id
   } : {})
 
   # Optional EasyAuth configuration for backend
   dynamic "auth_settings_v2" {
     for_each = var.backend_app_registration_client_id != null ? [1] : []
-    
+
     content {
       auth_enabled           = true
-      require_authentication = false  # Allow unauthenticated API calls for some endpoints
+      require_authentication = false # Allow unauthenticated API calls for some endpoints
       unauthenticated_action = "AllowAnonymous"
       default_provider       = "azureactivedirectory"
-      
+
       # Excluded paths that don't require authentication
       excluded_paths = [
         "/health",
@@ -176,15 +176,15 @@ resource "azurerm_linux_web_app" "backend" {
         # Allow frontend app registration and ACS managed identity to access backend
         allowed_applications = concat(
           var.frontend_app_registration_client_id != null ? [var.frontend_app_registration_client_id] : [],
-            try(azapi_resource.acs.output.identity.principalId, null) != null
-            ? [azapi_resource.acs.output.identity.clientId]
+          try(azapi_resource.acs.output.identity.principalId, null) != null
+          ? [azapi_resource.acs.output.identity.clientId]
           : []
         )
       }
-      
+
       login {
         logout_endpoint                   = "/.auth/logout"
-        token_store_enabled              = true
+        token_store_enabled               = true
         preserve_url_fragments_for_logins = false
       }
     }
@@ -195,12 +195,12 @@ resource "azurerm_linux_web_app" "backend" {
   tags = merge(local.tags, {
     "azd-service-name" = "rtaudio-server"
   })
-  
+
   lifecycle {
     ignore_changes = [
       # app_settings,
       site_config[0].app_command_line,
-      site_config[0].cors,  # Ignore CORS changes to prevent cycles
+      site_config[0].cors, # Ignore CORS changes to prevent cycles
       tags
     ]
   }
@@ -236,58 +236,58 @@ resource "azurerm_linux_web_app" "frontend" {
       }
     }
     detailed_error_messages = true
-    failed_request_tracing = true
+    failed_request_tracing  = true
   }
 
   site_config {
     application_stack {
-      node_version = "22-lts"  # Latest LTS Node.js for Vite
+      node_version = "22-lts" # Latest LTS Node.js for Vite
     }
-    
+
     always_on = true
-    
+
     # Vite production build and serve command
     app_command_line = "npm run build && npm run preview -- --host 0.0.0.0 --port 8080"
-    
+
     # CORS configuration - no circular dependency
     cors {
-      allowed_origins     = ["*"]  # Frontend doesn't need restricted CORS
-      support_credentials = false  # Must be false when allowed_origins includes "*"
+      allowed_origins     = ["*"] # Frontend doesn't need restricted CORS
+      support_credentials = false # Must be false when allowed_origins includes "*"
     }
   }
 
   # Environment variables for Vite build and runtime
   app_settings = merge({
     # Build-time environment variables for Vite
-    "VITE_AZURE_REGION"         = azurerm_cognitive_account.speech.location
-    "VITE_BACKEND_BASE_URL"     = "https://${azurerm_linux_web_app.backend.default_hostname}"
-    "VITE_ALLOWED_HOSTS"        = "https://${azurerm_linux_web_app.backend.default_hostname}"
-    
+    "VITE_AZURE_REGION"     = azurerm_cognitive_account.speech.location
+    "VITE_BACKEND_BASE_URL" = "https://${azurerm_linux_web_app.backend.default_hostname}"
+    "VITE_ALLOWED_HOSTS"    = "https://${azurerm_linux_web_app.backend.default_hostname}"
+
     # Azure Client ID for managed identity authentication
-    "AZURE_CLIENT_ID"           = azurerm_user_assigned_identity.frontend.client_id
-    
+    "AZURE_CLIENT_ID" = azurerm_user_assigned_identity.frontend.client_id
+
     # Application Insights for frontend monitoring
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
     "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.main.instrumentation_key
-    
+
     # Node.js and build configuration
-    "PORT"                              = "8080"
-    "NODE_ENV"                          = "production"
-    "NPM_CONFIG_PRODUCTION"             = "false"  # Allow dev dependencies for build
-    "SCM_DO_BUILD_DURING_DEPLOYMENT"    = "true"
-    "ENABLE_ORYX_BUILD"                 = "true"
-    "ORYX_PLATFORM_NAME"                = "nodejs"
-    
+    "PORT"                           = "8080"
+    "NODE_ENV"                       = "production"
+    "NPM_CONFIG_PRODUCTION"          = "false" # Allow dev dependencies for build
+    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
+    "ENABLE_ORYX_BUILD"              = "true"
+    "ORYX_PLATFORM_NAME"             = "nodejs"
+
     # Website configuration
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
     "WEBSITES_PORT"                       = "8080"
-  }, var.disable_local_auth ? {
+    }, var.disable_local_auth ? {
     # Use managed identity for authentication
     "VITE_USE_MANAGED_IDENTITY" = "true"
-  } : {
+    } : {
     # Use API keys when local auth is enabled
     "VITE_AZURE_SPEECH_KEY" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=speech-key)"
-  }, var.frontend_app_registration_client_id != null ? {
+    }, var.frontend_app_registration_client_id != null ? {
     # Use EasyAuth with existing Azure AD app registration
     "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID" = azurerm_user_assigned_identity.frontend.client_id
   } : {})
@@ -295,13 +295,13 @@ resource "azurerm_linux_web_app" "frontend" {
   # Optional EasyAuth configuration for frontend
   dynamic "auth_settings_v2" {
     for_each = var.frontend_app_registration_client_id != null ? [1] : []
-    
+
     content {
       auth_enabled           = true
       require_authentication = true
       unauthenticated_action = "RedirectToLoginPage"
       default_provider       = "azureactivedirectory"
-      
+
       excluded_paths = [
         "/health",
         "/favicon.ico",
@@ -310,22 +310,22 @@ resource "azurerm_linux_web_app" "frontend" {
       ]
 
       microsoft_v2 {
-        client_id = var.frontend_app_registration_client_id
+        client_id                  = var.frontend_app_registration_client_id
         client_secret_setting_name = "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID"
         allowed_audiences = [
           var.frontend_app_registration_client_id,
           "api://${var.frontend_app_registration_client_id}"
         ]
-        login_scopes = [ 
+        login_scopes = [
           "openid",
           "profile",
           "email"
         ]
       }
-      
+
       login {
         logout_endpoint                   = "/.auth/logout"
-        token_store_enabled              = false  # Better for SPAs
+        token_store_enabled               = false # Better for SPAs
         preserve_url_fragments_for_logins = true
       }
     }
@@ -348,7 +348,7 @@ resource "azurerm_linux_web_app" "frontend" {
 
   depends_on = [
     azurerm_role_assignment.keyvault_frontend_secrets,
-    azurerm_linux_web_app.backend  # Explicit dependency to ensure backend is created first
+    azurerm_linux_web_app.backend # Explicit dependency to ensure backend is created first
   ]
 }
 
@@ -359,7 +359,7 @@ resource "azurerm_linux_web_app" "frontend" {
 # This resource updates the backend CORS settings after frontend is created
 # to avoid circular dependency while still having proper CORS configuration
 resource "null_resource" "update_backend_cors" {
-  count = 1  # Only run if you want to update CORS after both services exist
+  count = 1 # Only run if you want to update CORS after both services exist
 
   provisioner "local-exec" {
     command = <<-EOT
@@ -375,7 +375,7 @@ resource "null_resource" "update_backend_cors" {
 
   triggers = {
     frontend_hostname = azurerm_linux_web_app.frontend.default_hostname
-    backend_name     = azurerm_linux_web_app.backend.name
+    backend_name      = azurerm_linux_web_app.backend.name
   }
 }
 
