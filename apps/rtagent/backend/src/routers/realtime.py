@@ -46,7 +46,8 @@ async def relay_ws(ws: WebSocket):
     except WebSocketDisconnect:
         clients.remove(ws)
     finally:
-        await ws.close()
+        if ws.client_state.name != "DISCONNECTED":
+            await ws.close()
 
 
 # --------------------------------------------------------------------------- #

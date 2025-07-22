@@ -43,11 +43,19 @@ class JsonFormatter(logging.Formatter):
             "span_id": record.span_id,
             "session_id": record.session_id,
             "call_connection_id": record.call_connection_id,
+            "operation_name": getattr(record, "operation_name", "-"),
+            "component": getattr(record, "component", "-"),
             "message": record.getMessage(),
             "file": record.filename,
             "function": record.funcName,
             "line": record.lineno,
         }
+        
+        # Add any custom span attributes as additional fields
+        for attr_name in dir(record):
+            if attr_name.startswith(("call_", "session_", "agent_", "model_", "operation_")):
+                log_record[attr_name] = getattr(record, attr_name)
+        
         return json.dumps(log_record)
 
 
@@ -75,20 +83,141 @@ class TraceLogFilter(logging.Filter):
     def filter(self, record):
         span = trace.get_current_span()
         context = span.get_span_context() if span else None
-        record.trace_id = f"{context.trace_id:016x}" if context and context.trace_id else "-"
+        record.trace_id = f"{context.trace_id:032x}" if context and context.trace_id else "-"
         record.span_id = f"{context.span_id:016x}" if context and context.span_id else "-"
 
-        # Capture additional context attributes if available (for real-time correlation)
-        record.session_id = getattr(span, "session_id", "-") if span else "-"
-        record.call_connection_id = getattr(span, "call_connection_id", "-") if span else "-"
+        # Extract span attributes for correlation - these become customDimensions in App Insights
+        if span and span.is_recording():
+            # Get span attributes that were set via TraceContext or manually
+            span_attributes = getattr(span, '_attributes', {})
+            
+            # Extract key correlation IDs from span attributes
+            record.session_id = span_attributes.get("session.id", 
+                                span_attributes.get("ai.user.id", "-"))
+            record.call_connection_id = span_attributes.get("call.connection.id", 
+                                       span_attributes.get("ai.session.id", "-"))
+            
+            # Add other useful span attributes to the log record for search/filtering
+            record.operation_name = span_attributes.get("operation.name", span.name)
+            record.component = span_attributes.get("component", "-")
+            
+            # Add custom properties that will appear in customDimensions
+            for key, value in span_attributes.items():
+                if key.startswith(("call.", "session.", "agent.", "model.", "operation.")):
+                    # Sanitize key name for logging
+                    log_key = key.replace(".", "_")
+                    setattr(record, log_key, value)
+        else:
+            record.session_id = "-"
+            record.call_connection_id = "-"
+            record.operation_name = "-"
+            record.component = "-"
+            
         return True
 
 def configure_azure_monitor(logger_name: Optional[str] = None):
+    """
+    Configure Azure Monitor for the specified logger or root logger.
+    This ensures logs are sent to Application Insights with proper trace correlation.
+    """
     setup_azure_monitor(logger_name)
-    handler = LoggingHandler(level=logging.INFO)
+    
+    # Get the target logger
     target_logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
-    target_logger.addHandler(handler)
-    target_logger.addFilter(TraceLogFilter())
+    
+    # Check if Azure Monitor handler is already attached to avoid duplicates
+    has_azure_handler = any(isinstance(h, LoggingHandler) for h in target_logger.handlers)
+    if not has_azure_handler:
+        try:
+            handler = LoggingHandler(level=logging.INFO)
+            target_logger.addHandler(handler)
+            target_logger.debug(f"Azure Monitor LoggingHandler attached to logger: {logger_name or 'root'}")
+        except Exception as e:
+            target_logger.debug(f"Failed to attach Azure Monitor handler: {e}")
+    
+    # Ensure trace filter is attached
+    has_trace_filter = any(isinstance(f, TraceLogFilter) for f in target_logger.filters)
+    if not has_trace_filter:
+        target_logger.addFilter(TraceLogFilter())
+
+def set_span_correlation_attributes(
+    call_connection_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    operation_name: Optional[str] = None,
+    custom_attributes: Optional[dict] = None,
+) -> None:
+    """
+    Set correlation attributes on the current span that will appear as customDimensions in Application Insights.
+    
+    Args:
+        call_connection_id: ACS call connection ID for correlation
+        session_id: User session ID for correlation
+        agent_name: Name of the AI agent handling the request
+        operation_name: Name of the current operation
+        custom_attributes: Additional custom attributes to set
+    """
+    span = trace.get_current_span()
+    if not span or not span.is_recording():
+        return
+    
+    # Standard correlation attributes
+    if call_connection_id:
+        span.set_attribute("call.connection.id", call_connection_id)
+        span.set_attribute("ai.session.id", call_connection_id)  # Application Insights standard
+    
+    if session_id:
+        span.set_attribute("session.id", session_id)
+        span.set_attribute("ai.user.id", session_id)  # Application Insights standard
+    
+    if agent_name:
+        span.set_attribute("agent.name", agent_name)
+    
+    if operation_name:
+        span.set_attribute("operation.name", operation_name)
+    
+    # Custom attributes
+    if custom_attributes:
+        for key, value in custom_attributes.items():
+            if isinstance(value, (str, int, float, bool)):
+                span.set_attribute(key, value)
+
+
+def log_with_correlation(
+    logger: logging.Logger,
+    level: int,
+    message: str,
+    call_connection_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
+    operation_name: Optional[str] = None,
+    custom_attributes: Optional[dict] = None,
+) -> None:
+    """
+    Log a message with correlation attributes that will appear in Application Insights.
+    
+    Args:
+        logger: Logger instance
+        level: Logging level (logging.INFO, logging.ERROR, etc.)
+        message: Log message
+        call_connection_id: ACS call connection ID
+        session_id: User session ID
+        agent_name: AI agent name
+        operation_name: Operation name
+        custom_attributes: Additional custom attributes
+    """
+    # Set span attributes first
+    set_span_correlation_attributes(
+        call_connection_id=call_connection_id,
+        session_id=session_id,
+        agent_name=agent_name,
+        operation_name=operation_name,
+        custom_attributes=custom_attributes,
+    )
+    
+    # Log the message (attributes will be automatically included via TraceLogFilter)
+    logger.log(level, message)
+
 
 def get_logger(
     name: str = "micro",
@@ -102,7 +231,24 @@ def get_logger(
 
     is_production = os.environ.get("ENV", "dev").lower() == "prod"
 
+    # Ensure Azure Monitor LoggingHandler is attached if not already present
+    has_azure_handler = any(isinstance(h, LoggingHandler) for h in logger.handlers)
+    if not has_azure_handler and os.getenv('APPLICATIONINSIGHTS_CONNECTION_STRING'):
+        try:
+            azure_handler = LoggingHandler(level=logging.INFO)
+            logger.addHandler(azure_handler)
+            logger.debug(f"Azure Monitor LoggingHandler attached to logger: {name}")
+        except Exception as e:
+            logger.debug(f"Failed to attach Azure Monitor handler: {e}")
+
+    # Add trace filter if not already present
+    has_trace_filter = any(isinstance(f, TraceLogFilter) for f in logger.filters)
+    if not has_trace_filter:
+        logger.addFilter(TraceLogFilter())
+
     if include_stream_handler and not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        if not has_azure_handler:
+            logger.debug("OTEL LoggingHandler not attached. Ensure configure_azure_monitor was called.")
         sh = logging.StreamHandler()
         sh.setFormatter(JsonFormatter() if is_production else PrettyFormatter())
         sh.addFilter(TraceLogFilter())

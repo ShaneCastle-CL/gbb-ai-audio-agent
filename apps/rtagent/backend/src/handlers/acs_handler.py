@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Dict, Optional
 
 from azure.communication.callautomation import TextSource
@@ -25,7 +26,9 @@ from apps.rtagent.backend.settings import ACS_STREAMING_MODE
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 
 from src.enums.stream_modes import StreamMode
-from utils.ml_logging import get_logger
+from utils.ml_logging import get_logger, set_span_correlation_attributes, log_with_correlation
+from utils.trace_context import TraceContext
+import time
 
 logger = get_logger("handlers.acs_handler")
 
@@ -63,30 +66,111 @@ class ACSHandler:
         if not acs_caller:
             raise HTTPException(503, "ACS Caller not initialised")
 
-        try:
-            # TODO: Add logic to reject multiple requests for the same target number
-            result = await acs_caller.initiate_call(
-                target_number, stream_mode=ACS_STREAMING_MODE
-            )
-            if result.get("status") != "created":
-                return {"status": "failed", "message": "Call initiation failed"}
+        with TraceContext(
+            "acs_handler.initiate_call", 
+            component="acs",
+            metadata={
+                "target_number": target_number
+            }) as ctx:
+                try:
+                    # Set initial trace attributes
+                    ctx.set_attribute("acs.target_number", target_number)
+                    ctx.set_attribute("acs.initial_call_id", call_id or "auto_generated")
+                    ctx.set_attribute("acs.streaming_mode", str(ACS_STREAMING_MODE))
+                    ctx.set_attribute("operation.type", "outbound_call_initiation")
+                    ctx.set_attribute("operation.name", "acs_handler.initiate_call")
+                    
+                    # Add correlation attributes for Application Insights
+                    set_span_correlation_attributes(
+                        operation_name="acs_handler.initiate_call",
+                        custom_attributes={
+                            "target.phone.number": target_number,
+                            "call.direction": "outbound",
+                            "acs.operation": "initiate_call"
+                        }
+                    )
 
-            call_id = result["call_id"]
+                    # Log operation start with correlation
+                    log_with_correlation(
+                        logger, logging.INFO, 
+                        f"Initiating outbound call to {target_number}",
+                        operation_name="acs_handler.initiate_call",
+                        custom_attributes={"target_number": target_number}
+                    )
 
-            # Initialize conversation state
-            cm = MemoManager.from_redis(
-                session_id=call_id,
-                redis_mgr=redis_mgr,
-            )
-            cm.update_context("target_number", target_number)
-            cm.persist_to_redis(redis_mgr)
+                    # TODO: Add logic to reject multiple requests for the same target number
 
-            logger.info("Call initiated – ID=%s", call_id)
-            return {"status": "success", "message": "Call initiated", "callId": call_id}
+                    start_time = time.perf_counter()
+                    result = await acs_caller.initiate_call(
+                        target_number, stream_mode=ACS_STREAMING_MODE
+                    )
+                    latency = time.perf_counter() - start_time
+                    ctx.set_attribute("call_initiation_latency_sec", latency)
+                    
+                    if result.get("status") != "created":
+                        ctx.set_attribute("acs.call_initiation.status", "failed")
+                        ctx.set_attribute("acs.call_initiation.result", str(result))
+                        return {"status": "failed", "message": "Call initiation failed"}
+                    
+                    logger.info(f"Call initiation latency: {latency:.3f} seconds for target {target_number}")
 
-        except (HttpResponseError, RuntimeError) as exc:
-            logger.error("ACS error: %s", exc, exc_info=True)
-            raise HTTPException(500, str(exc)) from exc
+                    call_id = result["call_id"]
+                    
+                    # Update span with the actual call connection ID (KEY CORRELATION)
+                    ctx.set_attribute("call.connection.id", call_id)
+                    ctx.set_attribute("acs.call_initiation.status", "success")
+                    ctx.set_attribute("acs.call_id", call_id)
+
+                    # Update correlation attributes with call connection ID
+                    set_span_correlation_attributes(
+                        call_connection_id=call_id,
+                        session_id=call_id,
+                        operation_name="acs_handler.initiate_call",
+                        custom_attributes={
+                            "target.phone.number": target_number,
+                            "call.direction": "outbound",
+                            "acs.operation": "initiate_call"
+                        }
+                    )
+
+                    # Initialize conversation state
+                    cm = MemoManager.from_redis(
+                        session_id=call_id,
+                        redis_mgr=redis_mgr,
+                    )
+
+                    cm.update_context("target_number", target_number)
+                    cm.persist_to_redis(redis_mgr)
+
+                    # Log success with correlation
+                    log_with_correlation(
+                        logger, logging.INFO, 
+                        f"Call initiated successfully – ID={call_id}, Target={target_number}",
+                        call_connection_id=call_id,
+                        session_id=call_id,
+                        operation_name="acs_handler.initiate_call",
+                        custom_attributes={
+                            "target_number": target_number,
+                            "conversation_state_initialized": True
+                        }
+                    )
+                    
+                    ctx.set_attribute("conversation.state.initialized", True)
+                    ctx.set_attribute("operation.success", True)
+
+                    return {"status": "success", "message": "Call initiated", "callId": call_id}
+
+                except (HttpResponseError, RuntimeError) as exc:
+                    ctx.set_attribute("error.occurred", True)
+                    ctx.set_attribute("error.message", f"ACS error during call initiation: {exc}")
+                    log_with_correlation(
+                        logger, logging.ERROR,
+                        f"ACS error during call initiation to {target_number}: {exc}",
+                        operation_name="acs_handler.initiate_call",
+                        custom_attributes={"target_number": target_number, "error_type": type(exc).__name__}
+                    )
+                    logger.error("ACS error: %s", exc, exc_info=True)
+                    raise HTTPException(500, str(exc)) from exc
 
     @staticmethod
     async def handle_inbound_call(
@@ -102,71 +186,155 @@ class ACSHandler:
         Returns:
             JSONResponse with appropriate status
         """
-        if not acs_caller:
-            raise HTTPException(503, "ACS Caller not initialised")
+        with TraceContext("acs_handler.handle_inbound_call") as trace:
+            # Set initial span attributes
+            trace.set_attribute("acs.event_count", len(request_body))
+            trace.set_attribute("acs.streaming_mode", str(ACS_STREAMING_MODE))
+            trace.set_attribute("operation.type", "inbound_call_handling")
+            trace.set_attribute("operation.name", "acs_handler.handle_inbound_call")
 
-        try:
-            for event in request_body:
-                event_type = event.get("eventType")
-                if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
-                    # Handle subscription validation event
-                    validation_code = event.get("data", {}).get("validationCode")
-                    if validation_code:
-                        return JSONResponse(
-                            {"validationResponse": validation_code}, status_code=200
-                        )
-                    else:
-                        raise HTTPException(
-                            400, "Validation code not found in event data"
-                        )
-                elif event_type == "Microsoft.Communication.IncomingCall":
-                    # Convert CloudEvent to dict for processing
-                    event = dict(event)
-                    event_data = event.get("data", {})
-                    # logger.info("Incoming call received: data=%s", event_data)
+            # Add correlation attributes for Application Insights
+            set_span_correlation_attributes(
+                operation_name="acs_handler.handle_inbound_call",
+                custom_attributes={
+                    "call.direction": "inbound",
+                    "acs.operation": "handle_inbound_call",
+                    "event.count": len(request_body)
+                }
+            )
 
-                    if event_data["from"]["kind"] == "phoneNumber":
-                        caller_id = event_data["from"]["phoneNumber"]["value"]
-                    else:
-                        caller_id = event_data["from"]["rawId"]
-                    logger.info("incoming call handler caller id: %s", caller_id)
+            if not acs_caller:
+                trace.set_attribute("error.occurred", True)
+                trace.set_attribute("error.message", "ACS Caller not initialised")
+                raise HTTPException(503, "ACS Caller not initialised")
 
-                    incoming_call_context = event_data["incomingCallContext"]
-                    # query_parameters = urlencode({"callerId": caller_id})
-                    answer_call_result = await acs_caller.answer_incoming_call(
-                        incoming_call_context=incoming_call_context,
-                        stream_mode=ACS_STREAMING_MODE,
-                    )
-                    # participants = event.data.get("participants", [])
-                    # target_number = cm.get_context("target_number")
-                    # target_joined = any(
-                    #     p.get("identifier", {}).get("rawId", "").endswith(target_number or "")
-                    #     for p in participants
-                    # ) if target_number else False
-                    # cm.update_context("target_participant_joined", target_joined)
-                    # cm.persist_to_redis(redis_mgr)
-                    if answer_call_result:
-                        call_connection_id = getattr(
-                            answer_call_result, "call_connection_id", None
-                        )
-                        if call_connection_id:
-                            logger.info("Call answered: %s", call_connection_id)
-                        else:
-                            logger.warning(
-                                "Call answered but no call_connection_id available: %s",
-                                answer_call_result,
+            try:
+                for idx, event in enumerate(request_body):
+                    event_type = event.get("eventType")
+                    trace.set_attribute(f"acs.event.{idx}.type", event_type)
+
+                    if event_type == "Microsoft.EventGrid.SubscriptionValidationEvent":
+                        # Handle subscription validation event
+                        validation_code = event.get("data", {}).get("validationCode")
+                        
+                        trace.set_attribute("acs.event.validation.code_present", bool(validation_code))
+                        trace.set_attribute("operation.subtype", "subscription_validation")
+
+                        if validation_code:
+                            trace.set_attribute("operation.success", True)
+                            return JSONResponse(
+                                {"validationResponse": validation_code}, status_code=200
                             )
-                else:
-                    logger.info(f"Received event of type {event_type}: {event}")
+                        else:
+                            trace.set_attribute("error.occurred", True)
+                            trace.set_attribute("error.message", "Validation code not found in event data")
+                            raise HTTPException(
+                                400, "Validation code not found in event data"
+                            )
+                    elif event_type == "Microsoft.Communication.IncomingCall":
+                        # Convert CloudEvent to dict for processing
+                        event = dict(event)
+                        event_data = event.get("data", {})
 
-            return JSONResponse({"status": "call answered"}, status_code=200)
+                        # Extract caller information
+                        if event_data["from"]["kind"] == "phoneNumber":
+                            caller_id = event_data["from"]["phoneNumber"]["value"]
+                        else:
+                            caller_id = event_data["from"]["rawId"]
 
-        except (HttpResponseError, RuntimeError) as exc:
-            logger.error("ACS error: %s", exc, exc_info=True)
-            raise HTTPException(500, str(exc)) from exc
-        except Exception as exc:
-            logger.error("Error processing inbound call: %s", exc, exc_info=True)
-            raise HTTPException(400, "Invalid request body") from exc
+                        incoming_call_context = event_data["incomingCallContext"]
+
+                        # Update span with incoming call details
+                        trace.set_attribute("call.caller_id", caller_id)
+                        trace.set_attribute("call.from.kind", event_data["from"]["kind"])
+                        trace.set_attribute("acs.incoming_call_context", incoming_call_context[:50] + "..." if len(incoming_call_context) > 50 else incoming_call_context)
+                        trace.set_attribute("operation.subtype", "incoming_call_answer")
+
+                        # Update correlation attributes with caller information
+                        set_span_correlation_attributes(
+                            operation_name="acs_handler.handle_inbound_call",
+                            custom_attributes={
+                                "caller.id": caller_id,
+                                "incoming.call.context": incoming_call_context[:50] + "..." if len(incoming_call_context) > 50 else incoming_call_context,
+                                "call.direction": "inbound"
+                            }
+                        )
+
+                        log_with_correlation(
+                            logger, logging.INFO,
+                            f"Processing incoming call from caller: {caller_id}",
+                            operation_name="acs_handler.handle_inbound_call",
+                            custom_attributes={
+                                "caller_id": caller_id,
+                                "from_kind": event_data["from"]["kind"]
+                            }
+                        )
+
+                        # Answer the incoming call
+                        answer_call_result = await acs_caller.answer_incoming_call(
+                            incoming_call_context=incoming_call_context,
+                            stream_mode=ACS_STREAMING_MODE,
+                        )
+
+                        if answer_call_result:
+                            call_connection_id = getattr(
+                                answer_call_result, "call_connection_id", None
+                            )
+                            
+                            if call_connection_id:
+                                # Update span with call connection ID (KEY CORRELATION)
+                                trace.set_attribute("call.connection.id", call_connection_id)
+                                trace.set_attribute("acs.call_answered", True)
+                                trace.set_attribute("operation.success", True)
+
+                                # Update correlation attributes with call connection ID
+                                set_span_correlation_attributes(
+                                    call_connection_id=call_connection_id,
+                                    session_id=call_connection_id,
+                                    operation_name="acs_handler.handle_inbound_call",
+                                    custom_attributes={
+                                        "caller.id": caller_id,
+                                        "call.direction": "inbound"
+                                    }
+                                )
+
+                                log_with_correlation(
+                                    logger, logging.INFO,
+                                    f"Incoming call answered successfully: {call_connection_id} from caller {caller_id}",
+                                    call_connection_id=call_connection_id,
+                                    session_id=call_connection_id,
+                                    operation_name="acs_handler.handle_inbound_call",
+                                    custom_attributes={
+                                        "caller_id": caller_id,
+                                        "call_answered": True
+                                    }
+                                )
+                            else:
+                                trace.set_attribute("acs.call_answered", True)
+                                trace.set_attribute("call.connection.id.missing", True)
+                                logger.warning(
+                                    "Call answered but no call_connection_id available: %s",
+                                    answer_call_result,
+                                )
+                    else:
+                        # Handle unhandled events
+                        trace.set_attribute(f"acs.event.{idx}.unhandled", True)
+                        trace.set_attribute("operation.subtype", "unhandled_event")
+                        logger.info(f"Received event of type {event_type}: {event}")
+
+                trace.set_attribute("operation.success", True)
+                return JSONResponse({"status": "call answered"}, status_code=200)
+
+            except (HttpResponseError, RuntimeError) as exc:
+                trace.set_attribute("error.occurred", True)
+                trace.set_attribute("error.message", f"ACS error during inbound call handling: {exc}")
+                logger.error("ACS error: %s", exc, exc_info=True)
+                raise HTTPException(500, str(exc)) from exc
+            except Exception as exc:
+                trace.set_attribute("error.occurred", True)
+                trace.set_attribute("error.message", f"Unexpected error processing inbound call: {exc}")
+                logger.error("Error processing inbound call: %s", exc, exc_info=True)
+                raise HTTPException(400, "Invalid request body") from exc
 
     @staticmethod
     async def process_callback_events(events: list, request) -> Dict[str, str]:
@@ -195,14 +363,14 @@ class ACSHandler:
             "Microsoft.Communication.MediaStreamingStarted": ACSHandler._handle_media_streaming_started,
         }
 
-        # Media events that update bot_speaking context
-        media_events = {
-            "Microsoft.Communication.PlayStarted": True,
-            "Microsoft.Communication.PlayCompleted": False,
-            "Microsoft.Communication.PlayFailed": False,
-            "Microsoft.Communication.PlayCanceled": False,
-            "Microsoft.Communication.MediaStreamingFailed": False,
-        }
+        # # Media events that update bot_speaking context
+        # media_events = {
+        #     "Microsoft.Communication.PlayStarted": True,
+        #     "Microsoft.Communication.PlayCompleted": False,
+        #     "Microsoft.Communication.PlayFailed": False,
+        #     "Microsoft.Communication.PlayCanceled": False,
+        #     "Microsoft.Communication.MediaStreamingFailed": False,
+        # }
 
         try:
             for raw in events:
@@ -210,7 +378,8 @@ class ACSHandler:
                 etype = event.type
                 cid = event.data.get("callConnectionId")
                 cm = MemoManager.from_redis(cid, redis_mgr)
-
+                # Log event type and call connection ID for observability
+                logger.info(f"Processing event: {etype} for callConnectionId: {cid}")
                 # Handle specific events with dedicated handlers
                 if etype in event_handlers:
                     handler = event_handlers[etype]
@@ -227,31 +396,31 @@ class ACSHandler:
                     elif etype == "Microsoft.Communication.CallDisconnected":
                         await handler(event, cm, redis_mgr, cid)
 
-                # Handle media events that affect bot_speaking state
-                elif etype in media_events:
-                    cm.update_context("bot_speaking", media_events[etype])
-                    action = "Set" if media_events[etype] else "Set"
-                    logger.info(
-                        f"{etype.split('.')[-1]}: {action} bot_speaking={media_events[etype]} for call {cm.session_id}"
-                    )
+                # # Handle media events that affect bot_speaking state
+                # elif etype in media_events:
+                #     cm.update_context("bot_speaking", media_events[etype])
+                #     action = "Set" if media_events[etype] else "Set"
+                #     logger.info(
+                #         f"{etype.split('.')[-1]}: {action} bot_speaking={media_events[etype]} for call {cm.session_id}"
+                #     )
 
-                    # Log errors for failed events
-                    if "Failed" in etype:
-                        reason = event.data.get("resultInformation", "Unknown reason")
-                        logger.error(
-                            f"⚠️ {etype.split('.')[-1]} for call {cid}: {reason}"
-                        )
+                #     # Log errors for failed events
+                #     if "Failed" in etype:
+                #         reason = event.data.get("resultInformation", "Unknown reason")
+                #         logger.error(
+                #             f"⚠️ {etype.split('.')[-1]} for call {cid}: {reason}"
+                #         )
 
-                # Handle other failed events
-                elif "Failed" in etype:
-                    reason = event.data.get("resultInformation", "Unknown reason")
-                    logger.error("⚠️ %s for call %s: %s", etype, cid, reason)
+                # # Handle other failed events
+                # elif "Failed" in etype:
+                #     reason = event.data.get("resultInformation", "Unknown reason")
+                #     logger.error("⚠️ %s for call %s: %s", etype, cid, reason)
 
-                # Log unhandled events
-                else:
-                    logger.info("Unhandled event: %s for call %s", etype, cid)
+                # # Log unhandled events
+                # else:
+                #     logger.info("Unhandled event: %s for call %s", etype, cid)
 
-                cm.persist_to_redis(redis_mgr)
+                # cm.persist_to_redis(redis_mgr)
 
             return {"status": "callback received"}
 
@@ -281,11 +450,11 @@ class ACSHandler:
         participants_info = [
             p.get("identifier", {}).get("rawId", "unknown") for p in participants
         ]
-        await broadcast_message(
-            clients,
-            f"\tParticipants updated for call {cid}: {participants_info}",
-            "System",
-        )
+        # await broadcast_message(
+        #     clients,
+        #     f"\tParticipants updated for call {cid}: {participants_info}",
+        #     "System",
+        # )
 
     @staticmethod
     async def _handle_call_connected(
