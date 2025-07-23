@@ -9,9 +9,8 @@ from azure.communication.callautomation import (
 from fastapi import WebSocket
 from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
-from apps.rtagent.backend.src.services.acs.acs_helpers import broadcast_message
-from apps.rtagent.backend.src.shared_ws import send_response_to_acs
-
+from apps.rtagent.backend.src.shared_ws import send_response_to_acs, broadcast_message
+from apps.rtagent.backend.settings import GREETING
 from src.enums.stream_modes import StreamMode
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from utils.ml_logging import get_logger
@@ -149,6 +148,12 @@ class ACSMediaHandler:
 
                 self.route_turn_task = asyncio.create_task(self.route_turn_loop())
                 # Fire greeting playback - it handles its own async task creation
+                logger.info(f"🎤 Playing greeting: {GREETING}")
+                await broadcast_message(
+                    connected_clients=self.incoming_websocket.app.state.clients,
+                    message=GREETING,
+                    sender="Assistant",
+                )
                 self.play_greeting()
 
             except Exception as e:
@@ -217,7 +222,7 @@ class ACSMediaHandler:
 
     def play_greeting(
         self,
-        greeting_text: str = "Welcome to our customer service. How can I help you today?",
+        greeting_text: str = GREETING,
     ):
         """
         Send a greeting message to ACS using TTS.
@@ -228,7 +233,6 @@ class ACSMediaHandler:
             metadata=self._get_trace_metadata("greeting_playback", greeting_length=len(greeting_text))
         ):
             try:
-                logger.info(f"🎤 Playing greeting: {greeting_text}")
 
                 # Send the greeting text to ACS for TTS playback
                 self.playback_task = asyncio.create_task(
@@ -252,7 +256,7 @@ class ACSMediaHandler:
         logger.debug(f"🗣️ User (partial) in {lang}: {text}")
         
         # Start latency measurement for barge-in detection
-        latency_tool = self.latency_tool
+        # latency_tool = self.latency_tool
         # latency_tool.start("barge_in")
         
         # Set the barge-in event flag immediately
@@ -316,11 +320,11 @@ class ACSMediaHandler:
         ):
             try:
                 logger.info("🚫 User barge-in detected, stopping playback")
-                await broadcast_message(
-                    connected_clients=self.incoming_websocket.app.state.clients,
-                    message="User has barged in, stopping playback.",
-                    sender="System",
-                )
+                # await broadcast_message(
+                #     connected_clients=self.incoming_websocket.app.state.clients,
+                #     message="User has barged in, stopping playback.",
+                #     sender="System",
+                # )
                 # Cancel current playback task if running
                 if self.playback_task and not self.playback_task.done():
                     logger.info("Cancelling playback task due to barge-in")
@@ -381,13 +385,8 @@ class ACSMediaHandler:
                         )
 
                         logger.info(f"🎯 Processing {kind} turn: {text}")
-
-                        await broadcast_message(
-                            connected_clients=self.incoming_websocket.app.state.clients,
-                            message=text,
-                            sender="User",
-                        )
-
+ 
+                        # Note: broadcast_message is now handled in the orchestrator to avoidduplication
                         # Cancel any current playback before starting new one
                         if self.playback_task and not self.playback_task.done():
                             logger.info("Cancelling previous playback task")
