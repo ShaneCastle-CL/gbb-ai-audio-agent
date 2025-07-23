@@ -289,7 +289,7 @@ const styles = {
 /* ------------------------------------------------------------------ *
  *  WAVEFORM COMPONENT
  * ------------------------------------------------------------------ */
-const WaveformVisualization = ({ isActive, speaker }) => {
+const WaveformVisualization = ({ speaker }) => {
   const [waveOffset, setWaveOffset] = useState(0);
   const [amplitude, setAmplitude] = useState(5);
   const animationRef = useRef();
@@ -310,7 +310,7 @@ const WaveformVisualization = ({ isActive, speaker }) => {
     // Animate the wave
     const animate = () => {
       setWaveOffset(prev => (prev + 2) % 360);
-      setAmplitude(prev => {
+      setAmplitude(() => {
         const baseAmplitude = speaker ? 15 : 3;
         const variation = speaker ? Math.random() * 15 : Math.random() * 2;
         return baseAmplitude + variation;
@@ -353,7 +353,7 @@ const WaveformVisualization = ({ isActive, speaker }) => {
     const baseColor = speaker === "User" ? "#ef4444" :  // Red for user
                      speaker === "Assistant" ? "#67d8ef" :  // Teal for assistant
                      "#11d483ff"; // fallback color
-    const opacity = !!speaker ? 0.8 : 0.4; // Simplified opacity logic
+    const opacity = speaker ? 0.8 : 0.4; // Simplified opacity logic
     
     // Main wave
     waves.push(
@@ -479,14 +479,14 @@ export default function RealTimeVoiceApp() {
 
 
   // Function call state (not mind-map)
-  const [functionCalls, setFunctionCalls] = useState([]);
-  const [callResetKey, setCallResetKey]   = useState(0);
+  // const [functionCalls, setFunctionCalls] = useState([]);
+  // const [callResetKey, setCallResetKey]   = useState(0);
 
   /* ---------- refs ---------- */
   const chatRef      = useRef(null);
   const messageContainerRef = useRef(null);
   const socketRef    = useRef(null);
-  const recognizerRef= useRef(null);
+  // const recognizerRef= useRef(null);
 
   // Fix: missing refs for audio and processor
   const audioContextRef = useRef(null);
@@ -513,7 +513,31 @@ export default function RealTimeVoiceApp() {
   },[messages]);
 
   /* ---------- teardown on unmount ---------- */
-  useEffect(()=>()=> stopRecognition(),[]);
+  useEffect(() => {
+    return () => {
+      if (processorRef.current) {
+        try { 
+          processorRef.current.disconnect(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+      if (audioContextRef.current) {
+        try { 
+          audioContextRef.current.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+      if (socketRef.current) {
+        try { 
+          socketRef.current.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+    };
+  }, []);
 
   /* ---------- derive callActive from logs ---------- */
   useEffect(()=>{
@@ -588,15 +612,27 @@ export default function RealTimeVoiceApp() {
 
     const stopRecognition = () => {
       if (processorRef.current) {
-        try { processorRef.current.disconnect(); } catch {}
+        try { 
+          processorRef.current.disconnect(); 
+        } catch (e) {
+          console.warn("Error disconnecting processor:", e);
+        }
         processorRef.current = null;
       }
       if (audioContextRef.current) {
-        try { audioContextRef.current.close(); } catch {}
+        try { 
+          audioContextRef.current.close(); 
+        } catch (e) {
+          console.warn("Error closing audio context:", e);
+        }
         audioContextRef.current = null;
       }
       if (socketRef.current) {
-        try { socketRef.current.close(); } catch {}
+        try { 
+          socketRef.current.close(); 
+        } catch (e) {
+          console.warn("Error closing socket:", e);
+        }
         socketRef.current = null;
       }
       setRecording(false);
@@ -639,7 +675,7 @@ export default function RealTimeVoiceApp() {
         payload.content = payload.message;
         // fall through to unified logic below
       }
-      const { type, content = "", message = "", function_call, speaker } = payload;
+      const { type, content = "", message = "", speaker } = payload;
       const txt = content || message;
       const msgType = (type || "").toLowerCase();
 
@@ -780,8 +816,8 @@ export default function RealTimeVoiceApp() {
         appendLog("Relay WS disconnected");
         setCallActive(false);
         setActiveSpeaker(null);
-        setFunctionCalls([]);
-        setCallResetKey(k=>k+1);
+        // setFunctionCalls([]);
+        // setCallResetKey(k=>k+1);
       };
     } catch(e) {
       appendLog(`Network error starting call: ${e.message}`);
@@ -793,16 +829,12 @@ export default function RealTimeVoiceApp() {
    * ------------------------------------------------------------------ */
   return (
     <div style={styles.root}>
-      {/* HEADER */}
-      <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div style={{ flex: 1 }} />
-          <div style={{ textAlign: 'center' }}>
-            <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
-            <p style={styles.headerSubtitle}>
-              Transforming patient care with real-time, intelligent voice interactions
-            </p>
-          </div>
+      <div style={styles.mainContainer}>
+        {/* Waveform Section */}
+        <div style={styles.waveformSection}>
+          <div style={styles.waveformSectionTitle}>Voice Activity</div>
+          <WaveformVisualization isActive={recording} speaker={activeSpeaker} />
+          <div style={styles.sectionDivider}></div>
         </div>
 
         {/* Chat Messages */}
@@ -870,3 +902,4 @@ export default function RealTimeVoiceApp() {
     </div>
   );
 }
+
