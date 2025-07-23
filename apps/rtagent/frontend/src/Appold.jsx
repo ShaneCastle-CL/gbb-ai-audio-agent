@@ -48,39 +48,93 @@ const styles = {
     flexDirection: "column",
     overflow: "hidden",
   },
+
+  // App header with title - more blended approach  
+  appHeader: {
+    backgroundColor: "#f8fafc",
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+    padding: "16px 24px 12px 24px",
+    borderBottom: "1px solid #e2e8f0",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+
+  appTitleContainer: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "4px",
+  },
+
+  appTitleWrapper: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+
+  appTitleIcon: {
+    fontSize: "20px",
+    opacity: 0.7,
+  },
+
+  appTitle: {
+    fontSize: "18px",
+    fontWeight: "600",
+    color: "#334155",
+    textAlign: "center",
+    margin: 0,
+    letterSpacing: "0.1px",
+  },
+
+  appSubtitle: {
+    fontSize: "12px",
+    fontWeight: "400",
+    color: "#64748b",
+    textAlign: "center",
+    margin: 0,
+    letterSpacing: "0.1px",
+    maxWidth: "350px",
+    lineHeight: "1.3",
+    opacity: 0.8,
+  },
   
-  // Waveform section (top third)
+  // Waveform section - blended design
   waveformSection: {
-    backgroundColor: "#dbeafe",
-    padding: "2px 4px",
+    backgroundColor: "#f1f5f9",
+    background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+    padding: "12px 4px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     borderBottom: "1px solid #e2e8f0",
-    height: "25%",
-    minHeight: "100px",
+    height: "22%",
+    minHeight: "90px",
     position: "relative",
   },
   
   waveformSectionTitle: {
-    fontSize: "14px",
-    fontWeight: "600",
+    fontSize: "12px",
+    fontWeight: "500",
     color: "#64748b",
     textTransform: "uppercase",
     letterSpacing: "0.5px",
-    marginBottom: "2px",
+    marginBottom: "8px",
+    opacity: 0.8,
   },
   
-  // Section divider line
+  // Section divider line - more subtle
   sectionDivider: {
     position: "absolute",
     bottom: "-1px",
-    left: "15%",
-    right: "15%",
-    height: "3px",
-    backgroundColor: "#3b82f6",
-    borderRadius: "1px",
+    left: "20%",
+    right: "20%",
+    height: "1px",
+    backgroundColor: "#cbd5e1",
+    borderRadius: "0.5px",
+    opacity: 0.6,
   },
   
   waveformContainer: {
@@ -89,12 +143,16 @@ const styles = {
     justifyContent: "center",
     width: "100%",
     height: "60%",
-    padding: "0 10px", // Add horizontal padding to prevent edge cutoff
+    padding: "0 10px",
+    background: "radial-gradient(ellipse at center, rgba(100, 116, 139, 0.05) 0%, transparent 70%)",
+    borderRadius: "6px",
   },
   
   waveformSvg: {
     width: "100%",
     height: "60px",
+    filter: "drop-shadow(0 1px 2px rgba(100, 116, 139, 0.1))",
+    transition: "filter 0.3s ease",
   },
   
   // Chat section (middle section)
@@ -196,10 +254,11 @@ const styles = {
     whiteSpace: "pre-wrap",
   },
   
-  // Control section (bottom third)
+  // Control section - blended footer design
   controlSection: {
-    padding: "8px",
-    backgroundColor: "#dbeafe",
+    padding: "12px",
+    backgroundColor: "#f1f5f9",
+    background: "linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%)",
     display: "flex",
     justifyContent: "center",
     alignItems: "center",
@@ -211,11 +270,11 @@ const styles = {
   
   controlContainer: {
     display: "flex",
-    gap: "6px",
+    gap: "8px",
     background: "white",
-    padding: "10px 10px",
-    borderRadius: "50px",
-    boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+    padding: "12px 16px",
+    borderRadius: "24px",
+    boxShadow: "0 4px 16px rgba(100, 116, 139, 0.08), 0 1px 4px rgba(100, 116, 139, 0.04)",
     border: "1px solid #e2e8f0",
     width: "fit-content",
   },
@@ -289,32 +348,49 @@ const styles = {
 /* ------------------------------------------------------------------ *
  *  WAVEFORM COMPONENT
  * ------------------------------------------------------------------ */
-const WaveformVisualization = ({ speaker }) => {
+const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }) => {
   const [waveOffset, setWaveOffset] = useState(0);
   const [amplitude, setAmplitude] = useState(5);
   const animationRef = useRef();
   
   useEffect(() => {
-    // Animation should run when there's an active speaker
-    if (!speaker) {
-      setAmplitude(3);
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-      return;
-    }
-    
-    // Higher amplitude when someone is speaking
-    setAmplitude(15 + Math.random() * 10);
-    
-    // Animate the wave
+    // Always run animation, but with different intensities
     const animate = () => {
-      setWaveOffset(prev => (prev + 2) % 360);
-      setAmplitude(() => {
-        const baseAmplitude = speaker ? 15 : 3;
-        const variation = speaker ? Math.random() * 15 : Math.random() * 2;
-        return baseAmplitude + variation;
+      setWaveOffset(prev => {
+        // More controlled speeds - good idle pace, moderate when speaking
+        const speed = speaker ? 1.8 : 1.2;
+        return (prev + speed) % 360;
       });
+      
+      setAmplitude(() => {
+        // React to actual audio levels first, then fall back to speaker state
+        if (audioLevel > 0.01) {
+          // User is speaking - use real audio level
+          const scaledLevel = audioLevel * 25; // Scale up the audio level
+          const rhythmicVariation = Math.sin(Date.now() * 0.003) * (scaledLevel * 0.3);
+          return Math.max(8, scaledLevel + rhythmicVariation);
+        } else if (outputAudioLevel > 0.01) {
+          // Assistant is speaking - use output audio level
+          const scaledLevel = outputAudioLevel * 20;
+          const rhythmicVariation = Math.sin(Date.now() * 0.0025) * (scaledLevel * 0.4);
+          return Math.max(6, scaledLevel + rhythmicVariation);
+        } else if (speaker) {
+          // Active speaking fallback - more controlled, less spazzy movement
+          const time = Date.now() * 0.003; // Moderate speaking rhythm
+          const baseAmplitude = 12;
+          const rhythmicVariation = Math.sin(time) * 8; // Smooth rhythmic change
+          const subtleNoise = Math.random() * 3; // Reduced random variation
+          return baseAmplitude + rhythmicVariation + subtleNoise;
+        } else {
+          // Idle state - gentle breathing pattern with subtle pulse
+          const time = Date.now() * 0.0008; // Slow breathing cycle
+          const breathingAmplitude = 2.5 + Math.sin(time) * 1.5; // Gentle up and down
+          const pulseEffect = 1 + Math.sin(time * 2) * 0.1; // Subtle secondary pulse
+          const subtleVariation = Math.random() * 0.3; // Very small random variation
+          return (breathingAmplitude * pulseEffect) + subtleVariation;
+        }
+      });
+      
       animationRef.current = requestAnimationFrame(animate);
     };
     
@@ -325,35 +401,45 @@ const WaveformVisualization = ({ speaker }) => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [speaker]); // Changed dependency from isActive to speaker
+  }, [speaker, audioLevel, outputAudioLevel]);
   
   // Generate wave path
   const generateWavePath = () => {
     const width = 750;
     const height = 100;
     const centerY = height / 2;
-    const frequency = 0.02; // How many waves across the width
-    const points = 200; // Number of points to draw
+    const frequency = speaker ? 0.02 : 0.015; // Gentler frequency when idle
+    const points = 200;
     
     let path = `M 0 ${centerY}`;
     
     for (let i = 0; i <= points; i++) {
       const x = (i / points) * width;
-      const y = centerY + Math.sin((x * frequency + waveOffset * 0.1)) * amplitude;
+      const waveSpeed = speaker ? 0.09 : 0.08; // Gentler speaking speed, good idle speed
+      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * amplitude;
       path += ` L ${x} ${y}`;
     }
     
     return path;
   };
-  
+
   // Generate multiple wave layers for richer visualization
   const generateMultipleWaves = () => {
     const waves = [];
-    // More distinct colors based on speaker
-    const baseColor = speaker === "User" ? "#ef4444" :  // Red for user
-                     speaker === "Assistant" ? "#67d8ef" :  // Teal for assistant
-                     "#11d483ff"; // fallback color
-    const opacity = speaker ? 0.8 : 0.4; // Simplified opacity logic
+    
+    // Different colors based on state
+    let baseColor, opacity;
+    if (speaker === "User") {
+      baseColor = "#ef4444"; // Red for user
+      opacity = 0.8;
+    } else if (speaker === "Assistant") {
+      baseColor = "#67d8ef"; // Teal for assistant  
+      opacity = 0.8;
+    } else {
+      // Idle state - gentle blue
+      baseColor = "#3b82f6";
+      opacity = 0.3;
+    }
     
     // Main wave
     waves.push(
@@ -361,7 +447,7 @@ const WaveformVisualization = ({ speaker }) => {
         key="wave1"
         d={generateWavePath()}
         stroke={baseColor}
-        strokeWidth="3"
+        strokeWidth={speaker ? "3" : "2"}
         fill="none"
         opacity={opacity}
         strokeLinecap="round"
@@ -375,7 +461,7 @@ const WaveformVisualization = ({ speaker }) => {
         key="wave2"
         d={secondaryPath}
         stroke={baseColor}
-        strokeWidth="2"
+        strokeWidth={speaker ? "2" : "1.5"}
         fill="none"
         opacity={opacity * 0.6}
         strokeLinecap="round"
@@ -389,14 +475,15 @@ const WaveformVisualization = ({ speaker }) => {
     const width = 750;
     const height = 100;
     const centerY = height / 2;
-    const frequency = 0.025; // Slightly different frequency
+    const frequency = speaker ? 0.025 : 0.018; // Slightly different frequency, gentler when idle
     const points = 200;
     
     let path = `M 0 ${centerY}`;
     
     for (let i = 0; i <= points; i++) {
       const x = (i / points) * width;
-      const y = centerY + Math.sin((x * frequency + waveOffset * 0.15)) * (amplitude * 0.6);
+      const waveSpeed = speaker ? 0.12 : 0.11; // More controlled secondary wave speed
+      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * (amplitude * 0.6);
       path += ` L ${x} ${y}`;
     }
     
@@ -405,10 +492,23 @@ const WaveformVisualization = ({ speaker }) => {
   
   return (
     <div style={styles.waveformContainer}>
-      {!!speaker && (
-        <svg style={styles.waveformSvg} viewBox="0 0 750 80" preserveAspectRatio="xMidYMid meet">
-          {generateMultipleWaves()}
-        </svg>
+      <svg style={styles.waveformSvg} viewBox="0 0 750 80" preserveAspectRatio="xMidYMid meet">
+        {generateMultipleWaves()}
+      </svg>
+      
+      {/* Audio level indicators for debugging - simple development check */}
+      {window.location.hostname === 'localhost' && (
+        <div style={{
+          position: 'absolute',
+          bottom: '-25px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: '10px',
+          color: '#666',
+          whiteSpace: 'nowrap'
+        }}>
+          Input: {(audioLevel * 100).toFixed(1)}% | Output: {(outputAudioLevel * 100).toFixed(1)}%
+        </div>
       )}
     </div>
   );
@@ -454,8 +554,8 @@ const ChatBubble = ({ message }) => {
 export default function RealTimeVoiceApp() {
   /* ---------- state ---------- */
   const [messages, setMessages] = useState([
-    { speaker: "User", text: "Hello, I need help with my insurance claim." },
-    { speaker: "Assistant", text: "I'd be happy to help you with your insurance claim. Can you please provide me with your policy number?" }
+    // { speaker: "User", text: "Hello, I need help with my insurance claim." },
+    // { speaker: "Assistant", text: "I'd be happy to help you with your insurance claim. Can you please provide me with your policy number?" }
   ]);
   const [log, setLog]                 = useState("");
   const [recording, setRecording]     = useState(false);
@@ -491,6 +591,14 @@ export default function RealTimeVoiceApp() {
   // Fix: missing refs for audio and processor
   const audioContextRef = useRef(null);
   const processorRef = useRef(null);
+  const analyserRef = useRef(null);
+  const micStreamRef = useRef(null);
+  
+  // Audio level tracking for reactive waveforms
+  const [audioLevel, setAudioLevel] = useState(0);
+  // const [outputAudioLevel, setOutputAudioLevel] = useState(0);
+  const audioLevelRef = useRef(0);
+  // const outputAudioLevelRef = useRef(0);
 
 
 
@@ -571,6 +679,7 @@ export default function RealTimeVoiceApp() {
 
       // 2) setup Web Audio for raw PCM @16 kHz
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: 16000
       });
@@ -578,13 +687,37 @@ export default function RealTimeVoiceApp() {
 
       const source = audioCtx.createMediaStreamSource(stream);
 
+      // Add analyser for real-time audio level monitoring
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.3;
+      analyserRef.current = analyser;
+      
+      // Connect source to analyser
+      source.connect(analyser);
+
       // 3) ScriptProcessor with small buffer for low latency (256 or 512 samples)
       const bufferSize = 512; 
       const processor  = audioCtx.createScriptProcessor(bufferSize, 1, 1);
       processorRef.current = processor;
 
+      // Connect analyser to processor for audio data flow
+      analyser.connect(processor);
+
       processor.onaudioprocess = (evt) => {
         const float32 = evt.inputBuffer.getChannelData(0);
+        
+        // Calculate real-time audio level
+        let sum = 0;
+        for (let i = 0; i < float32.length; i++) {
+          sum += float32[i] * float32[i];
+        }
+        const rms = Math.sqrt(sum / float32.length);
+        const level = Math.min(1, rms * 10); // Scale and clamp to 0-1
+        
+        audioLevelRef.current = level;
+        setAudioLevel(level);
+
         // Debug: Log a sample of mic data
         console.log("Mic data sample:", float32.slice(0, 10)); // Should show non-zero values if your mic is hot
 
@@ -830,10 +963,26 @@ export default function RealTimeVoiceApp() {
   return (
     <div style={styles.root}>
       <div style={styles.mainContainer}>
+        {/* App Header */}
+        <div style={styles.appHeader}>
+          <div style={styles.appTitleContainer}>
+            <div style={styles.appTitleWrapper}>
+              <span style={styles.appTitleIcon}>🎙️</span>
+              <h1 style={styles.appTitle}>RTInsuranceAgent</h1>
+            </div>
+            <p style={styles.appSubtitle}>Transforming patient care with real-time, intelligent voice interactions</p>
+          </div>
+        </div>
+
         {/* Waveform Section */}
         <div style={styles.waveformSection}>
           <div style={styles.waveformSectionTitle}>Voice Activity</div>
-          <WaveformVisualization isActive={recording} speaker={activeSpeaker} />
+          <WaveformVisualization 
+            isActive={recording} 
+            speaker={activeSpeaker} 
+            audioLevel={audioLevel}
+            outputAudioLevel={0}
+          />
           <div style={styles.sectionDivider}></div>
         </div>
 
