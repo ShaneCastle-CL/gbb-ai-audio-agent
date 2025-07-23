@@ -22,7 +22,7 @@ from fastapi import HTTPException, WebSocket
 from fastapi.responses import JSONResponse
 from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
-from apps.rtagent.backend.settings import ACS_STREAMING_MODE
+from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING, VOICE_TTS
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 
 from src.enums.stream_modes import StreamMode
@@ -508,12 +508,7 @@ class ACSHandler:
             logger.info(f"Greeting already played for call {cid}")
             return
 
-        greeting = (
-            "Hello, thank you for calling XMYX Insurance Company. "
-            "Before I can assist you, let's verify your identity. "
-            "How may I address you today? Please state your full name clearly after the tone, "
-            "and let me know how I can help you with your insurance needs."
-        )
+        greeting = GREETING
 
         try:
             # Add delay for media mode to ensure WebSocket is stable
@@ -526,7 +521,7 @@ class ACSHandler:
                 text_source = TextSource(
                     text=greeting, 
                     source_locale="en-US", 
-                    voice_name="en-US-JennyNeural"
+                    voice_name=VOICE_TTS
                 )
                 call_conn = acs_caller.get_call_connection(cid)
                 call_conn.play_media(play_source=text_source)
