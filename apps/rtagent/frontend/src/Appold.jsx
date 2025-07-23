@@ -19,48 +19,499 @@ const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
  * ------------------------------------------------------------------ */
 const styles = {
   root: {
+    width: "768px",
+    maxWidth: "768px", // Expanded from iPad width
     fontFamily: "Segoe UI, Roboto, sans-serif",
-    background: "linear-gradient(135deg, rgba(20,25,35,0.85), rgba(30,35,45,0.85))",
-    backdropFilter: "blur(12px)",
-    WebkitBackdropFilter: "blur(12px)",
-    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.05), 0 8px 32px rgba(0,0,0,0.6)",
-    borderRadius: "20px",
-    color: "#E5E7EB",
+    background: "transparent",
     minHeight: "100vh",
-    padding: 32,
+    display: "flex",
+    flexDirection: "column",
+    color: "#1e293b",
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "8px",
+    border: "0px solid #0e4bf3ff",
+  },
+  
+  // Main iPad-sized container
+  mainContainer: {
+    width: "100%",
+    maxWidth: "100%", // Expanded from iPad width
+    height: "90vh",
+    maxHeight: "900px", // Adjusted height
+    background: "white",
+    borderRadius: "20px",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+    border: "0px solid #ce1010ff",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
+
+  // App header with title - more blended approach  
+  appHeader: {
+    backgroundColor: "#f8fafc",
+    background: "linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",
+    padding: "16px 24px 12px 24px",
+    borderBottom: "1px solid #e2e8f0",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+
+  appTitleContainer: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: 40,
+    gap: "4px",
   },
-  header:       { width:"100%", maxWidth:1080, textAlign:"center" },
-  headerTitle:  { fontSize:"3rem", fontWeight:700, marginBottom:8, textShadow:"0 2px 8px rgba(88,166,255,0.3)" },
-  headerSubtitle:{ fontSize:"1.1rem", color:"#9CA3AF", textShadow:"0 2px 8px rgba(88,166,255,0.3)" },
 
-  chatWrapper: { background:"#263238", borderRadius:12, padding:20,
-                 width:"95%", maxWidth:1080, height:480, overflow:"hidden",
-                 display:"flex", flexDirection:"column" },
-  chatScroll:  { flex:1, overflowY:"auto", padding:"12px 18px" },
+  appTitleWrapper: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
 
-  controlBar: { textAlign:"center", width:"100%" },
-  primaryBtn: rec => ({
-    padding:"14px 40px", border:"none", borderRadius:10,
-    fontWeight:600, fontSize:"1rem", cursor:"pointer",
-    background: rec ? "#D13438" : "#107C10", color:"#fff"
+  appTitleIcon: {
+    fontSize: "20px",
+    opacity: 0.7,
+  },
+
+  appTitle: {
+    fontSize: "18px",
+    fontWeight: "600",
+    color: "#334155",
+    textAlign: "center",
+    margin: 0,
+    letterSpacing: "0.1px",
+  },
+
+  appSubtitle: {
+    fontSize: "12px",
+    fontWeight: "400",
+    color: "#64748b",
+    textAlign: "center",
+    margin: 0,
+    letterSpacing: "0.1px",
+    maxWidth: "350px",
+    lineHeight: "1.3",
+    opacity: 0.8,
+  },
+  
+  // Waveform section - blended design
+  waveformSection: {
+    backgroundColor: "#f1f5f9",
+    background: "linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)",
+    padding: "12px 4px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottom: "1px solid #e2e8f0",
+    height: "22%",
+    minHeight: "90px",
+    position: "relative",
+  },
+  
+  waveformSectionTitle: {
+    fontSize: "12px",
+    fontWeight: "500",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: "8px",
+    opacity: 0.8,
+  },
+  
+  // Section divider line - more subtle
+  sectionDivider: {
+    position: "absolute",
+    bottom: "-1px",
+    left: "20%",
+    right: "20%",
+    height: "1px",
+    backgroundColor: "#cbd5e1",
+    borderRadius: "0.5px",
+    opacity: 0.6,
+  },
+  
+  waveformContainer: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    height: "60%",
+    padding: "0 10px",
+    background: "radial-gradient(ellipse at center, rgba(100, 116, 139, 0.05) 0%, transparent 70%)",
+    borderRadius: "6px",
+  },
+  
+  waveformSvg: {
+    width: "100%",
+    height: "60px",
+    filter: "drop-shadow(0 1px 2px rgba(100, 116, 139, 0.1))",
+    transition: "filter 0.3s ease",
+  },
+  
+  // Chat section (middle section)
+  chatSection: {
+    flex: 1,
+    padding: "15px 20px 15px 5px", // Remove most left padding, keep right padding
+    width: "100%",
+    overflowY: "auto",
+    backgroundColor: "#ffffff",
+    borderBottom: "1px solid #e2e8f0",
+    display: "flex",
+    flexDirection: "column",
+    position: "relative",
+  },
+  
+  chatSectionHeader: {
+    textAlign: "center",
+    marginBottom: "30px",
+    paddingBottom: "20px",
+    borderBottom: "1px solid #f1f5f9",
+  },
+  
+  chatSectionTitle: {
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+    marginBottom: "5px",
+  },
+  
+  chatSectionSubtitle: {
+    fontSize: "12px",
+    color: "#94a3b8",
+    fontStyle: "italic",
+  },
+  
+  // Chat section visual indicator
+  chatSectionIndicator: {
+    position: "absolute",
+    left: "0",
+    top: "0",
+    bottom: "0",
+    width: "0px", // Removed blue border
+    backgroundColor: "#3b82f6",
+  },
+  
+  messageContainer: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "16px",
+    flex: 1,
+    overflowY: "auto",
+    padding: "0", // Remove all padding for maximum space usage
+  },
+  
+  // User message (right aligned - blue bubble)
+  userMessage: {
+    alignSelf: "flex-end",
+    maxWidth: "75%", // More conservative width
+    marginRight: "15px", // Increased margin for more right padding
+    marginBottom: "4px",
+  },
+  
+  userBubble: {
+    background: "#e0f2fe",
+    color: "#0f172a",
+    padding: "12px 16px",
+    borderRadius: "20px",
+    fontSize: "14px",
+    lineHeight: "1.5",
+    border: "1px solid #bae6fd",
+    boxShadow: "0 2px 8px rgba(14,165,233,0.15)",
+    wordWrap: "break-word",
+    overflowWrap: "break-word",
+    hyphens: "auto",
+    whiteSpace: "pre-wrap",
+  },
+  
+  // Assistant message (left aligned - teal bubble)
+  assistantMessage: {
+    alignSelf: "flex-start",
+    maxWidth: "80%", // Increased width for maximum space usage
+    marginLeft: "0px", // No left margin - flush to edge
+    marginBottom: "4px",
+  },
+  
+  assistantBubble: {
+    background: "#67d8ef",
+    color: "white",
+    padding: "12px 16px",
+    borderRadius: "20px",
+    fontSize: "14px",
+    lineHeight: "1.5",
+    boxShadow: "0 2px 8px rgba(103,216,239,0.3)",
+    wordWrap: "break-word",
+    overflowWrap: "break-word",
+    hyphens: "auto",
+    whiteSpace: "pre-wrap",
+  },
+  
+  // Control section - blended footer design
+  controlSection: {
+    padding: "12px",
+    backgroundColor: "#f1f5f9",
+    background: "linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    height: "15%",
+    minHeight: "100px",
+    borderTop: "1px solid #e2e8f0",
+    position: "relative",
+  },
+  
+  controlContainer: {
+    display: "flex",
+    gap: "8px",
+    background: "white",
+    padding: "12px 16px",
+    borderRadius: "24px",
+    boxShadow: "0 4px 16px rgba(100, 116, 139, 0.08), 0 1px 4px rgba(100, 116, 139, 0.04)",
+    border: "1px solid #e2e8f0",
+    width: "fit-content",
+  },
+  
+  controlButton: (isActive, variant = 'default') => ({
+    width: "56px",
+    height: "56px",
+    borderRadius: "50%",
+    border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    fontSize: "20px",
+    transition: "all 0.2s ease",
+    background: variant === 'phone' ? "#67d8ef" : 
+                variant === 'close' ? "#f1f5f9" :
+                isActive ? "#67d8ef" : "#f1f5f9",
+    color: variant === 'phone' || isActive ? "white" : "#64748b",
+    transform: isActive ? "scale(1.05)" : "scale(1)",
+    boxShadow: isActive ? "0 4px 16px rgba(103,216,239,0.4)" : "0 2px 8px rgba(0,0,0,0.05)",
   }),
+  
+  // Health indicator in top right
+  healthIndicator: {
+    position: "absolute",
+    top: "20px",
+    right: "20px",
+    zIndex: 10,
+  },
+  
+  // Input section for phone calls
+  phoneInputSection: {
+    position: "absolute",
+    bottom: "60px", // Moved lower from 140px to 60px to avoid blocking chat bubbles
+    left: "500px", // Moved further to the right from 400px to 500px
+    background: "white",
+    padding: "20px",
+    borderRadius: "16px",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+    border: "1px solid #e2e8f0",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    minWidth: "240px",
+    zIndex: 90,
+  },
+  
+  phoneInput: {
+    padding: "12px 16px",
+    border: "1px solid #d1d5db",
+    borderRadius: "8px",
+    fontSize: "14px",
+    outline: "none",
+    transition: "border-color 0.2s ease",
+  },
+  
+  phoneButton: (isActive) => ({
+    padding: "12px 20px",
+    background: isActive ? "#ef4444" : "#67d8ef",
+    color: "white",
+    border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "14px",
+    fontWeight: "600",
+    transition: "all 0.2s ease",
+  }),
+};
 
-  secondRow: { display:"flex", gap:32, width:"100%", maxWidth:1080,
-               alignItems:"center", justifyContent:"center" },
-  card:      { flex:1, background:"#263238", borderRadius:12, padding:20,
-               height:300, display:"flex", alignItems:"center", justifyContent:"center",
-               position:"relative" },
+/* ------------------------------------------------------------------ *
+ *  WAVEFORM COMPONENT
+ * ------------------------------------------------------------------ */
+const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }) => {
+  const [waveOffset, setWaveOffset] = useState(0);
+  const [amplitude, setAmplitude] = useState(5);
+  const animationRef = useRef();
+  
+  useEffect(() => {
+    // Always run animation, but with different intensities
+    const animate = () => {
+      setWaveOffset(prev => {
+        // More controlled speeds - good idle pace, moderate when speaking
+        const speed = speaker ? 1.8 : 1.2;
+        return (prev + speed) % 360;
+      });
+      
+      setAmplitude(() => {
+        // React to actual audio levels first, then fall back to speaker state
+        if (audioLevel > 0.01) {
+          // User is speaking - use real audio level
+          const scaledLevel = audioLevel * 25; // Scale up the audio level
+          const rhythmicVariation = Math.sin(Date.now() * 0.003) * (scaledLevel * 0.3);
+          return Math.max(8, scaledLevel + rhythmicVariation);
+        } else if (outputAudioLevel > 0.01) {
+          // Assistant is speaking - use output audio level
+          const scaledLevel = outputAudioLevel * 20;
+          const rhythmicVariation = Math.sin(Date.now() * 0.0025) * (scaledLevel * 0.4);
+          return Math.max(6, scaledLevel + rhythmicVariation);
+        } else if (speaker) {
+          // Active speaking fallback - more controlled, less spazzy movement
+          const time = Date.now() * 0.003; // Moderate speaking rhythm
+          const baseAmplitude = 12;
+          const rhythmicVariation = Math.sin(time) * 8; // Smooth rhythmic change
+          const subtleNoise = Math.random() * 3; // Reduced random variation
+          return baseAmplitude + rhythmicVariation + subtleNoise;
+        } else {
+          // Idle state - gentle breathing pattern with subtle pulse
+          const time = Date.now() * 0.0008; // Slow breathing cycle
+          const breathingAmplitude = 2.5 + Math.sin(time) * 1.5; // Gentle up and down
+          const pulseEffect = 1 + Math.sin(time * 2) * 0.1; // Subtle secondary pulse
+          const subtleVariation = Math.random() * 0.3; // Very small random variation
+          return (breathingAmplitude * pulseEffect) + subtleVariation;
+        }
+      });
+      
+      animationRef.current = requestAnimationFrame(animate);
+    };
+    
+    animationRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [speaker, audioLevel, outputAudioLevel]);
+  
+  // Generate wave path
+  const generateWavePath = () => {
+    const width = 750;
+    const height = 100;
+    const centerY = height / 2;
+    const frequency = speaker ? 0.02 : 0.015; // Gentler frequency when idle
+    const points = 200;
+    
+    let path = `M 0 ${centerY}`;
+    
+    for (let i = 0; i <= points; i++) {
+      const x = (i / points) * width;
+      const waveSpeed = speaker ? 0.09 : 0.08; // Gentler speaking speed, good idle speed
+      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * amplitude;
+      path += ` L ${x} ${y}`;
+    }
+    
+    return path;
+  };
 
-  logsWrapper:{ width:"100%", maxWidth:1080 },
-  logsPre:    { background:"#17202A", padding:14, borderRadius:10,
-                fontSize:"0.9rem", maxHeight:260, overflow:"auto", whiteSpace:"pre-wrap" },
-
-  phoneWidget:{ position:"fixed", right:28, bottom:28, width:220, height:275,
-                  display:"flex", alignItems:"center", justifyContent:"center" },
+  // Generate multiple wave layers for richer visualization
+  const generateMultipleWaves = () => {
+    const waves = [];
+    
+    // Different colors based on state
+    let baseColor, opacity;
+    if (speaker === "User") {
+      baseColor = "#ef4444"; // Red for user
+      opacity = 0.8;
+    } else if (speaker === "Assistant") {
+      baseColor = "#67d8ef"; // Teal for assistant  
+      opacity = 0.8;
+    } else {
+      // Idle state - gentle blue
+      baseColor = "#3b82f6";
+      opacity = 0.3;
+    }
+    
+    // Main wave
+    waves.push(
+      <path
+        key="wave1"
+        d={generateWavePath()}
+        stroke={baseColor}
+        strokeWidth={speaker ? "3" : "2"}
+        fill="none"
+        opacity={opacity}
+        strokeLinecap="round"
+      />
+    );
+    
+    // Secondary wave (slightly offset and smaller)
+    const secondaryPath = generateSecondaryWave();
+    waves.push(
+      <path
+        key="wave2"
+        d={secondaryPath}
+        stroke={baseColor}
+        strokeWidth={speaker ? "2" : "1.5"}
+        fill="none"
+        opacity={opacity * 0.6}
+        strokeLinecap="round"
+      />
+    );
+    
+    return waves;
+  };
+  
+  const generateSecondaryWave = () => {
+    const width = 750;
+    const height = 100;
+    const centerY = height / 2;
+    const frequency = speaker ? 0.025 : 0.018; // Slightly different frequency, gentler when idle
+    const points = 200;
+    
+    let path = `M 0 ${centerY}`;
+    
+    for (let i = 0; i <= points; i++) {
+      const x = (i / points) * width;
+      const waveSpeed = speaker ? 0.12 : 0.11; // More controlled secondary wave speed
+      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * (amplitude * 0.6);
+      path += ` L ${x} ${y}`;
+    }
+    
+    return path;
+  };
+  
+  return (
+    <div style={styles.waveformContainer}>
+      <svg style={styles.waveformSvg} viewBox="0 0 750 80" preserveAspectRatio="xMidYMid meet">
+        {generateMultipleWaves()}
+      </svg>
+      
+      {/* Audio level indicators for debugging - simple development check */}
+      {window.location.hostname === 'localhost' && (
+        <div style={{
+          position: 'absolute',
+          bottom: '-25px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: '10px',
+          color: '#666',
+          whiteSpace: 'nowrap'
+        }}>
+          Input: {(audioLevel * 100).toFixed(1)}% | Output: {(outputAudioLevel * 100).toFixed(1)}%
+        </div>
+      )}
+    </div>
+  );
 };
 
 /* ------------------------------------------------------------------ *
@@ -69,29 +520,29 @@ const styles = {
 const ChatBubble = ({ message }) => {
   const { speaker, text, isTool, streaming } = message;
   const isUser = speaker === "User";
-  return (
-    <div style={{ display:"flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom:16 }}>
-      <div style={{
-        background: isTool ? "rgba(26,101,112,0.2)"
-                    : isUser ? "#0078D4"
-                    : "#394B59",
-        color:"#fff", padding:"12px 16px", borderRadius:20,
-        maxWidth:"75%", lineHeight:1.5, boxShadow:"0 2px 6px rgba(0,0,0,.2)"
-      }}>
-        <span style={{ opacity: streaming ? 0.7 : 1 }}>
-          {text.split("\n").map((line,i)=><p key={i} style={{margin:"4px 0"}}>{line}</p>)}
-          {streaming && <em>▌</em>}
-        </span>
-        <span style={{
-          display:"block", fontSize:"0.8rem", color:"#B0BEC5",
-          marginTop:8, textAlign: isUser ? "right" : "left"
+  
+  if (isTool) {
+    return (
+      <div style={{ ...styles.assistantMessage, alignSelf: "center" }}>
+        <div style={{
+          ...styles.assistantBubble,
+          background: "#8b5cf6",
+          textAlign: "center",
+          fontSize: "14px",
         }}>
-          { isTool
-              ? "🛠️ Agent Called Tool"
-              : isUser
-                ? "👤 User"
-                : "🤖 Agent" }
-        </span>
+          {text}
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div style={isUser ? styles.userMessage : styles.assistantMessage}>
+      <div style={isUser ? styles.userBubble : styles.assistantBubble}>
+        {text.split("\n").map((line, i) => (
+          <div key={i}>{line}</div>
+        ))}
+        {streaming && <span style={{ opacity: 0.7 }}>▌</span>}
       </div>
     </div>
   );
@@ -102,12 +553,16 @@ const ChatBubble = ({ message }) => {
  * ------------------------------------------------------------------ */
 export default function RealTimeVoiceApp() {
   /* ---------- state ---------- */
-  const [messages, setMessages]       = useState([]);
+  const [messages, setMessages] = useState([
+    // { speaker: "User", text: "Hello, I need help with my insurance claim." },
+    // { speaker: "Assistant", text: "I'd be happy to help you with your insurance claim. Can you please provide me with your policy number?" }
+  ]);
   const [log, setLog]                 = useState("");
   const [recording, setRecording]     = useState(false);
   const [targetPhoneNumber, setTargetPhoneNumber] = useState("");
   const [callActive, setCallActive]   = useState(false);
   const [activeSpeaker, setActiveSpeaker] = useState(null);
+  const [showPhoneInput, setShowPhoneInput] = useState(false);
 
   // /* ---------- health monitoring ---------- */
   // const { 
@@ -124,17 +579,26 @@ export default function RealTimeVoiceApp() {
 
 
   // Function call state (not mind-map)
-  const [functionCalls, setFunctionCalls] = useState([]);
-  const [callResetKey, setCallResetKey]   = useState(0);
+  // const [functionCalls, setFunctionCalls] = useState([]);
+  // const [callResetKey, setCallResetKey]   = useState(0);
 
   /* ---------- refs ---------- */
   const chatRef      = useRef(null);
+  const messageContainerRef = useRef(null);
   const socketRef    = useRef(null);
-  const recognizerRef= useRef(null);
+  // const recognizerRef= useRef(null);
 
   // Fix: missing refs for audio and processor
   const audioContextRef = useRef(null);
   const processorRef = useRef(null);
+  const analyserRef = useRef(null);
+  const micStreamRef = useRef(null);
+  
+  // Audio level tracking for reactive waveforms
+  const [audioLevel, setAudioLevel] = useState(0);
+  // const [outputAudioLevel, setOutputAudioLevel] = useState(0);
+  const audioLevelRef = useRef(0);
+  // const outputAudioLevelRef = useRef(0);
 
 
 
@@ -142,11 +606,46 @@ export default function RealTimeVoiceApp() {
 
   /* ---------- scroll chat on new message ---------- */
   useEffect(()=>{
-    if(chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    // Try both refs to ensure scrolling works
+    if(messageContainerRef.current) {
+      messageContainerRef.current.scrollTo({
+        top: messageContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    } else if(chatRef.current) {
+      chatRef.current.scrollTo({
+        top: chatRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   },[messages]);
 
   /* ---------- teardown on unmount ---------- */
-  useEffect(()=>()=> stopRecognition(),[]);
+  useEffect(() => {
+    return () => {
+      if (processorRef.current) {
+        try { 
+          processorRef.current.disconnect(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+      if (audioContextRef.current) {
+        try { 
+          audioContextRef.current.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+      if (socketRef.current) {
+        try { 
+          socketRef.current.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
+    };
+  }, []);
 
   /* ---------- derive callActive from logs ---------- */
   useEffect(()=>{
@@ -180,6 +679,7 @@ export default function RealTimeVoiceApp() {
 
       // 2) setup Web Audio for raw PCM @16 kHz
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: 16000
       });
@@ -187,13 +687,37 @@ export default function RealTimeVoiceApp() {
 
       const source = audioCtx.createMediaStreamSource(stream);
 
+      // Add analyser for real-time audio level monitoring
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.3;
+      analyserRef.current = analyser;
+      
+      // Connect source to analyser
+      source.connect(analyser);
+
       // 3) ScriptProcessor with small buffer for low latency (256 or 512 samples)
       const bufferSize = 512; 
       const processor  = audioCtx.createScriptProcessor(bufferSize, 1, 1);
       processorRef.current = processor;
 
+      // Connect analyser to processor for audio data flow
+      analyser.connect(processor);
+
       processor.onaudioprocess = (evt) => {
         const float32 = evt.inputBuffer.getChannelData(0);
+        
+        // Calculate real-time audio level
+        let sum = 0;
+        for (let i = 0; i < float32.length; i++) {
+          sum += float32[i] * float32[i];
+        }
+        const rms = Math.sqrt(sum / float32.length);
+        const level = Math.min(1, rms * 10); // Scale and clamp to 0-1
+        
+        audioLevelRef.current = level;
+        setAudioLevel(level);
+
         // Debug: Log a sample of mic data
         console.log("Mic data sample:", float32.slice(0, 10)); // Should show non-zero values if your mic is hot
 
@@ -221,15 +745,27 @@ export default function RealTimeVoiceApp() {
 
     const stopRecognition = () => {
       if (processorRef.current) {
-        try { processorRef.current.disconnect(); } catch {}
+        try { 
+          processorRef.current.disconnect(); 
+        } catch (e) {
+          console.warn("Error disconnecting processor:", e);
+        }
         processorRef.current = null;
       }
       if (audioContextRef.current) {
-        try { audioContextRef.current.close(); } catch {}
+        try { 
+          audioContextRef.current.close(); 
+        } catch (e) {
+          console.warn("Error closing audio context:", e);
+        }
         audioContextRef.current = null;
       }
       if (socketRef.current) {
-        try { socketRef.current.close(); } catch {}
+        try { 
+          socketRef.current.close(); 
+        } catch (e) {
+          console.warn("Error closing socket:", e);
+        }
         socketRef.current = null;
       }
       setRecording(false);
@@ -272,7 +808,7 @@ export default function RealTimeVoiceApp() {
         payload.content = payload.message;
         // fall through to unified logic below
       }
-      const { type, content = "", message = "", function_call, speaker } = payload;
+      const { type, content = "", message = "", speaker } = payload;
       const txt = content || message;
       const msgType = (type || "").toLowerCase();
 
@@ -413,8 +949,8 @@ export default function RealTimeVoiceApp() {
         appendLog("Relay WS disconnected");
         setCallActive(false);
         setActiveSpeaker(null);
-        setFunctionCalls([]);
-        setCallResetKey(k=>k+1);
+        // setFunctionCalls([]);
+        // setCallResetKey(k=>k+1);
       };
     } catch(e) {
       appendLog(`Network error starting call: ${e.message}`);
@@ -426,111 +962,93 @@ export default function RealTimeVoiceApp() {
    * ------------------------------------------------------------------ */
   return (
     <div style={styles.root}>
-      {/* HEADER */}
-      <header style={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div style={{ flex: 1 }} />
-          <div style={{ textAlign: 'center' }}>
-            <h1 style={styles.headerTitle}>🎙️ RTInsuranceAgent</h1>
-            <p style={styles.headerSubtitle}>
-              Transforming patient care with real-time, intelligent voice interactions
-            </p>
+      <div style={styles.mainContainer}>
+        {/* App Header */}
+        <div style={styles.appHeader}>
+          <div style={styles.appTitleContainer}>
+            <div style={styles.appTitleWrapper}>
+              <span style={styles.appTitleIcon}>🎙️</span>
+              <h1 style={styles.appTitle}>RTInsuranceAgent</h1>
+            </div>
+            <p style={styles.appSubtitle}>Transforming patient care with real-time, intelligent voice interactions</p>
           </div>
         </div>
-      </header>
 
-      {/* CHAT */}
-      <section style={styles.chatWrapper}>
-        <div ref={chatRef} style={styles.chatScroll}>
-          {messages.map((m,i)=> <ChatBubble key={i} message={m} />)}
-        </div>
-      </section>
-
-      {/* START/STOP */}
-      <div style={styles.controlBar}>
-        <button
-          style={styles.primaryBtn(recording)}
-          onClick={recording ? stopRecognition : startRecognition}
-        >
-          {recording ? "⏹ End Conversation" : "▶ Start Conversation"}
-        </button>
-      </div>
-
-      {/* AVATAR + SPHERE */}
-      <div style={styles.secondRow}>
-        <div style={styles.card}>
-          <VoiceSphere
-            speaker={activeSpeaker}
-            active={!!activeSpeaker}
-            functionCalls={functionCalls}
-            resetKey={callResetKey}
+        {/* Waveform Section */}
+        <div style={styles.waveformSection}>
+          <div style={styles.waveformSectionTitle}>Voice Activity</div>
+          <WaveformVisualization 
+            isActive={recording} 
+            speaker={activeSpeaker} 
+            audioLevel={audioLevel}
+            outputAudioLevel={0}
           />
+          <div style={styles.sectionDivider}></div>
+        </div>
+
+        {/* Chat Messages */}
+        <div style={styles.chatSection} ref={chatRef}>
+          <div style={styles.chatSectionIndicator}></div>
+          <div style={styles.messageContainer} ref={messageContainerRef}>
+            {messages.map((message, index) => (
+              <ChatBubble key={index} message={message} />
+            ))}
+          </div>
+        </div>
+
+        {/* Control Buttons */}
+        <div style={styles.controlSection}>
+          <div style={styles.controlContainer}>
+            {/* Microphone Button */}
+            <button
+              style={styles.controlButton(recording)}
+              onClick={recording ? stopRecognition : startRecognition}
+              title={recording ? "Stop Recording" : "Start Recording"}
+            >
+              🎤
+            </button>
+            
+            {/* Phone Call Button */}
+            <button
+              style={styles.controlButton(false, 'phone')}
+              onClick={() => setShowPhoneInput(!showPhoneInput)}
+              title="Phone Call"
+            >
+              📞
+            </button>
+            
+            {/* Close Button */}
+            <button
+              style={styles.controlButton(false, 'close')}
+              onClick={stopRecognition}
+              title="End Session"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* LOGS */}
-      <div style={styles.logsWrapper}>
-        <h3 style={{ marginBottom:8 }}>System Logs</h3>
-        <pre style={styles.logsPre}>{log}</pre>
-      </div>
-
-      {/* PHONE WIDGET */}
-      <div style={{
-        position:"fixed",right:-300,bottom:20,width:260,height:350,
-        display:"flex",alignItems:"center",justifyContent:"center"
-      }}>
-        {callActive && (
-          <div style={{
-            position:"absolute", left:"7%", width:"80%", height:"120%",
-            borderRadius:20, background:"rgba(0,183,255,0.88)",
-            animation:"ring 1.6s ease-out infinite"
-          }}/>
-        )}
-        <img
-          src={`${import.meta.env.BASE_URL}phoneimage.png`}
-          alt="Phone"
-          style={{ width:"100%", height:"auto" }}
-        />
-        {callActive && (
-          <div style={{
-            position:"absolute", top:88, left:"63%",
-            transform:"translate(-50%,-50%)",
-            width:12, height:12, background:"#A3FF12",
-            boxShadow:"0 0 6px 3px rgba(73,255,18,0.8)",
-            animation:"led 1.2s infinite"
-          }}/>
-        )}
-        <div style={{
-          position:"absolute", top:112, left:48, width:134,
-          display:"flex", flexDirection:"column", gap:8
-        }}>
+      {/* Phone Input Panel */}
+      {showPhoneInput && (
+        <div style={styles.phoneInputSection}>
           <input
             type="tel"
-            disabled={callActive}
             value={targetPhoneNumber}
+            onChange={(e) => setTargetPhoneNumber(e.target.value)}
             placeholder="+15551234567"
-            onChange={e=>setTargetPhoneNumber(e.target.value)}
-            style={{
-              background:"#1E293B", color:"#E5E7EB",
-              border:"1px solid #374151", borderRadius:4,
-              padding:"6px 6px", textAlign:"center",
-              fontSize:"0.8rem", opacity: callActive ? 0.6 : 1
-            }}
+            style={styles.phoneInput}
+            disabled={callActive}
           />
           <button
-            onClick={startACSCall}
-            style={{
-              background: callActive?"#DC2626":"#2563EB",
-              color:"#fff", border:"none", borderRadius:4,
-              fontSize:"0.8rem", fontWeight:600, padding:"8px 0",
-              cursor:"pointer",
-              animation: callActive ? "btnGlow 1.4s infinite" : undefined
-            }}
+            onClick={callActive ? stopRecognition : startACSCall}
+            style={styles.phoneButton(callActive)}
           >
-            {callActive ? "End" : "Call"}
+            {callActive ? "End Call" : "Call"}
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
+
