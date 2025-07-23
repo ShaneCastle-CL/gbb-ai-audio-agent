@@ -10,6 +10,7 @@ PYTHON_INTERPRETER = python
 CONDA_ENV ?= audioagent
 # Ensure current directory is in PYTHONPATH
 export PYTHONPATH=$(PWD):$PYTHONPATH;
+SCRIPTS_DIR = apps/rtagent/scripts
 
 
 # Install pre-commit and pre-push git hooks

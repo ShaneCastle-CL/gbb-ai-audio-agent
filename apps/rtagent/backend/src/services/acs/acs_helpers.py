@@ -5,11 +5,12 @@ This module provides helper functions and utilities for integrating with Azure C
 
 """
 
+
 import asyncio
 import json
 from base64 import b64encode
 from typing import List, Optional
-
+import hashlib
 
 class MediaCancelledException(Exception):
     """Exception raised when media playback is cancelled due to interrupt."""
