@@ -37,18 +37,86 @@ async def send_tts_audio(
     text: str, ws: WebSocket, latency_tool: Optional[LatencyTool] = None
 ) -> None:
     """
-    Fire-and-forget speech for browser clients.
+    Synthesize speech and send audio data to browser WebSocket client.
 
-    Uses the synthesiser cached on FastAPI `app.state.tts_client`.
-    Adds latency tracking for TTS step.
+    Uses the synthesizer cached on FastAPI `app.state.tts_client`.
+    Adds latency tracking for TTS step and sends audio frames to React frontend.
     """
+    # Validate WebSocket connection
+    if ws.client_state != WebSocketState.CONNECTED:
+        logger.error("WebSocket is not connected, cannot send TTS audio")
+        return
+    
+    if not text or not text.strip():
+        logger.warning("Empty text provided for TTS synthesis")
+        return
+
     if latency_tool:
         latency_tool.start("tts")
-    synth: SpeechSynthesizer = ws.app.state.tts_client
-    ws.state.is_synthesizing = True  # type: ignore[attr-defined]
-    synth.start_speaking_text(text)
-    if latency_tool:
-        latency_tool.stop("tts", ws.app.state.redis)
+        latency_tool.start("tts:synthesis")
+
+    try:
+        synth: SpeechSynthesizer = ws.app.state.tts_client
+        ws.state.is_synthesizing = True  # type: ignore[attr-defined]
+        
+        # Synthesize text to PCM bytes for browser playback
+        logger.debug(f"Synthesizing text: {text[:100]}...")
+        pcm_bytes = synth.synthesize_to_pcm(
+            text=text, 
+            voice=VOICE_TTS, 
+            sample_rate=16000
+        )
+        
+        if latency_tool:
+            latency_tool.stop("tts:synthesis", ws.app.state.redis)
+
+        # Convert PCM to base64 frames for WebSocket transmission
+        frames = SpeechSynthesizer.split_pcm_to_base64_frames(
+            pcm_bytes, sample_rate=16000
+        )
+        
+        logger.debug(f"Generated {len(frames)} audio frames for WebSocket transmission")
+        
+        # Send audio frames to React frontend
+        for i, frame in enumerate(frames):
+            if ws.client_state != WebSocketState.CONNECTED:
+                logger.warning("WebSocket disconnected during audio transmission")
+                break
+                
+            try:
+                # Send audio data in format expected by React frontend
+                await ws.send_json({
+                    "type": "audio_data",
+                    "data": frame,
+                    "frame_index": i,
+                    "total_frames": len(frames),
+                    "sample_rate": 16000,
+                    "is_final": i == len(frames) - 1
+                })
+            except Exception as e:
+                logger.error(f"Failed to send audio frame {i}: {e}")
+                break
+                
+        logger.debug("TTS audio transmission completed successfully")
+        
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        # Send error message to frontend
+        try:
+            await ws.send_json({
+                "type": "tts_error",
+                "error": str(e),
+                "text": text[:100] + "..." if len(text) > 100 else text
+            })
+        except Exception as send_error:
+            logger.error(f"Failed to send error message to frontend: {send_error}")
+    finally:
+        # Clean up synthesis state
+        if hasattr(ws.state, 'is_synthesizing'):
+            ws.state.is_synthesizing = False  # type: ignore[attr-defined]
+        
+        if latency_tool:
+            latency_tool.stop("tts", ws.app.state.redis)
 
 
 async def send_response_to_acs(

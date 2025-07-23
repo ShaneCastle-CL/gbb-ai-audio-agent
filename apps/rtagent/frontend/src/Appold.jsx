@@ -346,7 +346,7 @@ const styles = {
 };
 
 /* ------------------------------------------------------------------ *
- *  WAVEFORM COMPONENT
+ *  WAVEFORM COMPONENT - SIMPLE & SMOOTH
  * ------------------------------------------------------------------ */
 const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }) => {
   const [waveOffset, setWaveOffset] = useState(0);
@@ -354,40 +354,32 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
   const animationRef = useRef();
   
   useEffect(() => {
-    // Always run animation, but with different intensities
     const animate = () => {
-      setWaveOffset(prev => {
-        // More controlled speeds - good idle pace, moderate when speaking
-        const speed = speaker ? 1.8 : 1.2;
-        return (prev + speed) % 360;
-      });
+      setWaveOffset(prev => (prev + (speaker ? 2 : 1)) % 1000);
       
       setAmplitude(() => {
         // React to actual audio levels first, then fall back to speaker state
         if (audioLevel > 0.01) {
           // User is speaking - use real audio level
-          const scaledLevel = audioLevel * 25; // Scale up the audio level
-          const rhythmicVariation = Math.sin(Date.now() * 0.003) * (scaledLevel * 0.3);
-          return Math.max(8, scaledLevel + rhythmicVariation);
+          const scaledLevel = audioLevel * 25;
+          const smoothVariation = Math.sin(Date.now() * 0.002) * (scaledLevel * 0.2);
+          return Math.max(8, scaledLevel + smoothVariation);
         } else if (outputAudioLevel > 0.01) {
           // Assistant is speaking - use output audio level
           const scaledLevel = outputAudioLevel * 20;
-          const rhythmicVariation = Math.sin(Date.now() * 0.0025) * (scaledLevel * 0.4);
-          return Math.max(6, scaledLevel + rhythmicVariation);
+          const smoothVariation = Math.sin(Date.now() * 0.0018) * (scaledLevel * 0.25);
+          return Math.max(6, scaledLevel + smoothVariation);
         } else if (speaker) {
-          // Active speaking fallback - more controlled, less spazzy movement
-          const time = Date.now() * 0.003; // Moderate speaking rhythm
-          const baseAmplitude = 12;
-          const rhythmicVariation = Math.sin(time) * 8; // Smooth rhythmic change
-          const subtleNoise = Math.random() * 3; // Reduced random variation
-          return baseAmplitude + rhythmicVariation + subtleNoise;
+          // Active speaking fallback - gentle rhythmic movement
+          const time = Date.now() * 0.002;
+          const baseAmplitude = 10;
+          const rhythmicVariation = Math.sin(time) * 5;
+          return baseAmplitude + rhythmicVariation;
         } else {
-          // Idle state - gentle breathing pattern with subtle pulse
-          const time = Date.now() * 0.0008; // Slow breathing cycle
-          const breathingAmplitude = 2.5 + Math.sin(time) * 1.5; // Gentle up and down
-          const pulseEffect = 1 + Math.sin(time * 2) * 0.1; // Subtle secondary pulse
-          const subtleVariation = Math.random() * 0.3; // Very small random variation
-          return (breathingAmplitude * pulseEffect) + subtleVariation;
+          // Idle state - gentle breathing pattern
+          const time = Date.now() * 0.0008;
+          const breathingAmplitude = 3 + Math.sin(time) * 1.5;
+          return breathingAmplitude;
         }
       });
       
@@ -403,42 +395,58 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
     };
   }, [speaker, audioLevel, outputAudioLevel]);
   
-  // Generate wave path
+  // Simple wave path generation
   const generateWavePath = () => {
     const width = 750;
     const height = 100;
     const centerY = height / 2;
-    const frequency = speaker ? 0.02 : 0.015; // Gentler frequency when idle
-    const points = 200;
+    const frequency = 0.02;
+    const points = 100; // Reduced points for better performance
     
     let path = `M 0 ${centerY}`;
     
     for (let i = 0; i <= points; i++) {
       const x = (i / points) * width;
-      const waveSpeed = speaker ? 0.09 : 0.08; // Gentler speaking speed, good idle speed
-      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * amplitude;
+      const y = centerY + Math.sin((x * frequency + waveOffset * 0.1)) * amplitude;
       path += ` L ${x} ${y}`;
     }
     
     return path;
   };
 
-  // Generate multiple wave layers for richer visualization
+  // Secondary wave
+  const generateSecondaryWave = () => {
+    const width = 750;
+    const height = 100;
+    const centerY = height / 2;
+    const frequency = 0.025;
+    const points = 100;
+    
+    let path = `M 0 ${centerY}`;
+    
+    for (let i = 0; i <= points; i++) {
+      const x = (i / points) * width;
+      const y = centerY + Math.sin((x * frequency + waveOffset * 0.12)) * (amplitude * 0.6);
+      path += ` L ${x} ${y}`;
+    }
+    
+    return path;
+  };
+
+  // Wave rendering
   const generateMultipleWaves = () => {
     const waves = [];
     
-    // Different colors based on state
     let baseColor, opacity;
     if (speaker === "User") {
-      baseColor = "#ef4444"; // Red for user
+      baseColor = "#ef4444";
       opacity = 0.8;
     } else if (speaker === "Assistant") {
-      baseColor = "#67d8ef"; // Teal for assistant  
+      baseColor = "#67d8ef";
       opacity = 0.8;
     } else {
-      // Idle state - gentle blue
       baseColor = "#3b82f6";
-      opacity = 0.3;
+      opacity = 0.4;
     }
     
     // Main wave
@@ -454,40 +462,20 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
       />
     );
     
-    // Secondary wave (slightly offset and smaller)
-    const secondaryPath = generateSecondaryWave();
+    // Secondary wave
     waves.push(
       <path
         key="wave2"
-        d={secondaryPath}
+        d={generateSecondaryWave()}
         stroke={baseColor}
         strokeWidth={speaker ? "2" : "1.5"}
         fill="none"
-        opacity={opacity * 0.6}
+        opacity={opacity * 0.5}
         strokeLinecap="round"
       />
     );
     
     return waves;
-  };
-  
-  const generateSecondaryWave = () => {
-    const width = 750;
-    const height = 100;
-    const centerY = height / 2;
-    const frequency = speaker ? 0.025 : 0.018; // Slightly different frequency, gentler when idle
-    const points = 200;
-    
-    let path = `M 0 ${centerY}`;
-    
-    for (let i = 0; i <= points; i++) {
-      const x = (i / points) * width;
-      const waveSpeed = speaker ? 0.12 : 0.11; // More controlled secondary wave speed
-      const y = centerY + Math.sin((x * frequency + waveOffset * waveSpeed)) * (amplitude * 0.6);
-      path += ` L ${x} ${y}`;
-    }
-    
-    return path;
   };
   
   return (
@@ -496,7 +484,7 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
         {generateMultipleWaves()}
       </svg>
       
-      {/* Audio level indicators for debugging - simple development check */}
+      {/* Audio level indicators for debugging */}
       {window.location.hostname === 'localhost' && (
         <div style={{
           position: 'absolute',
@@ -507,7 +495,7 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
           color: '#666',
           whiteSpace: 'nowrap'
         }}>
-          Input: {(audioLevel * 100).toFixed(1)}% | Output: {(outputAudioLevel * 100).toFixed(1)}%
+          Input: {(audioLevel * 100).toFixed(1)}% | Amp: {amplitude.toFixed(1)}
         </div>
       )}
     </div>

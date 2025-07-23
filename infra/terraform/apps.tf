@@ -105,8 +105,10 @@ resource "azurerm_linux_web_app" "backend" {
 
   app_settings = merge(
     {
-      "ACS_ENDPOINT"       = "https://${azapi_resource.acs.output.properties.hostName}"
-      "ACS_STREAMING_MODE" = "media"
+      # Azure Communication Services Configuration
+      "ACS_CONNECTION_STRING" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=AcsConnectionString)"
+      "ACS_ENDPOINT"          = "https://${azapi_resource.acs.output.properties.hostName}"
+      "ACS_STREAMING_MODE"    = "media"
       "ACS_SOURCE_PHONE_NUMBER" = (
         var.acs_source_phone_number != null && var.acs_source_phone_number != ""
         ? var.acs_source_phone_number
@@ -216,6 +218,7 @@ resource "azurerm_linux_web_app" "backend" {
   }
 
   depends_on = [
+    azurerm_key_vault_secret.acs_connection_string,
     azurerm_role_assignment.keyvault_backend_secrets
   ]
 }
@@ -270,14 +273,19 @@ resource "azurerm_linux_web_app" "frontend" {
 
     always_on = true
 
-    # Vite production build and serve command
-    app_command_line = "npm run build && npm run preview -- --host 0.0.0.0 --port 8080"
+    # Vite production build and serve command using the serve package
+    app_command_line = "npm run build && npm run start"
 
     # CORS configuration - no circular dependency
     cors {
       allowed_origins     = ["*"] # Frontend doesn't need restricted CORS
       support_credentials = false # Must be false when allowed_origins includes "*"
     }
+
+    # Enable static file compression and proper MIME types
+    use_32_bit_worker = false
+    ftps_state        = "Disabled"
+    http2_enabled     = true
   }
 
   # Environment variables for Vite build and runtime
@@ -294,7 +302,7 @@ resource "azurerm_linux_web_app" "frontend" {
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.main.connection_string
     "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.main.instrumentation_key
 
-    # Node.js and build configuration
+    # Node.js and Vite build configuration
     "PORT"                           = "8080"
     "NODE_ENV"                       = "production"
     "NPM_CONFIG_PRODUCTION"          = "false" # Allow dev dependencies for build
@@ -302,15 +310,28 @@ resource "azurerm_linux_web_app" "frontend" {
     "ENABLE_ORYX_BUILD"              = "true"
     "ORYX_PLATFORM_NAME"             = "nodejs"
 
-    # Website configuration
+    # Vite-specific optimizations
+    "VITE_NODE_ENV" = "production"
+    "BUILD_FLAGS"   = "--mode production"
+
+    # Website configuration for Vite SPA
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
     "WEBSITES_PORT"                       = "8080"
+    "WEBSITE_NODE_DEFAULT_VERSION"        = "22-lts"
+    "SCM_COMMAND_IDLE_TIMEOUT"            = "1800" # 30 minutes for build timeout
+
+    # Static file serving optimizations
+    "WEBSITE_STATIC_COMPRESSION"      = "1"
+    "WEBSITE_DYNAMIC_CACHE"           = "1"
+    "WEBSITE_ENABLE_SYNC_UPDATE_SITE" = "true"
+
+    # Always include Speech key for frontend when local auth is enabled
+    "VITE_AZURE_SPEECH_KEY" = var.disable_local_auth ? "" : "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=speech-key)"
     }, var.disable_local_auth ? {
     # Use managed identity for authentication
     "VITE_USE_MANAGED_IDENTITY" = "true"
     } : {
-    # Use API keys when local auth is enabled
-    "VITE_AZURE_SPEECH_KEY" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=speech-key)"
+    # Additional settings when local auth is enabled (keys are used)
     }, var.frontend_app_registration_client_id != null ? {
     # Use EasyAuth with existing Azure AD app registration
     "OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID" = azurerm_user_assigned_identity.frontend.client_id

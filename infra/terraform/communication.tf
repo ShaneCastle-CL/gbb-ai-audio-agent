@@ -22,13 +22,27 @@ resource "azapi_resource" "acs" {
   }
 }
 
-# Store the ACS connection string in Azure Key Vault as a secret
-resource "azurerm_key_vault_secret" "acs_connection_string" {
-  name         = "AcsConnectionString"
-  value        = azapi_resource.acs.output.properties.primaryConnectionString
-  key_vault_id = azurerm_key_vault.main.id
+# Retrieve ACS connection string using listKeys action (secure method)
+resource "azapi_resource_action" "acs_list_keys" {
+  type        = "Microsoft.Communication/communicationServices@2025-05-01-preview"
+  resource_id = azapi_resource.acs.id
+  action      = "listKeys"
+
+  response_export_values = {
+    primary_connection_string = "primaryConnectionString"
+  }
 
   depends_on = [azapi_resource.acs]
+}
+
+# Store the ACS connection string in Azure Key Vault as a secret
+resource "azurerm_key_vault_secret" "acs_connection_string" {
+  name            = "acs-connection-string"
+  value           = azapi_resource_action.acs_list_keys.output.primary_connection_string
+  key_vault_id    = azurerm_key_vault.main.id
+  expiration_date = timeadd(timestamp(), "8760h") # 1 year from now
+
+  depends_on = [azapi_resource_action.acs_list_keys]
 }
 
 # Grant the Communication Service's managed identity access to Speech Services

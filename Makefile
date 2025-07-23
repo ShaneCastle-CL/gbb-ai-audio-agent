@@ -344,7 +344,55 @@ deploy_to_webapp:
 		fi \
 	fi
 	@echo "🚀 Deploying '$(DEPLOY_DIR)' to Azure Web App '$(WEBAPP_NAME)' in resource group '$(AZURE_RESOURCE_GROUP)'"
-	az webapp deploy --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME) --src-path $(DEPLOY_DIR) --type zip
+	@echo "⏳ Note: Large deployments may take 10+ minutes. Please be patient..."
+	@echo ""
+	@echo "📊 Deployment Progress Monitor:"
+	@echo "   🌐 Azure Portal: https://portal.azure.com/#@/resource/subscriptions/$(shell az account show --query id -o tsv 2>/dev/null)/resourceGroups/$(AZURE_RESOURCE_GROUP)/providers/Microsoft.Web/sites/$(WEBAPP_NAME)/deploymentCenter"
+	@echo "   📋 Deployment Logs: https://$(WEBAPP_NAME).scm.azurewebsites.net/api/deployments/latest/log"
+	@echo ""
+	@set -e; \
+	if az webapp deploy --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME) --src-path $(DEPLOY_DIR) --type zip; then \
+		DEPLOY_EXIT_CODE=$$?; \
+		echo ""; \
+		echo "⚠️  Deployment command timed out or encountered an issue (exit code: $$DEPLOY_EXIT_CODE)"; \
+		echo ""; \
+		if [ "$$DEPLOY_EXIT_CODE" = "124" ]; then \
+			echo "🔄 TIMEOUT NOTICE: The deployment is likely still in progress in the background."; \
+			echo "   The 15-minute timeout is a safety measure to prevent hanging builds."; \
+			echo ""; \
+		fi; \
+		echo "📋 Next Steps:"; \
+		echo "   1. 🔍 Check deployment status in Azure Portal:"; \
+		echo "      https://portal.azure.com/#@/resource/subscriptions/$(shell az account show --query id -o tsv 2>/dev/null)/resourceGroups/$(AZURE_RESOURCE_GROUP)/providers/Microsoft.Web/sites/$(WEBAPP_NAME)/deploymentCenter"; \
+		echo ""; \
+		echo "   2. 📊 Monitor real-time logs via VS Code:"; \
+		echo "      • Install 'Azure App Service' extension"; \
+		echo "      • Right-click on '$(WEBAPP_NAME)' → 'Start Streaming Logs'"; \
+		echo "      • Or use Command Palette: 'Azure App Service: Start Streaming Logs'"; \
+		echo ""; \
+		echo "   3. 🖥️  Monitor logs via Azure CLI:"; \
+		echo "      az webapp log tail --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME)"; \
+		echo ""; \
+		echo "   4. 🌐 Check deployment logs directly:"; \
+		echo "      https://$(WEBAPP_NAME).scm.azurewebsites.net/api/deployments/latest/log"; \
+		echo ""; \
+		echo "   5. 🔄 If deployment fails, retry with:"; \
+		echo "      make deploy_to_webapp WEBAPP_NAME=$(WEBAPP_NAME) DEPLOY_DIR=$(DEPLOY_DIR) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)"; \
+		echo ""; \
+		echo "💡 Pro Tip: Large Node.js builds (like Vite) typically take 5-15 minutes."; \
+		echo "   The site may show 'Application Error' until build completes."; \
+		exit $$DEPLOY_EXIT_CODE; \
+	else \
+		echo ""; \
+		echo "✅ Deployment command completed successfully!"; \
+		echo "🌐 Your app should be available at: https://$(WEBAPP_NAME).azurewebsites.net"; \
+		echo ""; \
+		echo "📋 Post-Deployment Verification:"; \
+		echo "   • Wait 2-3 minutes for app startup"; \
+		echo "   • Check app health: https://$(WEBAPP_NAME).azurewebsites.net/health (if available)"; \
+		echo "   • Monitor logs for any startup issues"; \
+		echo ""; \
+	fi
 
 # Deploy frontend to Azure Web App using Terraform outputs and deployment artifacts
 deploy_frontend:
@@ -388,7 +436,85 @@ deploy_backend:
 	fi
 	$(MAKE) deploy_to_webapp WEBAPP_NAME=$(WEBAPP_NAME) DEPLOY_DIR=$(DEPLOY_ZIP) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)
 
-.PHONY: generate_env_from_terraform check_terraform_initialized show_env_file update_env_with_secrets generate_env_from_terraform_ps show_env_file_ps update_env_with_secrets_ps
+# Monitor deployment status and logs for any webapp
+# Usage: make monitor_deployment WEBAPP_NAME=<your-app-name> AZURE_RESOURCE_GROUP=<your-resource-group>
+monitor_deployment:
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		echo "❌ Usage: make monitor_deployment WEBAPP_NAME=<your-app-name> AZURE_RESOURCE_GROUP=<your-resource-group>"; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		if [ -f ".env" ]; then \
+			RESOURCE_GROUP_ENV=$$(grep '^AZURE_RESOURCE_GROUP=' .env | cut -d'=' -f2); \
+			if [ -n "$$RESOURCE_GROUP_ENV" ]; then \
+				echo "ℹ️  Using AZURE_RESOURCE_GROUP from .env: $$RESOURCE_GROUP_ENV"; \
+				AZURE_RESOURCE_GROUP=$$RESOURCE_GROUP_ENV; \
+			else \
+				echo "❌ AZURE_RESOURCE_GROUP not set and not found in .env"; \
+				exit 1; \
+			fi \
+		else \
+			echo "❌ AZURE_RESOURCE_GROUP not set and .env file not found"; \
+			exit 1; \
+		fi \
+	fi
+	@echo "📊 Monitoring Azure Web App: $(WEBAPP_NAME)"
+	@echo "============================================="
+	@echo ""
+	@echo "🔍 App Service Status:"
+	@az webapp show --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME) --query "{name:name,state:state,defaultHostName:defaultHostName,lastModifiedTime:lastModifiedTime}" --output table 2>/dev/null || echo "❌ Could not retrieve app status"
+	@echo ""
+	@echo "📋 Recent Deployment Status:"
+	@az webapp deployment list --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME) --query "[0].{status:status,deploymentId:id,startTime:startTime,endTime:endTime,message:message}" --output table 2>/dev/null || echo "❌ Could not retrieve deployment status"
+	@echo ""
+	@echo "🌐 Useful Links:"
+	@echo "   • App URL: https://$(WEBAPP_NAME).azurewebsites.net"
+	@echo "   • Azure Portal: https://portal.azure.com/#@/resource/subscriptions/$(shell az account show --query id -o tsv 2>/dev/null)/resourceGroups/$(AZURE_RESOURCE_GROUP)/providers/Microsoft.Web/sites/$(WEBAPP_NAME)"
+	@echo "   • Deployment Center: https://portal.azure.com/#@/resource/subscriptions/$(shell az account show --query id -o tsv 2>/dev/null)/resourceGroups/$(AZURE_RESOURCE_GROUP)/providers/Microsoft.Web/sites/$(WEBAPP_NAME)/deploymentCenter"
+	@echo "   • Kudu Console: https://$(WEBAPP_NAME).scm.azurewebsites.net"
+	@echo "   • Deployment Logs: https://$(WEBAPP_NAME).scm.azurewebsites.net/api/deployments/latest/log"
+	@echo ""
+	@echo "📊 VS Code Log Streaming:"
+	@echo "   1. Install 'Azure App Service' extension"
+	@echo "   2. Sign in to Azure account"
+	@echo "   3. Right-click '$(WEBAPP_NAME)' → 'Start Streaming Logs'"
+	@echo "   4. Or use Command Palette: 'Azure App Service: Start Streaming Logs'"
+	@echo ""
+	@echo "🖥️  CLI Log Streaming (run in separate terminal):"
+	@echo "   az webapp log tail --resource-group $(AZURE_RESOURCE_GROUP) --name $(WEBAPP_NAME)"
+	@echo ""
+
+# Stream logs for backend app service
+monitor_backend_deployment:
+	@echo "📊 Monitoring Backend Deployment"
+	$(eval WEBAPP_NAME := $(shell terraform -chdir=$(TF_DIR) output -raw BACKEND_APP_SERVICE_NAME 2>/dev/null))
+	$(eval AZURE_RESOURCE_GROUP := $(shell terraform -chdir=$(TF_DIR) output -raw AZURE_RESOURCE_GROUP 2>/dev/null))
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		echo "❌ Could not determine backend web app name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		echo "❌ Could not determine resource group name from Terraform outputs."; \
+		exit 1; \
+	fi
+	$(MAKE) monitor_deployment WEBAPP_NAME=$(WEBAPP_NAME) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)
+
+# Stream logs for frontend app service  
+monitor_frontend_deployment:
+	@echo "📊 Monitoring Frontend Deployment"
+	$(eval WEBAPP_NAME := $(shell terraform -chdir=$(TF_DIR) output -raw FRONTEND_APP_SERVICE_NAME 2>/dev/null))
+	$(eval AZURE_RESOURCE_GROUP := $(shell terraform -chdir=$(TF_DIR) output -raw AZURE_RESOURCE_GROUP 2>/dev/null))
+	@if [ -z "$(WEBAPP_NAME)" ]; then \
+		echo "❌ Could not determine frontend web app name from Terraform outputs."; \
+		exit 1; \
+	fi
+	@if [ -z "$(AZURE_RESOURCE_GROUP)" ]; then \
+		echo "❌ Could not determine resource group name from Terraform outputs."; \
+		exit 1; \
+	fi
+	$(MAKE) monitor_deployment WEBAPP_NAME=$(WEBAPP_NAME) AZURE_RESOURCE_GROUP=$(AZURE_RESOURCE_GROUP)
+
+.PHONY: generate_env_from_terraform check_terraform_initialized show_env_file update_env_with_secrets generate_env_from_terraform_ps show_env_file_ps update_env_with_secrets_ps monitor_deployment monitor_backend_deployment monitor_frontend_deployment
 
 
 ############################################################
@@ -484,6 +610,9 @@ help:
 	@echo "  deploy_backend                   Deploy backend to Azure App Service (using Terraform outputs)"
 	@echo "  deploy_frontend                  Deploy frontend to Azure App Service (using Terraform outputs)"
 	@echo "  deploy_to_webapp                 Generic Web App deployment (manual parameters)"
+	@echo "  monitor_deployment               Monitor any webapp deployment status and logs"
+	@echo "  monitor_backend_deployment       Monitor backend deployment (using Terraform outputs)"
+	@echo "  monitor_frontend_deployment      Monitor frontend deployment (using Terraform outputs)"
 	@echo ""
 	@echo "🏗️  Terraform Environment Management:"
 	@echo "  generate_env_from_terraform      Generate .env file from Terraform state (Bash)"
@@ -518,6 +647,12 @@ help:
 	@echo "💡 Quick Start for ACS Phone Number Purchase:"
 	@echo "  make purchase_acs_phone_number                    # Bash/Python version"
 	@echo "  make purchase_acs_phone_number_ps                # PowerShell version"
+	@echo ""
+	@echo "💡 Deployment Monitoring Tips:"
+	@echo "  • Large deployments may timeout after 15 minutes but continue in background"
+	@echo "  • Use monitor_deployment targets to check status during/after deployment"
+	@echo "  • Install 'Azure App Service' VS Code extension for easy log streaming"
+	@echo "  • Frontend builds (Vite/React) typically take 5-15 minutes"
 	@echo ""
 	@echo "📝 Note: ACS endpoint will be retrieved from:"
 	@echo "  1. Environment file (ACS_ENDPOINT variable)"

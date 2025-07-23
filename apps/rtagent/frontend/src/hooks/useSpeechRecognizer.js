@@ -13,12 +13,17 @@ export default function useSpeechRecognizer(
 ) {
   const [recording, setRecording] = useState(false);
   const recognizerRef = useRef(null);
-
   const startRecognition = () => {
-    const cfg = SpeechConfig.fromSubscription(
-      import.meta.env.VITE_AZURE_SPEECH_KEY,
-      import.meta.env.VITE_AZURE_REGION
-    );
+    let cfg;
+    const endpoint = import.meta.env.VITE_AZURE_SPEECH_ENDPOINT;
+    const key = import.meta.env.VITE_AZURE_SPEECH_KEY;
+    const region = import.meta.env.VITE_AZURE_REGION;
+
+    if (endpoint) {
+      cfg = SpeechConfig.fromEndpoint(new URL(endpoint), key);
+    } else {
+      cfg = SpeechConfig.fromSubscription(key, region);
+    }
     cfg.speechRecognitionLanguage = "en-US";
 
     const rec = new SpeechRecognizer(

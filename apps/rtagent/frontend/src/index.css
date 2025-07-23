@@ -12,6 +12,7 @@
   background-color: #242424;
 }
 
+/* Background will be set dynamically via JavaScript */
 body {
   margin: 0;
   display: flex;
@@ -19,7 +20,10 @@ body {
   align-items: center;
   min-width: 320px;
   min-height: 100vh;
-  background: url('./src/assets/abstract.jpg') no-repeat center center fixed;
+  background-color: #242424;
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-attachment: fixed;
   background-size: cover;
 }
 
@@ -70,7 +74,7 @@ button:focus-visible {
   body {
     color: #213547;
     background-color: #ffffff;
-    background-image: url('./src/assets/abstract.jpg');
+    /* Background image will be set dynamically */
   }
 
   a:hover {
