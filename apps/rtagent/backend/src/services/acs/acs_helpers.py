@@ -133,7 +133,6 @@ async def broadcast_message(
         return
         
     # Create a message hash for deduplication
-    import hashlib
     message_hash = hashlib.md5(f"{sender}:{message.strip()}".encode()).hexdigest()
     
     # Store recent message hashes to prevent duplicates (using a simple in-memory cache)
