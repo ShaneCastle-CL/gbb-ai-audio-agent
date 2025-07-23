@@ -250,8 +250,8 @@ const styles = {
   // Input section for phone calls
   phoneInputSection: {
     position: "absolute",
-    bottom: "140px",
-    right: "20px",
+    bottom: "60px", // Moved lower from 140px to 60px to avoid blocking chat bubbles
+    left: "500px", // Moved further to the right from 400px to 500px
     background: "white",
     padding: "20px",
     borderRadius: "16px",
@@ -484,6 +484,7 @@ export default function RealTimeVoiceApp() {
 
   /* ---------- refs ---------- */
   const chatRef      = useRef(null);
+  const messageContainerRef = useRef(null);
   const socketRef    = useRef(null);
   const recognizerRef= useRef(null);
 
@@ -497,7 +498,18 @@ export default function RealTimeVoiceApp() {
 
   /* ---------- scroll chat on new message ---------- */
   useEffect(()=>{
-    if(chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    // Try both refs to ensure scrolling works
+    if(messageContainerRef.current) {
+      messageContainerRef.current.scrollTo({
+        top: messageContainerRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    } else if(chatRef.current) {
+      chatRef.current.scrollTo({
+        top: chatRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
   },[messages]);
 
   /* ---------- teardown on unmount ---------- */
@@ -805,7 +817,7 @@ export default function RealTimeVoiceApp() {
         {/* Chat Messages */}
         <div style={styles.chatSection} ref={chatRef}>
           <div style={styles.chatSectionIndicator}></div>
-          <div style={styles.messageContainer}>
+          <div style={styles.messageContainer} ref={messageContainerRef}>
             {messages.map((message, index) => (
               <ChatBubble key={index} message={message} />
             ))}
