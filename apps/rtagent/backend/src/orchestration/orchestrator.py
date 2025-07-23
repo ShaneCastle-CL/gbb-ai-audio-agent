@@ -75,9 +75,6 @@ async def run_auth_agent(
 ) -> None:
     """Execute the AuthAgent.  If it succeeds, prime routing metadata."""
 
-    if _cm_get(cm, "authenticated", False):
-        return
-
     auth_agent = ws.app.state.auth_agent
     async with track_latency(ws.state.lt, "auth_agent", ws.app.state.redis):
         result: Dict[str, Any] | Any = await auth_agent.respond(cm, utterance, ws, is_acs=is_acs)
@@ -214,7 +211,6 @@ SPECIALIST_MAP: Dict[str, Callable[..., Any]] = {
     "Claims": run_claims_agent,
 }
 
-
 async def route_turn(
     cm: "MemoManager",
     transcript: str,
@@ -222,30 +218,25 @@ async def route_turn(
     *,
     is_acs: bool,
 ) -> None:
-    """Handle a single user turn end‑to‑end."""
+    """Handle one user turn, plus any immediate follow-ups."""
 
     redis_mgr = ws.app.state.redis
-    
-    # Broadcast the user input to all connected clients (relay dashboard)
-    # This centralizes the broadcast to avoid duplication across different handlers
+
     try:
         await broadcast_message(ws.app.state.clients, transcript, "User")
-    except Exception as e:
-        logger.error(f"Failed to broadcast user message: {e}")
-    
-    try:
-        await run_auth_agent(cm, transcript, ws, is_acs=is_acs)
+    except Exception as exc:
+        logger.error("Broadcast failure: %s", exc)
 
-        authenticated = _cm_get(cm, "authenticated", False)
-        if not authenticated:
+    try:
+        if not _cm_get(cm, "authenticated", False):
+            await run_auth_agent(cm, transcript, ws, is_acs=is_acs)
             return
 
-        active_agent = _cm_get(cm, "active_agent")
-        if active_agent == "HumanEscalation":
+        if _cm_get(cm, "active_agent") == "HumanEscalation":
             await ws.send_text(json.dumps({"type": "live_agent_transfer"}))
             return
 
-        active = active_agent if active_agent else "General"
+        active = _cm_get(cm, "active_agent") or "General"
         handler = SPECIALIST_MAP.get(active)
         if handler:
             await handler(cm, transcript, ws, is_acs=is_acs)
