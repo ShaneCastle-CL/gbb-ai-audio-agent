@@ -957,7 +957,7 @@ export default function RealTimeVoiceApp() {
               <span style={styles.appTitleIcon}>🎙️</span>
               <h1 style={styles.appTitle}>RTInsuranceAgent</h1>
             </div>
-            <p style={styles.appSubtitle}>Transforming patient care with real-time, intelligent voice interactions</p>
+            <p style={styles.appSubtitle}>Transforming customer interactions with real-time, intelligent voice interactions</p>
           </div>
         </div>
 
