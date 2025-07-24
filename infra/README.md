@@ -16,11 +16,11 @@ This directory contains the Infrastructure as Code (IaC) implementations for dep
 ### 🟢 **Terraform Deployment** (`/terraform/`) - **✅ Current Recommended**
 **Simplified, public-facing PoC deployment for rapid development**
 
-- **Status**: ✅ **Production Ready** - Simplified public configuration
+- **Status**: ✅ **PoC Ready** - Simplified public configuration
 - **Target Audience**: Development teams, PoCs, and quick deployments  
 - **Architecture**: Public endpoints with managed identity authentication
 - **Security**: RBAC-first approach with managed identities (no network isolation)
-- **Use Case**: Development, testing, demos, and initial production workloads
+- **Use Case**: Development, testing, demos, and initial MVP workloads
 
 ---
 
@@ -217,6 +217,8 @@ az containerapp logs show --name <app-name> --resource-group <rg-name>
 # Monitor metrics
 az monitor metrics list --resource <resource-id>
 ```
+
+> 🔍 **Need detailed troubleshooting help?** See the comprehensive [Troubleshooting Guide](../docs/Troubleshooting.md) for common issues, diagnostic commands, and step-by-step solutions.
 
 ---
 

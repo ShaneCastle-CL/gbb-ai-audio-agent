@@ -3,16 +3,45 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  // Load env file based on `mode` in the current working directory.
-  // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
   const env = loadEnv(mode, '.', '')
   
   return {
     plugins: [react()],
+    server: {
+      host: '0.0.0.0',
+      port: parseInt(env.PORT) || 5173
+    },
     preview: {
-      // allowedHosts: env.VITE_ALLOWED_HOSTS
-      //   ? env.VITE_ALLOWED_HOSTS.split(',')
-      //   : []
+      host: '0.0.0.0', 
+      port: parseInt(env.PORT) || 4173
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: mode === 'development',
+      assetsDir: 'assets',
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            vendor: ['react', 'react-dom'],
+            azure: ['@azure/communication-calling', '@azure/communication-common', 'microsoft-cognitiveservices-speech-sdk']
+          },
+          assetFileNames: (assetInfo) => {
+            const info = assetInfo.name.split('.')
+            const ext = info[info.length - 1]
+            if (/png|jpe?g|svg|gif|tiff|bmp|ico/i.test(ext)) {
+              return `assets/images/[name]-[hash][extname]`
+            }
+            return `assets/[name]-[hash][extname]`
+          }
+        }
+      }
+    },
+    // Ensure proper asset handling
+    assetsInclude: ['**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.svg', '**/*.gif'],
+    // Environment variable handling
+    define: {
+      // Ensure environment variables are available at build time
+      'process.env.NODE_ENV': JSON.stringify(mode === 'production' ? 'production' : 'development')
     }
   }
 });

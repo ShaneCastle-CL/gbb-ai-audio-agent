@@ -247,7 +247,7 @@ AZURE_SPEECH_REGION=$(Get-OutputValue $terraformOutputs "AZURE_SPEECH_REGION")
 
 # Base URL Configuration
 # Prompt user for BASE_URL if not set in azd env
-BASE_URL="<Your publicly routable URL for the backend app, e.g devtunnel host>"
+BASE_URL=$(Get-OutputValue $terraformOutputs "BACKEND_APP_SERVICE_URL" "<Set this to enable ACS callbacks to this app>")
 
 # Backend App Service URL (from Terraform output if available)
 BACKEND_APP_SERVICE_URL=$(Get-OutputValue $terraformOutputs "BACKEND_APP_SERVICE_URL" "<Set this if using App Service deployment>")

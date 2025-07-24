@@ -47,6 +47,42 @@ azd up   # ~15 min for complete infra and code deployment
 
 For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/DeploymentGuide.md).
 
+### 🎯 **Quick Reference: Common Commands**
+
+```bash
+# Full deployment 
+export ARM_SUBSCRIPTION_ID="your-subscription-id"
+cd infra/terraform 
+terraform init
+terraform apply 
+cd ../.. 
+
+# Environment management
+make generate_env_from_terraform    # Extract config from Terraform
+make update_env_with_secrets        # Add Key Vault secrets  
+make show_env_file                  # View current environment
+
+# Deploy applications  
+make deploy_backend                 # Deploy FastAPI backend
+make deploy_frontend                # Deploy Vite/React frontend
+
+# Monitor deployments (enhanced with timeout handling)
+make monitor_backend_deployment     # Backend deployment status
+make monitor_frontend_deployment    # Frontend deployment status  
+
+# ACS phone setup
+make purchase_acs_phone_number      # Purchase phone number
+
+# Get help
+make help                           # Show all available targets
+```
+
+**💡 Pro Tips:**
+- Large frontend deployments may timeout after 15 minutes but continue in background
+- Use monitoring commands to check deployment progress  
+- Install 'Azure App Service' VS Code extension for easy log streaming
+- All sensitive values are automatically stored in Azure Key Vault
+
 **Project Structure Highlights:**
 
 | Path                | Description                                 |
@@ -60,9 +96,14 @@ For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/Depl
 | Makefile            | One-line dev commands                       |
 | environment.yaml    | Conda environment spec (name: audioagent)   |
 
-### *⚡ Run the app Local*
 
-**Prerequisites:** Infra deployed (above), Conda, Node.js ≥ 18, Azure CLI with `dev-tunnel` extension.
+**Prerequisites:** 
+- Infra deployed (above)
+- Python 3.11 
+- Node.js ≥ 22
+- Azure CLI
+- [Azure Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/get-started?tabs=windows)
+
 
 **Backend (FastAPI + Uvicorn):**
 ```bash
@@ -70,233 +111,180 @@ git clone https://github.com/your-org/gbb-ai-audio-agent.git
 cd gbb-ai-audio-agent/rtagents/RTAgent/backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.sample .env   # Configure ACS, Speech, and OpenAI keys
-python server.py      # Starts backend at ws://localhost:8010/realtime
+
+make generate_env_from_terraform  # Generate .env from Terraform outputs
+cp .env.<env name> .env   # Configure ACS, Speech, and OpenAI keys
+
+devtunnel host -p 8010 --allow-anonymous  # Start dev tunnel for local testing
+make start_backend
 ```
+
+> 💡 **Having issues?** Check the [troubleshooting guide](docs/Troubleshooting.md) for common setup problems and solutions.
 
 **Frontend (Vite + React):**
 ```bash
-cd ../../frontend
-npm install
-npm run dev           # Starts frontend at http://localhost:5173
+make start_frontend
 ```
 
 ## **Deployment on Azure**
 
-### Standard Deployment (Recommended)
+### 🚀 **Quick Start (Recommended)**
+
+The fastest way to deploy RTAgent is using Azure Developer CLI:
 
 ```bash
 azd auth login
-azd up         # full infra + code (~15 min)
+azd up         # Complete infra + code deployment (~15 min)
 ```
 
-### Alternative Deployment Methods
+### 🛠️ **Alternative Deployment: Terraform + Makefile**
 
-For environments where Azure Developer CLI cannot be used, we provide several alternative deployment approaches using Terraform and Makefile automation.
+For environments where `azd` is not available or when you need more infrastructure control, use our streamlined Terraform + Makefile approach:
 
-#### **Option 1: Direct Terraform + Makefile Deployment**
+#### **Prerequisites**
+- Azure CLI installed and authenticated (`az login`)
+- Terraform installed
+- Make utility available
 
-This approach uses Terraform directly for infrastructure provisioning and Makefile targets for environment management and application deployment:
+#### **Step-by-Step Deployment**
 
-##### 1. Set required environment variables
-
-Before deploying, copy and edit the example variables file:
-
+##### 1. **Environment Setup**
 ```bash
+# Set your Azure subscription ID
+export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+export AZURE_ENV_NAME="dev"  # Optional: defaults to 'dev'
+
+# Configure Terraform variables
 cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
-# Edit infra/terraform/terraform.tfvars to set your Azure subscription, environment, and region
+# Edit terraform.tfvars with your subscription and region preferences
 ```
 
-Set the following environment variables in your shell:
-
-```bash
-export ARM_SUBSCRIPTION_ID="<your-subscription-id>"
-```
-
-If you are using remote state for Terraform (recommended for team or CI/CD use), configure your backend in `infra/terraform/backend.tf`. For example, to use Azure Storage as the backend:
-
-```hcl
-# infra/terraform/backend.tf
-terraform {
-   backend "azurerm" {
-      resource_group_name  = "<your-tfstate-rg>"
-      storage_account_name = "<your-tfstate-storage>"
-      container_name       = "<your-tfstate-container>"
-      key                  = "terraform.tfstate"
-      use_azuread_auth     = true
-   }
-}
-```
-
-After editing `backend.tf`, initialize Terraform with:
-
+##### 2. **Infrastructure Deployment**
 ```bash
 cd infra/terraform
 terraform init
+terraform apply
+cd ../..  # Return to repo root
 ```
 
-See comments in `terraform.tfvars.example` and `backend.tf` for further configuration details.
-
-##### 2. Initialize and deploy infrastructure with Terraform
-```
-cd infra/terraform
-terraform init
-terraform plan 
-terraform apply 
-```
-
-##### 3. Generate local .env file from Terraform outputs
-```
-cd ../..  # (repository root directory)
+##### 3. **Environment Configuration**
+```bash
+# Generate .env file from Terraform outputs and Key Vault secrets
 make generate_env_from_terraform
-```
-
-##### 4. Update .env file with secrets from Azure Key Vault
-```
 make update_env_with_secrets
 ```
-
-##### 5. Generate deployment artifacts and deploy applications
-```
+##### 4. **Application Deployment**
+```bash
+# Deploy both backend and frontend apps to Azure App Service
 make deploy_backend
 make deploy_frontend
 ```
 
-#### **Option 2: PowerShell-Based Deployment (Windows)**
+> **⚠️ IMPORTANT:**  
+> **Don't forget to purchase your ACS phone number and update configuration:**
+> **YOUR BACKEND WILL NOT WORK WITHOUT THIS NUMBER**
+> - For **local development**, purchase the number and add it to your `.env` file as `ACS_SOURCE_PHONE_NUMBER`.
+> - For **Azure App Service deployments**, update `acs_source_phone_number` in your `terraform.tfvars` and re-run `terraform apply` to propagate the change.
+> - Alternatively, you can set the ACS phone number manually using the Azure CLI if needed.
 
-For Windows environments, use the PowerShell equivalents:
+##### 5. **REQUIRED: Phone Number Setup**
+```bash
+# Purchase an ACS phone number for voice calls via Python script
+make purchase_acs_phone_number
+```
+
+> To purchase a number via the Azure Portal:
+> https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/telephony/get-phone-number?tabs=windows&pivots=platform-azcli"
+
+> ⚠️ **Phone number issues?** If you encounter problems with ACS calling or phone number setup, see the [ACS troubleshooting section](docs/Troubleshooting.md#acs-azure-communication-services-issues) for detailed solutions.
+
+#### **🎯 One-Command Full Deployment**
+
+Once your environment variables are set, you can deploy everything with:
+
+```bash
+# Complete end-to-end deployment
+cd infra/terraform && terraform apply && cd ../.. && \
+make generate_env_from_terraform && \
+make update_env_with_secrets && \
+make deploy_backend && \
+make deploy_frontend
+```
+
+#### **📊 Deployment Monitoring**
+
+Our enhanced Makefile includes comprehensive deployment monitoring:
+
+```bash
+# Monitor any deployment in progress
+make monitor_deployment WEBAPP_NAME=<app-name>
+
+# Monitor specific apps using Terraform outputs
+make monitor_backend_deployment
+make monitor_frontend_deployment
+```
+
+**Deployment Timeouts:** Large deployments may take 10-15 minutes. If you see timeout messages, the deployment continues in the background. Use the monitoring commands above to check status.
+
+#### **🔧 Available Make Targets**
+
+**Quick Reference:**
+```bash
+make help                          # Show all available targets
+
+# Environment Management
+make generate_env_from_terraform   # Extract config from Terraform
+make update_env_with_secrets      # Add Key Vault secrets
+make show_env_file               # Display current environment
+
+# Application Deployment  
+make deploy_backend              # Deploy FastAPI backend
+make deploy_frontend             # Deploy Vite/React frontend
+make monitor_backend_deployment  # Monitor backend deployment
+make monitor_frontend_deployment # Monitor frontend deployment
+
+# ACS Phone Numbers
+make purchase_acs_phone_number   # Purchase phone number
+```
+
+#### **🪟 Windows Support**
+
+Windows users can use PowerShell equivalents:
 
 ```powershell
 # Set environment variables
-$env:AZURE_SUBSCRIPTION_ID = "<your-subscription-id>"
+$env:ARM_SUBSCRIPTION_ID = "<your-subscription-id>"
 $env:AZURE_ENV_NAME = "dev"
 
-# Deploy infrastructure (same Terraform commands as above)
-cd infra/terraform
-terraform init
-terraform plan -var="environment_name=$env:AZURE_ENV_NAME"
-terraform apply -var="environment_name=$env:AZURE_ENV_NAME"
-
-# Generate environment file and deploy (PowerShell)
-cd ../..
+# Use PowerShell-specific targets
 make generate_env_from_terraform_ps
 make update_env_with_secrets_ps
-make generate_backend_deployment
-make generate_frontend_deployment
-make deploy_backend
-make deploy_frontend
+make purchase_acs_phone_number_ps
 ```
 
-#### **Option 3: Step-by-Step Manual Deployment**
-
-For maximum control over each deployment step:
-
-```bash
-# 1. Environment Setup
-export AZURE_SUBSCRIPTION_ID="<your-subscription-id>"
-export AZURE_ENV_NAME="dev"
-
-# 2. Infrastructure Deployment
-cd infra/terraform
-terraform init
-terraform plan -out=tfplan -var="environment_name=${AZURE_ENV_NAME}"
-terraform apply tfplan
-
-# 3. Environment File Generation
-cd ../..
-make generate_env_from_terraform    # Extract Terraform outputs to .env
-make show_env_file                 # Verify environment file contents
-make update_env_with_secrets       # Add Key Vault secrets
-
-# 4. Application Deployment Preparation
-make generate_backend_deployment   # Create backend deployment package
-make generate_frontend_deployment  # Create frontend deployment package
-make show_deployment_info          # Verify deployment packages
-
-# 5. Deploy to Azure Web Apps
-make deploy_backend               # Deploy backend using Terraform outputs
-make deploy_frontend              # Deploy frontend using Terraform outputs
-
-# 6. Optional: Purchase ACS Phone Number
-make purchase_acs_phone_number    # Add phone number to ACS resource
-```
-
-#### **Key Environment Variables**
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `AZURE_SUBSCRIPTION_ID` | Your Azure subscription ID | `12345678-1234-1234-1234-123456789012` |
-| `AZURE_ENV_NAME` | Environment name for resource naming | `dev`, `staging`, `prod` |
-| `AZURE_RESOURCE_GROUP` | Resource group name (auto-extracted from Terraform) | `rg-rtvoice-dev-eastus2` |
-
-#### **Available Make Targets**
-
-**Infrastructure & Environment:**
-- `generate_env_from_terraform` - Generate .env file from Terraform state
-- `update_env_with_secrets` - Add Key Vault secrets to .env file
-- `show_env_file` - Display current environment configuration
-
-**Deployment Artifacts:**
-- `generate_backend_deployment` - Create backend deployment package
-- `generate_frontend_deployment` - Create frontend deployment package
-- `clean_deployment_artifacts` - Clean up deployment files
-- `show_deployment_info` - Display deployment package details
-
-**Azure Web App Deployment:**
-- `deploy_backend` - Deploy backend to Azure App Service
-- `deploy_frontend` - Deploy frontend to Azure App Service
-- `deploy_to_webapp` - Generic Web App deployment (manual usage)
-
-**Azure Communication Services:**
-- `purchase_acs_phone_number` - Purchase and configure ACS phone number
-
-#### **Troubleshooting Alternative Deployments**
+#### **🚨 Troubleshooting**
 
 **Common Issues:**
 
-1. **Terraform Backend Not Configured:**
-   ```bash
-   # Initialize with remote backend
-   cd infra/terraform
-   terraform init -backend-config="subscription_id=${AZURE_SUBSCRIPTION_ID}"
-   ```
+- **Timeout Errors:** Large frontend builds (Vite) take 5-15 minutes. Use `make monitor_frontend_deployment` to check status.
+- **Azure CLI Auth:** Run `az login` and `az account set --subscription "<subscription-id>"`
+- **Key Vault Access:** Ensure your user has Key Vault Secrets User role
+- **VS Code Integration:** Install 'Azure App Service' extension for easy log streaming
 
-2. **Missing Environment Variables:**
-   ```bash
-   # Verify required variables are set
-   echo "Subscription: ${AZURE_SUBSCRIPTION_ID}"
-   echo "Environment: ${AZURE_ENV_NAME}"
-   ```
+**Getting Help:**
+- Run `make help` for all available commands
+- Use monitoring targets to check deployment progress
+- View deployment logs in Azure Portal or VS Code
+- **📖 For detailed troubleshooting steps, see [`docs/Troubleshooting.md`](docs/Troubleshooting.md)**
 
-3. **Azure CLI Authentication:**
-   ```bash
-   az login
-   az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
-   ```
+#### **✨ Benefits of This Approach**
 
-4. **Key Vault Access Issues:**
-   ```bash
-   # Ensure you have Key Vault access
-   az keyvault list --subscription "${AZURE_SUBSCRIPTION_ID}"
-   ```
-
-**Environment File Validation:**
-After running `make generate_env_from_terraform`, verify your `.env.${AZURE_ENV_NAME}` file contains:
-- ACS_ENDPOINT
-- AZURE_OPENAI_ENDPOINT  
-- AZURE_SPEECH_KEY
-- BACKEND_APP_SERVICE_URL
-- FRONTEND_APP_SERVICE_URL
-
-For detailed troubleshooting, see: [`docs/TerraformDeployment.md`](docs/TerraformDeployment.md)
-
-#### **Benefits of the Terraform Approach**
-
-- **Full Infrastructure Control:** Direct Terraform management with state files
-- **Environment Isolation:** Separate environments using Terraform workspaces  
-- **Step-by-Step Visibility:** Clear separation of infrastructure and application deployment
-- **Cross-Platform Support:** Works on Windows (PowerShell), macOS, and Linux
-- **No azd Dependency:** Pure Terraform + Azure CLI workflow
+- **🎯 Simplified:** Streamlined commands with intelligent defaults
+- **📊 Monitoring:** Built-in deployment monitoring and error handling  
+- **🔒 Secure:** Uses Azure Key Vault for all sensitive values
+- **⚡ Fast:** Optimized deployment artifacts with timeout handling
+- **🖥️ Cross-Platform:** Works on Windows, macOS, and Linux
+- **🔄 Resumable:** Failed deployments can be easily retried
 
 ## **Load & Chaos Testing**
 Worried about the solution’s ability to scale under your application’s load? Here’s a guide to help you with horizontal scaling tests...

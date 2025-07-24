@@ -250,6 +250,8 @@ wscat -c ws://localhost:8000/ws
 - Verify SSL certificate is trusted
 - Ensure DNS is properly configured
 
+> 🔧 **More WebSocket troubleshooting:** For detailed WebSocket connection debugging and testing with wscat, see the [WebSocket troubleshooting section](Troubleshooting.md#websocket-connection-issues).
+
 ---
 
 ## 🔄 Environment Management
@@ -379,6 +381,8 @@ az containerapp logs show \
 | **WebSocket Fails** | Connection refused, handshake errors | Ensure publicly trusted certificate, test SSL config |
 | **Container Won't Start** | App unavailable, startup errors | Check environment variables, verify managed identity permissions |
 | **Redis Connection Issues** | Cache errors, timeout issues | Verify private endpoint connectivity, check access keys |
+
+> 📖 **Need more help?** For detailed troubleshooting steps, diagnostic commands, and solutions to common issues, see the comprehensive [Troubleshooting Guide](Troubleshooting.md).
 
 ---
 
