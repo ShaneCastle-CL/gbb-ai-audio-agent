@@ -364,7 +364,7 @@ class SpeechSynthesizer:
             
             if self._session_span:
                 self._session_span.add_event("tts_speaker_synthesis_initiated")
-                self._session_span.set_status(Status(StatusCode.OK, "Speaker synthesis initiated"))
+                self._session_span.set_status(Status(StatusCode.OK))
                 
         except Exception as exc:
             error_msg = f"TTS playback not available in this environment: {exc}"
@@ -465,7 +465,7 @@ class SpeechSynthesizer:
                     self._session_span.add_event("tts_audio_data_extracted", {
                         "audio_size_bytes": len(wav_bytes)
                     })
-                    self._session_span.set_status(Status(StatusCode.OK, "Synthesis completed"))
+                    self._session_span.set_status(Status(StatusCode.OK))
                     self._session_span.end()
                     self._session_span = None
                     

@@ -211,7 +211,7 @@ EOF
     cat >> "${ENV_FILE}" << EOF
 # Base URL Configuration
 # Prompt user for BASE_URL if not set in azd env
-BASE_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_APP_SERVICE_URL" "<Set this to enable ACS callbacks to the app>")
+BASE_URL="<Set this to enable ACS callbacks to the app>"
 
 # Backend App Service URL (from Terraform output if available)
 BACKEND_APP_SERVICE_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_APP_SERVICE_URL" "<Set this if using App Service deployment>")
