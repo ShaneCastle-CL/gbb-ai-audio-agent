@@ -1,0 +1,14 @@
+### Load environment variables from .env in repo root
+@env .env
+
+### Set backend endpoint from environment variable
+@backend_url = <backend url>
+
+
+### Test POST /api/call
+POST {{backend_url}}/api/call
+Content-Type: application/json
+
+{
+    "target_number": "+18001234567" // Phone number to call via ACS
+}

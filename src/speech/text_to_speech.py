@@ -287,6 +287,11 @@ class SpeechSynthesizer:
         Synthesize and play text through the server's speakers (if available).
         In headless environments, this will log a warning and skip playback.
         """
+        # Check environment variable to determine if playback is enabled
+        playback_env = os.getenv("TTS_ENABLE_LOCAL_PLAYBACK", "true").lower()
+        if playback_env not in ("1", "true", "yes"):
+            logger.info("TTS_ENABLE_LOCAL_PLAYBACK is set to false; skipping audio playback.")
+            return
         # Start session-level span for speaker synthesis if tracing is enabled
         if self.enable_tracing and self.tracer:
             self._session_span = self.tracer.start_span(
@@ -359,7 +364,7 @@ class SpeechSynthesizer:
             
             if self._session_span:
                 self._session_span.add_event("tts_speaker_synthesis_initiated")
-                self._session_span.set_status(Status(StatusCode.OK, "Speaker synthesis initiated"))
+                self._session_span.set_status(Status(StatusCode.OK))
                 
         except Exception as exc:
             error_msg = f"TTS playback not available in this environment: {exc}"
@@ -460,7 +465,7 @@ class SpeechSynthesizer:
                     self._session_span.add_event("tts_audio_data_extracted", {
                         "audio_size_bytes": len(wav_bytes)
                     })
-                    self._session_span.set_status(Status(StatusCode.OK, "Synthesis completed"))
+                    self._session_span.set_status(Status(StatusCode.OK))
                     self._session_span.end()
                     self._session_span = None
                     

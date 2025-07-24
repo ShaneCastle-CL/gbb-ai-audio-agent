@@ -203,13 +203,15 @@ AZURE_SPEECH_KEY=
 AZURE_SPEECH_RESOURCE_ID=$(extract_output_value "${terraform_outputs}" "AZURE_SPEECH_RESOURCE_ID")
 AZURE_SPEECH_REGION=$(extract_output_value "${terraform_outputs}" "AZURE_SPEECH_REGION")
 
+# For local development, you can enable local playback of TTS audio.
+TTS_ENABLE_LOCAL_PLAYBACK=true
 EOF
 
     # Base URL Configuration
     cat >> "${ENV_FILE}" << EOF
 # Base URL Configuration
 # Prompt user for BASE_URL if not set in azd env
-BASE_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_APP_SERVICE_URL" "<Set this to enable ACS callbacks to the app>")
+BASE_URL="<Set this to enable ACS callbacks to the app>"
 
 # Backend App Service URL (from Terraform output if available)
 BACKEND_APP_SERVICE_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_APP_SERVICE_URL" "<Set this if using App Service deployment>")
