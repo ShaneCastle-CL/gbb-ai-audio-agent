@@ -106,7 +106,7 @@ AGENT_GENERAL_INFO_CONFIG: str = (
 # ------------------------------------------------------------------------------
 # TTS behaviour
 # ------------------------------------------------------------------------------
-VOICE_TTS = "en-US-AvaMultilingualNeural"
+VOICE_TTS = "en-US-Ava:DragonHDLatestNeural"
 # en-US-AvaMultilingualNeural4 (Female)
 # en-US-AndrewMultilingualNeural4 (Male)
 # en-US-EmmaMultilingualNeural4 (Female)

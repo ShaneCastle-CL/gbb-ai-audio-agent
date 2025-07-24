@@ -173,9 +173,12 @@ async def process_gpt_response(  # noqa: D401
                     collected.append(delta.content)
                     if delta.content in TTS_END:  # Time to flush a sentence.
                         streaming = add_space("".join(collected).strip())
+                        logger.info(
+                            "process_gpt_response – streaming text chunk: %s",
+                            streaming,
+                        )
                         await _emit_streaming_text(streaming, ws, is_acs, call_connection_id, session_id)
                         final_chunks.append(streaming)
-                        agent_history.append({"role": "assistant", "content": streaming})
                         collected.clear()
 
             stream_ctx.set_attribute("chunks_processed", chunk_count)
