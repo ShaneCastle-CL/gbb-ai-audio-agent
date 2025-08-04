@@ -58,7 +58,7 @@ async def send_tts_audio(
     try:
         synth: SpeechSynthesizer = ws.app.state.tts_client
         ws.state.is_synthesizing = True  # type: ignore[attr-defined]
-
+        logger.info(f"Synthesizing text: {ws.state.is_synthesizing}...")
         synth.start_speaking_text(text)
         
         # Synthesize text to PCM bytes for browser playback
@@ -112,13 +112,6 @@ async def send_tts_audio(
             })
         except Exception as send_error:
             logger.error(f"Failed to send error message to frontend: {send_error}")
-    finally:
-        # Clean up synthesis state
-        if hasattr(ws.state, 'is_synthesizing'):
-            ws.state.is_synthesizing = False  # type: ignore[attr-defined]
-        
-        if latency_tool:
-            latency_tool.stop("tts", ws.app.state.redis)
 
 
 async def send_response_to_acs(

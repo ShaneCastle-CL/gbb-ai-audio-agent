@@ -284,8 +284,6 @@ async def acs_media_ws(ws: WebSocket):
         ) as ws_span:
             ws.app.state.call_conn = call_conn  # Store call connection in WebSocket state
 
-            ws.app.state.call_conn = call_conn  # Store call connection in WebSocket state
-
             # Log call connection state for debugging
             call_state = getattr(call_conn, "call_connection_state", "unknown")
             logger.info(f"Call {cid} connection state: {call_state}")

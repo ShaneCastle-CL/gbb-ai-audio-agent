@@ -199,8 +199,6 @@ class ACSMediaHandler:
                                 logger.error(f"❌ Failed to start recognizer on AudioMetadata: {e}")
                                 raise
 
-
-
                     # Start route_turn background processor
                     if not self.route_turn_task or self.route_turn_task.done():
                         self.route_turn_task = asyncio.create_task(self.route_turn_loop())
