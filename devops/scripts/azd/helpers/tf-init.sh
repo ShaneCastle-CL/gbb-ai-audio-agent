@@ -70,9 +70,9 @@ check_azure_auth() {
     fi
     
     local account_info
-    account_info=$(az account show --query "{subscriptionId: id, tenantId: tenantId, user: user.name}" -o json)
+    account_info=$(az account show --query id -o tsv)
     log_success "Authenticated to Azure:"
-    echo "$account_info" | jq -r '. | "  Subscription: \(.subscriptionId)\n  Tenant: \(.tenantId)\n  User: \(.user)"'
+    echo "Subscription ID: $account_info"
 }
 
 # Get azd environment variable value

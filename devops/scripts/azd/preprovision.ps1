@@ -93,7 +93,7 @@ switch ($Provider.ToLower()) {
         }
         
         # Generate tfvars.json
-        $TfVarsFile = "./infra-tf/main.tfvars.json"
+        $TfVarsFile = "./infra/terraform/main.tfvars.json"
         Write-Host "Generating $TfVarsFile..."
         
         # Build configuration object

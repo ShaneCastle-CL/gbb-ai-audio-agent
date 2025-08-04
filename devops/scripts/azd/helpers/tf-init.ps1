@@ -83,11 +83,9 @@ function Test-AzureAuth {
     Write-ColorOutput "Checking Azure authentication..." -Type Info
     
     try {
-        $accountInfo = az account show --query "{subscriptionId: id, tenantId: tenantId, user: user.name}" | ConvertFrom-Json
+        $accountInfo = az account show --query id -o tsv
         Write-ColorOutput "Authenticated to Azure:" -Type Success
-        Write-Host "  Subscription: $($accountInfo.subscriptionId)" -ForegroundColor White
-        Write-Host "  Tenant: $($accountInfo.tenantId)" -ForegroundColor White
-        Write-Host "  User: $($accountInfo.user)" -ForegroundColor White
+        Write-Host "  Subscription: $($accountInfo)" -ForegroundColor White
     }
     catch {
         Write-ColorOutput "Not authenticated to Azure. Please run 'az login'" -Type Error
