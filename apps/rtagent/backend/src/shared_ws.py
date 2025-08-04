@@ -144,16 +144,16 @@ async def send_response_to_acs(
         try:
             # Add timeout and retry logic for TTS synthesis
             pcm_bytes = synth.synthesize_to_pcm(text=text, voice=VOICE_TTS, sample_rate=16000)
+            frames = SpeechSynthesizer.split_pcm_to_base64_frames(
+                pcm_bytes, sample_rate=16000
+            )
             latency_tool.stop("tts:synthesis", ws.app.state.redis)
 
         except asyncio.TimeoutError:
-            logger.error(f"TTS synthesis timed out for texphat: {text[:50]}...")
+            logger.error(f"TTS synthesis timed out for text: {text[:50]}...")
             raise RuntimeError("TTS synthesis timed out")
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
-        frames = SpeechSynthesizer.split_pcm_to_base64_frames(
-            pcm_bytes, sample_rate=16000
-        )
 
         for frame in frames:
             if hasattr(ws.state, "lt") and ws.state.lt and not getattr(ws.state, "_greeting_ttfb_stopped", False):
