@@ -85,7 +85,6 @@ resource "azapi_resource" "mongoCluster" {
   parent_id = azurerm_resource_group.main.id
   name      = local.resource_names.cosmos
   location  = var.location
-  # location  = var.location
   body = {
     properties = {
       administrator = {
