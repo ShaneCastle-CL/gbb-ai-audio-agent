@@ -25,12 +25,13 @@ from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 from apps.rtagent.backend.src.handlers.acs_handler import ACSHandler
 from apps.rtagent.backend.src.handlers.acs_media_handler import ACSMediaHandler
-# from apps.rtagent.backend.src.auth.acs_auth import (
-#     ACSAuthError,
-#     validate_http_auth,
-#     validate_websocket_auth,
-#     get_easyauth_identity
-# )
+from apps.rtagent.backend.src.auth.acs_auth import (
+    ACSAuthError,
+    validate_http_auth,
+    validate_websocket_auth,
+    validate_eventgrid_auth,
+    get_easyauth_identity
+)
 from apps.rtagent.backend.src.handlers.acs_transcript_handler import (
     TranscriptionHandler,
 )
@@ -41,6 +42,7 @@ from apps.rtagent.backend.settings import (
     ACS_CALLBACK_PATH,
     ACS_STREAMING_MODE,
     ACS_WEBSOCKET_PATH,
+    ENABLE_AUTH_VALIDATION
 )
 from src.enums.stream_modes import StreamMode
 from utils.ml_logging import get_logger
@@ -140,18 +142,19 @@ async def initiate_call(call: CallRequest, request: Request):
 async def answer_call(request: Request):
     """Handle inbound call events (Event Grid or direct ACS)."""
 
-    # try:
-    #     # Try EasyAuth identity header
-    #     principal = get_easyauth_identity(request)
-    #     logger.info(f"Authenticated via EasyAuth: {principal}")
-    # except HTTPException:
-    #     # Try AAD validation (e.g., Event Grid client credentials token)
+    # if ENABLE_AUTH_VALIDATION:
     #     try:
-    #         decoded = validate_eventgrid_auth(request.headers.get("Authorization"))
-    #         logger.info(f"Authenticated via AAD: {decoded}")
-    #     except Exception as e:
-    #         logger.warning("Inbound request unauthenticated.")
-    #         raise HTTPException(401, "Unauthorized inbound request")
+    #         # Try EasyAuth identity header
+    #         principal = get_easyauth_identity(request)
+    #         logger.info(f"Authenticated via EasyAuth: {principal}")
+    #     except HTTPException:
+    #         # Try AAD validation (e.g., Event Grid client credentials token)
+    #         try:
+    #             decoded = validate_eventgrid_auth(request.headers.get("Authorization"))
+    #             logger.info(f"Authenticated via AAD: {decoded}")
+    #         except Exception as e:
+    #             logger.warning("Inbound request unauthenticated.")
+    #             raise HTTPException(401, "Unauthorized inbound request")
 
     try:
         body = await request.json()
@@ -175,14 +178,14 @@ async def callbacks(request: Request):
     if not request.app.state.stt_client:
         return JSONResponse({"error": "STT client not initialised"}, status_code=503)
     
-    # JWT token validation using the new ACS auth module
-    # try:
-    #     decoded = validate_http_auth(
-    #         authorization_header=request.headers.get("authorization"),
-    #     )
-    #     logger.debug("JWT token validated successfully: %s", decoded)
-    # except HTTPException as e:
-    #     return JSONResponse({"error": e.detail}, status_code=e.status_code)
+    # if ENABLE_AUTH_VALIDATION:
+    #     try:
+    #         decoded = validate_http_auth(
+    #             authorization_header=request.headers.get("authorization"),
+    #         )
+    #         logger.debug("JWT token validated successfully: %s", decoded)
+    #     except HTTPException as e:
+    #         return JSONResponse({"error": e.detail}, status_code=e.status_code)
 
     try:
         events = await request.json()
