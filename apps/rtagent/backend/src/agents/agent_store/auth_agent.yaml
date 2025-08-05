@@ -20,7 +20,5 @@ prompts:
 
 tools:
   - authenticate_caller
-  - handoff_general_agent      # ← route to General-Info bot
-  - handoff_claim_agent        # ← route to Claims-Intake bot
   - escalate_emergency         # ← 911-type escalation
   - escalate_human             # ← non-emergency live-agent transfer

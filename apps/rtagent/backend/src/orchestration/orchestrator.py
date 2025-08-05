@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """rtagent_orchestrator
 ======================
 Main orchestration loop for the XYMZ Insurance **RTAgent** real‑time voice bot.
@@ -11,36 +12,40 @@ Main orchestration loop for the XYMZ Insurance **RTAgent** real‑time voice bot
 
 """
 
-from contextlib import asynccontextmanager
 import json
 import os
-from typing import Any, Callable, Dict, TYPE_CHECKING
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
 from fastapi import WebSocket
+
 from apps.rtagent.backend.src.shared_ws import broadcast_message
+from src.enums.monitoring import SpanAttr
 from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
-from src.enums.monitoring import SpanAttr
 
 if TYPE_CHECKING:  # pragma: no cover
-    from src.stateful.state_managment import MemoManager  # noqa: N812 – external camel‑case
+    from src.stateful.state_managment import (
+        MemoManager,
+    )  # noqa: N812 – external camel‑case
 
 logger = get_logger(__name__)
 
 # Performance optimization: Cache tracing configuration
 _ORCHESTRATOR_TRACING = os.getenv("ORCHESTRATOR_TRACING", "true").lower() == "true"
 
+
 def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> tuple[str, str]:
     """Extract correlation context from WebSocket and MemoManager."""
     call_connection_id = (
-        getattr(ws.state, "call_connection_id", None) or
-        ws.headers.get("x-call-connection-id") or
-        cm.session_id  # fallback to session_id
+        getattr(ws.state, "call_connection_id", None)
+        or ws.headers.get("x-call-connection-id")
+        or cm.session_id  # fallback to session_id
     )
     session_id = (
-        getattr(ws.state, "session_id", None) or
-        ws.headers.get("x-session-id") or
-        cm.session_id
+        getattr(ws.state, "session_id", None)
+        or ws.headers.get("x-session-id")
+        or cm.session_id
     )
     return call_connection_id, session_id
 
@@ -77,7 +82,9 @@ async def run_auth_agent(
 
     auth_agent = ws.app.state.auth_agent
     async with track_latency(ws.state.lt, "auth_agent", ws.app.state.redis):
-        result: Dict[str, Any] | Any = await auth_agent.respond(cm, utterance, ws, is_acs=is_acs)
+        result: Dict[str, Any] | Any = await auth_agent.respond(
+            cm, utterance, ws, is_acs=is_acs
+        )
 
     if not (isinstance(result, dict) and result.get("authenticated")):
         return
@@ -109,7 +116,8 @@ async def run_auth_agent(
     )
 
 
-# 2.  Specialist agents 
+# 2.  Specialist agents
+
 
 async def run_general_agent(
     cm: "MemoManager",
@@ -186,7 +194,9 @@ async def _process_tool_response(cm: "MemoManager", resp: Any) -> None:  # noqa:
     # ─── Unified intent routing (post‑auth) ─────────────
     if intent in {"claims", "general"} and _cm_get(cm, "authenticated", False):
         new_agent = "Claims" if intent == "claims" else "General"
-        _cm_set(cm, active_agent=new_agent, claim_intent=claim_intent, call_reason=topic)
+        _cm_set(
+            cm, active_agent=new_agent, claim_intent=claim_intent, call_reason=topic
+        )
         logger.info("🔀 Routed via intent → %s", new_agent)
         return  # Skip legacy hand‑off logic if present
 
@@ -210,6 +220,7 @@ SPECIALIST_MAP: Dict[str, Callable[..., Any]] = {
     "General": run_general_agent,
     "Claims": run_claims_agent,
 }
+
 
 async def route_turn(
     cm: "MemoManager",

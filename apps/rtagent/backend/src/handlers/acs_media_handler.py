@@ -3,19 +3,18 @@ import json
 import threading
 from typing import Optional
 
-from azure.communication.callautomation import (
-    TextSource,
-)
+from azure.communication.callautomation import TextSource
 from fastapi import WebSocket
-from src.stateful.state_managment import MemoManager
-from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
-from apps.rtagent.backend.src.shared_ws import send_response_to_acs, broadcast_message
+
 from apps.rtagent.backend.settings import GREETING
+from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
+from apps.rtagent.backend.src.shared_ws import broadcast_message, send_response_to_acs
+from src.enums.monitoring import SpanAttr
 from src.enums.stream_modes import StreamMode
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
+from src.stateful.state_managment import MemoManager
 from utils.ml_logging import get_logger
 from utils.trace_context import TraceContext
-from src.enums.monitoring import SpanAttr
 
 logger = get_logger("handlers.acs_media_handler")
 
@@ -25,6 +24,7 @@ class NoOpTraceContext:
     No-operation context manager that provides the same interface as TraceContext
     but performs no actual tracing operations.
     """
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -71,26 +71,32 @@ class ACSMediaHandler:
 
         # Thread-safe event for barge-in detection
         self._barge_in_event = threading.Event()
-        
+
         # Track recognizer initialization state
         self._recognizer_started = False
 
         # Set tracing context from parameters with fallbacks
         self.call_connection_id = (
-            call_connection_id or 
-            getattr(ws.state, "call_connection_id", None) or
-            (ws.headers.get("x-call-connection-id") if hasattr(ws, 'headers') else None)
+            call_connection_id
+            or getattr(ws.state, "call_connection_id", None)
+            or (
+                ws.headers.get("x-call-connection-id")
+                if hasattr(ws, "headers")
+                else None
+            )
         )
         self.session_id = (
-            session_id or 
-            getattr(ws.state, "session_id", None) or
-            (ws.headers.get("x-session-id") if hasattr(ws, 'headers') else None)
+            session_id
+            or getattr(ws.state, "session_id", None)
+            or (ws.headers.get("x-session-id") if hasattr(ws, "headers") else None)
         )
-        
+
         # Store tracing configuration
         self.enable_tracing = enable_tracing
 
-        logger.info(f"ACSMediaHandler initialized - call_id: {self.call_connection_id}, session_id: {self.session_id}, tracing: {self.enable_tracing}")
+        logger.info(
+            f"ACSMediaHandler initialized - call_id: {self.call_connection_id}, session_id: {self.session_id}, tracing: {self.enable_tracing}"
+        )
 
     def _create_trace_context(self, name: str, **kwargs):
         """
@@ -102,7 +108,7 @@ class ACSMediaHandler:
                 name=name,
                 call_connection_id=self.call_connection_id,
                 session_id=self.session_id,
-                **kwargs
+                **kwargs,
             )
         else:
             return NoOpTraceContext()
@@ -113,13 +119,13 @@ class ACSMediaHandler:
         Only includes essential attributes to minimize overhead.
         """
         base_metadata = {"operation": operation}
-        
+
         # Add optional attributes if they provide value
         if kwargs:
             # Limit metadata size to prevent performance impact
             filtered_kwargs = {k: v for k, v in kwargs.items() if v is not None}
             base_metadata.update(filtered_kwargs)
-            
+
         return base_metadata
 
     async def start_recognizer(self):
@@ -128,7 +134,7 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.start_recognizer",
-            metadata=self._get_trace_metadata("recognizer_initialization")
+            metadata=self._get_trace_metadata("recognizer_initialization"),
         ):
             try:
                 # Capture the current event loop for thread-safe operations
@@ -146,15 +152,17 @@ class ACSMediaHandler:
                 # Start continuous recognition in a background thread
                 self.recognizer.speech_recognizer.start_continuous_recognition_async().get()
                 logger.info("✅ Speech recognizer started successfully")
-                
+
                 # Start the route_turn background processor in a separate thread to avoid blocking
                 def run_route_turn_loop():
                     asyncio.run(self.route_turn_loop())
 
-                self.route_turn_task = threading.Thread(target=run_route_turn_loop, daemon=True)
+                self.route_turn_task = threading.Thread(
+                    target=run_route_turn_loop, daemon=True
+                )
                 self.route_turn_task.start()
                 logger.info("✅ Route turn loop started")
-                
+
                 # Fire greeting playback - it handles its own async task creation
                 logger.info(f"🎤 Playing greeting: {GREETING}")
                 await broadcast_message(
@@ -177,20 +185,24 @@ class ACSMediaHandler:
         # Use lightweight metadata only for audio processing traces
         with self._create_trace_context(
             name="acs_media_handler.handle_media_message",
-            metadata=self._get_trace_metadata("audio_processing", lightweight=True)
+            metadata=self._get_trace_metadata("audio_processing", lightweight=True),
         ):
             try:
-                
+
                 data = json.loads(stream_data)
                 kind = data.get("kind")
                 if kind == "AudioMetadata":
                     # Handle AudioMetadata event - this indicates ACS is ready to send audio
-                    logger.info("📡 Received AudioMetadata - ACS is ready for audio streaming")
-                    
+                    logger.info(
+                        "📡 Received AudioMetadata - ACS is ready for audio streaming"
+                    )
+
                     # Start the recognizer if not already started (only once, on first AudioMetadata)
                     if not self._recognizer_started:
-                        logger.info("🎤 Starting speech recognizer on first AudioMetadata event")
-                        
+                        logger.info(
+                            "🎤 Starting speech recognizer on first AudioMetadata event"
+                        )
+
                         # Set trace attributes for recognizer initialization timing
                         with self._create_trace_context(
                             "acs_media_handler.recognizer_initialization_on_audio_metadata"
@@ -198,13 +210,23 @@ class ACSMediaHandler:
                             try:
                                 await self.start_recognizer()
                                 self._recognizer_started = True
-                                trace.set_attribute("recognizer.started_on_audio_metadata", True)
-                                trace.set_attribute("recognizer.initialization_timing", "optimal")
-                                
-                                logger.info("✅ Speech recognizer started successfully on AudioMetadata")
+                                trace.set_attribute(
+                                    "recognizer.started_on_audio_metadata", True
+                                )
+                                trace.set_attribute(
+                                    "recognizer.initialization_timing", "optimal"
+                                )
+
+                                logger.info(
+                                    "✅ Speech recognizer started successfully on AudioMetadata"
+                                )
                             except Exception as e:
-                                trace.set_attribute("recognizer.initialization_error", str(e))
-                                logger.error(f"❌ Failed to start recognizer on AudioMetadata: {e}")
+                                trace.set_attribute(
+                                    "recognizer.initialization_error", str(e)
+                                )
+                                logger.error(
+                                    f"❌ Failed to start recognizer on AudioMetadata: {e}"
+                                )
                                 raise
 
                 elif kind == "AudioData":
@@ -231,7 +253,9 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.play_greeting",
-            metadata=self._get_trace_metadata("greeting_playback", greeting_length=len(greeting_text))
+            metadata=self._get_trace_metadata(
+                "greeting_playback", greeting_length=len(greeting_text)
+            ),
         ):
             try:
 
@@ -255,17 +279,17 @@ class ACSMediaHandler:
         Note: Tracing is intentionally lightweight here due to high frequency calls.
         """
         logger.info(f"🗣️ User (partial) in {lang}: {text}")
-        
+
         # Start latency measurement for barge-in detection
         # latency_tool = self.latency_tool
         # latency_tool.start("barge_in")
-        
+
         # Set the barge-in event flag immediately
         # Only proceed with barge-in handling if this is a new event
         if self._barge_in_event.is_set():
             logger.info("⏭️ Barge-in already detected. Continuing...")
             return
-        
+
         self._barge_in_event.set()
 
         # Thread-safe async operation scheduling
@@ -318,11 +342,13 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.handle_barge_in",
-            metadata=self._get_trace_metadata("barge_in_processing")
+            metadata=self._get_trace_metadata("barge_in_processing"),
         ):
             try:
-                logger.info("🚫 User barge-in detected, stopping playback and clearing queue")
-                
+                logger.info(
+                    "🚫 User barge-in detected, stopping playback and clearing queue"
+                )
+
                 # Clear the entire queue to prevent processing queued items
                 while not self.route_turn_queue.empty():
                     try:
@@ -330,9 +356,11 @@ class ACSMediaHandler:
                         self.route_turn_queue.task_done()
                     except asyncio.QueueEmpty:
                         break
-                
-                logger.info(f"✅ Queue cleared, size now: {self.route_turn_queue.qsize()}")
-                
+
+                logger.info(
+                    f"✅ Queue cleared, size now: {self.route_turn_queue.qsize()}"
+                )
+
                 # Cancel current playback task if running
                 if self.playback_task and not self.playback_task.done():
                     logger.info("Cancelling playback task due to barge-in")
@@ -349,7 +377,7 @@ class ACSMediaHandler:
                 await self.send_stop_audio()
                 if self.latency_tool:
                     self.latency_tool.stop("barge_in", self.redis_mgr)
-                    
+
             except Exception as e:
                 logger.error(f"❌ Error in barge-in handling: {e}", exc_info=True)
 
@@ -360,12 +388,14 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.handle_final_result",
-            metadata=self._get_trace_metadata("final_speech_processing", text_length=len(text))
+            metadata=self._get_trace_metadata(
+                "final_speech_processing", text_length=len(text)
+            ),
         ):
             try:
                 # Add to queue for sequential processing
                 await self.route_turn_queue.put(("final", text))
-                
+
                 logger.info(
                     f"📋 Added to queue: {text}. Queue size: {self.route_turn_queue.qsize()}"
                 )
@@ -380,7 +410,7 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.route_turn_loop",
-            metadata=self._get_trace_metadata("background_processing_loop")
+            metadata=self._get_trace_metadata("background_processing_loop"),
         ):
             logger.info("🔄 Route turn loop started")
 
@@ -394,7 +424,7 @@ class ACSMediaHandler:
                         )
 
                         logger.info(f"🎯 Processing {kind} turn: {text}")
- 
+
                         # Cancel any current playback before starting new one
                         if self.playback_task and not self.playback_task.done():
                             logger.info("Cancelling previous playback task")
@@ -402,7 +432,9 @@ class ACSMediaHandler:
                             try:
                                 await asyncio.wait_for(self.playback_task, timeout=1.0)
                             except asyncio.TimeoutError:
-                                logger.warning("⚠️ Playback task cancellation timed out, moving on")
+                                logger.warning(
+                                    "⚠️ Playback task cancellation timed out, moving on"
+                                )
                             except asyncio.CancelledError:
                                 logger.info("✅ Previous playback task cancelled")
 
@@ -410,8 +442,10 @@ class ACSMediaHandler:
                         self.playback_task = asyncio.create_task(
                             self.route_and_playback(kind, text)
                         )
-                        logger.info(f"🎵 Started new playback task: {self.playback_task}")
-                        
+                        logger.info(
+                            f"🎵 Started new playback task: {self.playback_task}"
+                        )
+
                         # Mark queue task as done
                         self.route_turn_queue.task_done()
 
@@ -440,8 +474,8 @@ class ACSMediaHandler:
                 "orchestrator_processing",
                 kind=kind,
                 text_length=len(text),
-                queue_size=self.route_turn_queue.qsize()
-            )
+                queue_size=self.route_turn_queue.qsize(),
+            ),
         ):
             try:
                 logger.info(f"🎯 Routing turn with kind={kind} and text={text}")
@@ -457,9 +491,12 @@ class ACSMediaHandler:
                 # Use asyncio.wait_for to prevent route_turn from blocking indefinitely
                 await asyncio.wait_for(
                     route_turn(
-                        cm=self.cm, transcript=text, ws=self.incoming_websocket, is_acs=True
+                        cm=self.cm,
+                        transcript=text,
+                        ws=self.incoming_websocket,
+                        is_acs=True,
                     ),
-                    timeout=30.0  # 30 second timeout for LLM processing
+                    timeout=30.0,  # 30 second timeout for LLM processing
                 )
                 logger.info("✅ Route turn completed successfully")
 
@@ -472,7 +509,7 @@ class ACSMediaHandler:
                 await broadcast_message(
                     connected_clients=self.incoming_websocket.app.state.clients,
                     message="I'm sorry, I'm experiencing some delays. Please try again.",
-                    sender="Assistant"
+                    sender="Assistant",
                 )
             except Exception as e:
                 logger.error(f"❌ Error in route and playback: {e}", exc_info=True)
@@ -483,10 +520,14 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.send_stop_audio",
-            metadata=self._get_trace_metadata("stop_audio_command")
+            metadata=self._get_trace_metadata("stop_audio_command"),
         ):
             try:
-                stop_audio_data = {"Kind": "StopAudio", "AudioData": None, "StopAudio": {}}
+                stop_audio_data = {
+                    "Kind": "StopAudio",
+                    "AudioData": None,
+                    "StopAudio": {},
+                }
                 json_data = json.dumps(stop_audio_data)
                 await self.incoming_websocket.send_text(json_data)
                 logger.info("📢 Sent stop audio command to ACS")
@@ -499,7 +540,7 @@ class ACSMediaHandler:
         """
         with self._create_trace_context(
             name="acs_media_handler.stop",
-            metadata=self._get_trace_metadata("cleanup_and_shutdown")
+            metadata=self._get_trace_metadata("cleanup_and_shutdown"),
         ):
             logger.info("🛑 Stopping ACS Media Handler")
             self.stopped = True
