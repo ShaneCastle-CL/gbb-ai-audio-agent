@@ -23,7 +23,6 @@ from fastapi import HTTPException, WebSocket
 from fastapi.responses import JSONResponse
 
 from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING, VOICE_TTS
-from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 from src.enums.stream_modes import StreamMode
 from src.stateful.state_managment import MemoManager
@@ -446,6 +445,7 @@ class ACSHandler:
             "Microsoft.Communication.TranscriptionFailed": ACSHandler._handle_transcription_failed,
             "Microsoft.Communication.CallDisconnected": ACSHandler._handle_call_disconnected,
             "Microsoft.Communication.MediaStreamingStarted": ACSHandler._handle_media_streaming_started,
+            "Microsoft.Communication.ContinuousDtmfRecognitionToneReceived": ACSHandler._handle_dtmf_tone_received,
         }
 
         try:
@@ -471,8 +471,34 @@ class ACSHandler:
                         await handler(event, cm, redis_mgr, cid, acs_caller)
                     elif etype == "Microsoft.Communication.CallDisconnected":
                         await handler(event, cm, redis_mgr, cid)
-                    else:
+                    elif etype == "Microsoft.Communication.ContinuousDtmfRecognitionToneReceived":
                         await handler(event, cm, redis_mgr, cid)
+
+                # # Handle media events that affect bot_speaking state
+                # elif etype in media_events:
+                #     cm.update_context("bot_speaking", media_events[etype])
+                #     action = "Set" if media_events[etype] else "Set"
+                #     logger.info(
+                #         f"{etype.split('.')[-1]}: {action} bot_speaking={media_events[etype]} for call {cm.session_id}"
+                #     )
+
+                #     # Log errors for failed events
+                #     if "Failed" in etype:
+                #         reason = event.data.get("resultInformation", "Unknown reason")
+                #         logger.error(
+                #             f"⚠️ {etype.split('.')[-1]} for call {cid}: {reason}"
+                #         )
+
+                # # Handle other failed events
+                # elif "Failed" in etype:
+                #     reason = event.data.get("resultInformation", "Unknown reason")
+                #     logger.error("⚠️ %s for call %s: %s", etype, cid, reason)
+
+                # # Log unhandled events
+                # else:
+                #     logger.info("Unhandled event: %s for call %s", etype, cid)
+
+                # cm.persist_to_redis(redis_mgr)
 
             return {"status": "callback received"}
 
@@ -646,6 +672,13 @@ class ACSHandler:
                 f"Error handling media streaming started for call {cid}: {e}",
                 exc_info=True,
             )
+
+    @staticmethod
+    async def _handle_dtmf_tone_received(event, cm, redis_mgr, cid):
+        logger.info("🔢 DTMF seq=%s tone=%s call=%s",
+                    event.data.get("sequenceId"),
+                    event.data.get("tone"),
+                    cid)
 
     @staticmethod
     async def _handle_transcription_failed(

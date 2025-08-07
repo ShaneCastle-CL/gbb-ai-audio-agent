@@ -336,12 +336,14 @@ async def acs_media_ws(ws: WebSocket):
                 handler = ACSMediaHandler(ws, recognizer=ws.app.state.stt_client, cm=cm)
                 # Don't start recognizer here - it will be started when first AudioMetadata is received
                 # This prevents race conditions with WebSocket setup
+                ws.app.state.handler = handler
 
             elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
                 handler = TranscriptionHandler(
                     ws,
                     cm=cm,
                 )
+                ws.app.state.handler = handler
 
             if not handler:
                 logger.error("No handler initialized for ACS streaming mode")

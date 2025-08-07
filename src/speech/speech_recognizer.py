@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Final
 
 import azure.cognitiveservices.speech as speechsdk
 from azure.identity import DefaultAzureCredential
@@ -37,16 +37,30 @@ class StreamingSpeechRecognizerFromBytes:
     - Azure Monitor OpenTelemetry tracing with call correlation
     """
 
+    _DEFAULT_LANGS: Final[List[str]] = [
+        "en-US",
+        "es-ES",
+        "fr-FR",
+        "de-DE",
+        "it-IT",
+    ]
+
     def __init__(
         self,
         *,
         key: Optional[str] = None,
         region: Optional[str] = None,
-        candidate_languages: Optional[List[str]] = None,
-        use_semantic_segmentation: bool = True,
+        # Behaviour -----------------------------------------------------
+        candidate_languages: List[str] | None = None,
         vad_silence_timeout_ms: int = 800,
-        audio_format: str = "pcm",  # "pcm" or "any"
-        call_connection_id: Optional[str] = None,
+        use_semantic_segmentation: bool = True,
+        audio_format: str = "pcm",  # "pcm" | "any"
+        # Advanced features --------------------------------------------
+        enable_neural_fe: bool = False,
+        enable_diarisation: bool = True,
+        speaker_count_hint: int = 2,
+        # Observability -------------------------------------------------
+        call_connection_id: str | None = None,
         enable_tracing: bool = True,
     ):
         """
@@ -63,7 +77,7 @@ class StreamingSpeechRecognizerFromBytes:
         """
         self.key = key or os.getenv("AZURE_SPEECH_KEY")
         self.region = region or os.getenv("AZURE_SPEECH_REGION")
-        self.candidate_languages = candidate_languages or ["en-US", "es-ES", "fr-FR"]
+        self.candidate_languages = candidate_languages or self._DEFAULT_LANGS
         self.vad_silence_timeout_ms = vad_silence_timeout_ms
         self.audio_format = audio_format  # either "pcm" or "any"
         self.use_semantic = use_semantic_segmentation
@@ -71,11 +85,16 @@ class StreamingSpeechRecognizerFromBytes:
         self.call_connection_id = call_connection_id or "unknown"
         self.enable_tracing = enable_tracing
 
-        self.final_callback: Optional[Callable[[str, str], None]] = None
-        self.partial_callback: Optional[Callable[[str, str], None]] = None
+        self.partial_callback: Optional[Callable[[str, str, str | None], None]] = None
+        self.final_callback: Optional[Callable[[str, str, str | None], None]] = None
         self.cancel_callback: Optional[Callable[[speechsdk.SessionEventArgs], None]] = (
             None
         )
+
+        # Advanced feature flags
+        self._enable_neural_fe = enable_neural_fe
+        self._enable_diarisation = enable_diarisation
+        self._speaker_hint = max(0, min(speaker_count_hint, 16))
 
         self.push_stream = None
         self.speech_recognizer = None
@@ -217,130 +236,104 @@ class StreamingSpeechRecognizerFromBytes:
             self._start_recognition()
 
     def _start_recognition(self) -> None:
-        """Internal method to start recognition"""
-        logger.info("Starting recognition from byte stream...")
+        """
+        Build the Speech SDK recogniser **and start it** in one shot.
+        """
+        logger.info("Starting recognition from byte stream…")
 
-        # Create speech config with proper authentication
-        speech_config = self.cfg
-        # --- segmentation strategy -------------------------------------- #
-        if self.use_semantic:
-            speech_config.set_property(
-                speechsdk.PropertyId.Speech_SegmentationStrategy, "Semantic"
-            )
-
-        # switch to continuous LID mode
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_LanguageIdMode, "Continuous"
-        )
-        lid_cfg = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
-            languages=self.candidate_languages
-        )
-
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceResponse_StablePartialResultThreshold, "1"
-        )
-
-        # PCM format: for raw PCM/linear audio
-        if self.audio_format == "pcm":
-            stream_format = speechsdk.audio.AudioStreamFormat(
-                samples_per_second=16000, bits_per_sample=16, channels=1
-            )
-        # ANY format: for browser/native/mobile compressed formats (webm, ogg, mp3, etc)
-        elif self.audio_format == "any":
-            stream_format = speechsdk.audio.AudioStreamFormat(
-                compressed_stream_format=speechsdk.AudioStreamContainerFormat.ANY
-            )
-        else:
-            raise ValueError(f"Unsupported audio_format: {self.audio_format}")
-
-        self.push_stream = speechsdk.audio.PushAudioInputStream(
-            stream_format=stream_format
-        )
-        audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
-
-        self.speech_recognizer = speechsdk.SpeechRecognizer(
-            speech_config=speech_config,
-            audio_config=audio_config,
-            auto_detect_source_language_config=lid_cfg,
-        )
-        if not self.use_semantic:
-            # classic silence guard (100-5 000 ms). 800 ms default
-            self.speech_recognizer.properties.set_property(
-                speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
-                str(self.vad_silence_timeout_ms),
-            )
-
-        if self.partial_callback:
-            self.speech_recognizer.recognizing.connect(self._on_recognizing)
-        if self.final_callback:
-            self.speech_recognizer.recognized.connect(self._on_recognized)
-        if self.cancel_callback:
-            self.speech_recognizer.canceled.connect(self.cancel_callback)
-
-        self.speech_recognizer.canceled.connect(self._on_canceled)
-        self.speech_recognizer.session_stopped.connect(self._on_session_stopped)
-
+        self.prepare_start()                     
         self.speech_recognizer.start_continuous_recognition_async().get()
-        # self.speech_recognizer.start_continuous_recognition()
-        logger.info("Recognition started.")
 
-        # Add event to session span if tracing is enabled
+        logger.info("Recognition started.")
         if self._session_span:
             self._session_span.add_event("speech_recognition_started")
 
-    def prepare_start(self) -> None:
-        logger.info("Starting recognition from byte stream...")
 
-        # Create speech config with proper authentication
+    def prepare_start(self) -> None:
+        """
+        Allocate PushAudioInputStream + SpeechRecognizer.
+
+        • Neural front-end (noise-suppression / AEC / AGC) is enabled
+        when `self.` is *True*.
+        • Speaker diarisation is enabled when `self.enable_diarisation` is *True*.
+        • All other behaviour (LID, semantic segmentation, VAD, etc.)
+        follows the class-level settings.
+        """
+        logger.info("Speech-SDK prepare_start – format=%s  neuralFE=%s  diar=%s",
+                    self.audio_format, self._enable_neural_fe, self._enable_diarisation)
+
+        # ------------------------------------------------------------------ #
+        # 1. SpeechConfig – global properties
+        # ------------------------------------------------------------------ #
         speech_config = self.cfg
-        # --- segmentation strategy -------------------------------------- #
+
         if self.use_semantic:
             speech_config.set_property(
-                speechsdk.PropertyId.Speech_SegmentationStrategy, "Semantic"
-            )
-        # switch to continuous LID mode
-        speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_LanguageIdMode, "Continuous"
-        )
-        lid_cfg = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
-            languages=self.candidate_languages
-        )
+                speechsdk.PropertyId.Speech_SegmentationStrategy, "Semantic")
 
         speech_config.set_property(
-            speechsdk.PropertyId.SpeechServiceResponse_StablePartialResultThreshold, "1"
-        )
+            speechsdk.PropertyId.SpeechServiceConnection_LanguageIdMode, "Continuous")
 
-        # PCM format: for raw PCM/linear audio
+        speech_config.set_property(
+            speechsdk.PropertyId.SpeechServiceResponse_StablePartialResultThreshold, "1")
+
+        # ── Speaker diarisation (if requested) ────────────────────────────
+        if self._enable_diarisation:
+            speech_config.set_property(property_id=speechsdk.PropertyId.SpeechServiceResponse_DiarizeIntermediateResults, value='true')
+            # speech_config.set_property(
+            #     speechsdk.PropertyId.SpeechServiceConnection_SpeakerDiarizationSpeakerCount,
+            #     str(self._speaker_hint))
+
+        # ------------------------------------------------------------------ #
+        # 2. PushAudioInputStream – container vs. raw PCM
+        # ------------------------------------------------------------------ #
         if self.audio_format == "pcm":
             stream_format = speechsdk.audio.AudioStreamFormat(
-                samples_per_second=16000, bits_per_sample=16, channels=1
-            )
-        # ANY format: for browser/native/mobile compressed formats (webm, ogg, mp3, etc)
+                samples_per_second=16000, bits_per_sample=16, channels=1)
         elif self.audio_format == "any":
             stream_format = speechsdk.audio.AudioStreamFormat(
-                compressed_stream_format=speechsdk.AudioStreamContainerFormat.ANY
-            )
+                compressed_stream_format=speechsdk.AudioStreamContainerFormat.ANY)
         else:
-            raise ValueError(f"Unsupported audio_format: {self.audio_format}")
+            raise ValueError(f"Unsupported audio_format: {self.audio_format!r}")
 
-        self.push_stream = speechsdk.audio.PushAudioInputStream(
-            stream_format=stream_format
-        )
-        audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
+        self.push_stream = speechsdk.audio.PushAudioInputStream(stream_format=stream_format)
 
+        # ------------------------------------------------------------------ #
+        # 3. Optional neural audio front-end
+        # ------------------------------------------------------------------ #
+        if self._enable_neural_fe:
+            proc_opts = speechsdk.audio.AudioProcessingOptions(
+                speechsdk.audio.AudioProcessingConstants.AUDIO_INPUT_PROCESSING_ENABLE_DEFAULT,
+                speechsdk.audio.AudioProcessingConstants.AUDIO_INPUT_PROCESSING_MODE_DEFAULT,
+            )
+            audio_config = speechsdk.audio.AudioConfig(
+                stream=self.push_stream,
+                audio_processing_options=proc_opts)
+        else:
+            audio_config = speechsdk.audio.AudioConfig(stream=self.push_stream)
+
+        # ------------------------------------------------------------------ #
+        # 4. LID configuration
+        # ------------------------------------------------------------------ #
+        lid_cfg = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
+            languages=self.candidate_languages)
+
+        # ------------------------------------------------------------------ #
+        # 5. Build recogniser (still no network traffic)
+        # ------------------------------------------------------------------ #
         self.speech_recognizer = speechsdk.SpeechRecognizer(
             speech_config=speech_config,
             audio_config=audio_config,
-            auto_detect_source_language_config=lid_cfg,
-        )
+            auto_detect_source_language_config=lid_cfg)
 
         if not self.use_semantic:
-            # classic silence guard (100-5 000 ms). 800 ms default
             self.speech_recognizer.properties.set_property(
                 speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
-                str(self.vad_silence_timeout_ms),
-            )
+                str(self.vad_silence_timeout_ms))
 
+        # ------------------------------------------------------------------ #
+        # 6. Wire callbacks / health telemetry
+        # ------------------------------------------------------------------ #
         if self.partial_callback:
             self.speech_recognizer.recognizing.connect(self._on_recognizing)
         if self.final_callback:
@@ -351,7 +344,12 @@ class StreamingSpeechRecognizerFromBytes:
         self.speech_recognizer.canceled.connect(self._on_canceled)
         self.speech_recognizer.session_stopped.connect(self._on_session_stopped)
 
-        logger.info("Recognition ready to start.")
+        logger.info("Speech-SDK ready "
+                    "(neuralFE=%s, diarisation=%s, speakers=%s)",
+                    self._enable_neural_fe, self._enable_diarisation,
+                    self._speaker_hint)
+
+
 
     def write_bytes(self, audio_chunk: bytes) -> None:
         """Write audio bytes to the stream with optional tracing"""
@@ -427,10 +425,22 @@ class StreamingSpeechRecognizerFromBytes:
 
         return ""
 
+
+    def _extract_speaker_id(self, evt):
+        blob = evt.result.properties.get(
+            speechsdk.PropertyId.SpeechServiceResponse_JsonResult, "")
+        if blob:
+            try:
+                return str(json.loads(blob).get("SpeakerId"))
+            except Exception:
+                pass
+        return None
+
     # callbacks → wrap user callbacks with tracing
     def _on_recognizing(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle partial recognition results with tracing"""
         txt = evt.result.text
+        speaker_id = self._extract_speaker_id(evt)
         if txt and self.partial_callback:
             # Create a span for partial recognition
             if self.enable_tracing and self.tracer:
@@ -458,14 +468,14 @@ class StreamingSpeechRecognizerFromBytes:
                             {"text_length": len(txt), "detected_language": detected},
                         )
 
-            self.partial_callback(txt, detected)
+            self.partial_callback(txt, detected, speaker_id)
         else:
             # extract whatever lang Azure selected (or fallback to first candidate)
             detected = (
                 speechsdk.AutoDetectSourceLanguageResult(evt.result).language
                 or self.candidate_languages[0]
             )
-            self.partial_callback(txt, detected)
+            self.partial_callback(txt, detected, speaker_id)
 
     def _on_recognized(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle final recognition results with tracing"""

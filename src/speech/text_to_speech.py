@@ -158,22 +158,24 @@ class SpeechSynthesizer:
         Helper method to create and configure the SpeechConfig object.
         Creates a fresh config each time to handle token expiration.
         """
-        speech_config = None
-
         if self.key:
-            # Use subscription key authentication (most reliable)
-            logger.debug("Using subscription key for Azure Speech authentication")
-            speech_config = speechsdk.SpeechConfig(
-                subscription=self.key, region=self.region
-            )
+            # Use API key authentication if provided
+            logger.info("Creating SpeechConfig with API key authentication")
+            speech_config = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
         else:
-            # Try environment variable first as fallback
-            fallback_key = os.getenv("AZURE_SPEECH_KEY")
-            if fallback_key:
-                logger.debug("Using AZURE_SPEECH_KEY from environment")
-                speech_config = speechsdk.SpeechConfig(
-                    subscription=fallback_key, region=self.region
+            # Use Azure Default Credentials (managed identity, service principal, etc.)
+            logger.info("Creating SpeechConfig with Azure Default Credentials")
+            if not self.region:
+                raise ValueError(
+                    "Region must be specified when using Azure Default Credentials"
                 )
+
+            endpoint = os.getenv("AZURE_SPEECH_ENDPOINT")
+            credential = DefaultAzureCredential()
+
+            if endpoint:
+                # Use endpoint if provided
+                speech_config = speechsdk.SpeechConfig(endpoint=endpoint)
             else:
                 # Use default Azure credential for authentication
                 # Get a fresh token each time to handle token expiration
