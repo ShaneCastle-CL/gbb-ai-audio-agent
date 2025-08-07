@@ -59,6 +59,8 @@ async def wait_for_call_connected(
     deadline = datetime.utcnow() + timedelta(seconds=timeout)
 
     while True:
+        time = datetime.utcnow()
+        logger.info("🕐 Waiting for call to connect...")
         try:
             props: CallConnectionProperties = call_conn.get_call_properties()
             state = str(props.call_connection_state).lower()            
@@ -79,7 +81,8 @@ async def wait_for_call_connected(
                     f"Call not connected after {timeout}s due to errors."
                 )
         
-
+        time_end = datetime.utcnow() - time
+        logger.info(f"🕐 Waited {time_end.total_seconds()}s for call to connect...")
         await asyncio.sleep(poll_interval)
 
 class AcsCaller:
@@ -315,11 +318,11 @@ class AcsCaller:
                 media_streaming=media_streaming,
             )
             logger.info("Call created: %s", result.call_connection_id)
-            # call_conn = self.client.get_call_connection(result.call_connection_id)
-            # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
-            # call_conn.start_continuous_dtmf_recognition(target_participant=dest,
-            #                                             operation_context="ivr")
-            # logger.info("📲 DTMF subscription ON for %s", result.call_connection_id)
+            call_conn = self.client.get_call_connection(result.call_connection_id)
+            await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+            call_conn.start_continuous_dtmf_recognition(target_participant=dest,
+                                                        operation_context="ivr")
+            logger.info("📲 DTMF subscription ON for %s", result.call_connection_id)
             return {"status": "created", "call_id": result.call_connection_id}
 
         except HttpResponseError as e:
