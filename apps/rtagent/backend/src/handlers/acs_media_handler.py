@@ -132,39 +132,27 @@ class ACSMediaHandler:
         """
         Initialize and start the speech recognizer with proper event loop handling.
         """
-        with self._create_trace_context(
-            name="acs_media_handler.start_recognizer",
-            metadata=self._get_trace_metadata("recognizer_initialization"),
-        ):
-            try:
-                # Capture the current event loop for thread-safe operations
+        try: 
+            with self._create_trace_context(
+                name="acs_media_handler.start_recognizer",
+                metadata=self._get_trace_metadata("recognizer_initialization"),
+            ):
+                logger.info("🎤 Starting speech recognizer...")
                 self.main_loop = asyncio.get_running_loop()
-                logger.info(f"Captured main event loop: {self.main_loop}")
+                logger.info("Captured main event-loop id=%s", id(self.main_loop))
 
-                # Attach event handlers
                 self.recognizer.set_partial_result_callback(self.on_partial)
                 self.recognizer.set_final_result_callback(self.on_final)
                 self.recognizer.set_cancel_callback(self.on_cancel)
 
-                # Prepare the recognizer (this sets up the Speech SDK components)
                 self.recognizer.prepare_start()
-
-                # Start continuous recognition in a background thread
                 self.recognizer.speech_recognizer.start_continuous_recognition_async().get()
-                logger.info("✅ Speech recognizer started successfully")
+                logger.info("✅ Speech recognizer started")
 
-                # Start the route_turn background processor in a separate thread to avoid blocking
-                def run_route_turn_loop():
-                    asyncio.run(self.route_turn_loop())
+                self.route_turn_task = asyncio.create_task(self.route_turn_loop())
+                logger.info("✅ route_turn_loop task created (%s)", self.route_turn_task)
 
-                self.route_turn_task = threading.Thread(
-                    target=run_route_turn_loop, daemon=True
-                )
-                self.route_turn_task.start()
-                logger.info("✅ Route turn loop started")
-
-                # Fire greeting playback - it handles its own async task creation
-                logger.info(f"🎤 Playing greeting: {GREETING}")
+                logger.info("🎤 Playing greeting: %s", GREETING)
                 await broadcast_message(
                     connected_clients=self.incoming_websocket.app.state.clients,
                     message=GREETING,
@@ -172,9 +160,9 @@ class ACSMediaHandler:
                 )
                 self.play_greeting()
 
-            except Exception as e:
-                logger.error(f"❌ Failed to start recognizer: {e}", exc_info=True)
-                raise
+        except Exception as e:
+                    logger.error(f"❌ Failed to start recognizer: {e}", exc_info=True)
+                    raise
 
     async def handle_media_message(self, stream_data):
         """

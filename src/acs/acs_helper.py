@@ -18,14 +18,69 @@ from azure.communication.callautomation import (
     StreamingTransportType,
     TranscriptionOptions,
 )
+from azure.communication.callautomation.aio import CallAutomationClient as AsyncCallAutomationClient
+
 from azure.communication.identity import CommunicationIdentityClient
 from azure.core.exceptions import HttpResponseError
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
+from azure.communication.callautomation import CallConnectionProperties
+from datetime import datetime, timedelta
 
 from src.enums.stream_modes import StreamMode
+from utils.ml_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("src.acs")
 
+async def wait_for_call_connected(
+    call_conn: CallConnectionClient,
+    *,
+    timeout: float = 30.0,
+    poll_interval: float = 0.01,  # Poll every 10ms for low latency
+) -> CallConnectionProperties:
+    """
+    Block until the call reaches the **Connected** state.
+
+    Mid-call actions (DTMF, play media, recording, etc.) are only legal once the
+    call is established.  This helper polls the connection properties until
+    ``call_connection_state == 'Connected'``.
+
+    Args:
+        call_conn: Active :class:`CallConnectionClient` for the call.
+        timeout: Maximum seconds to wait before giving up.
+        poll_interval: Seconds between successive polls.
+
+    Returns:
+        The final :class:`CallConnectionProperties` when the call is connected.
+
+    Raises:
+        TimeoutError: If the call never reaches *Connected* within *timeout*.
+        HttpResponseError: Propagated SDK error while fetching properties.
+    """
+    deadline = datetime.utcnow() + timedelta(seconds=timeout)
+
+    while True:
+        try:
+            props: CallConnectionProperties = call_conn.get_call_properties()
+            state = str(props.call_connection_state).lower()            
+
+            if state == "connected":
+                logger.info("☎️ Call %s is now connected", props.call_connection_id)
+                return props
+
+            if datetime.utcnow() >= deadline:
+                raise TimeoutError(
+                    f"Call {props.call_connection_id} not connected after {timeout}s."
+                )
+
+        except Exception as e:
+            logger.warning(f"Error getting call properties: {e}")
+            if datetime.utcnow() >= deadline:
+                raise TimeoutError(
+                    f"Call not connected after {timeout}s due to errors."
+                )
+        
+
+        await asyncio.sleep(poll_interval)
 
 class AcsCaller:
     """
@@ -260,6 +315,11 @@ class AcsCaller:
                 media_streaming=media_streaming,
             )
             logger.info("Call created: %s", result.call_connection_id)
+            # call_conn = self.client.get_call_connection(result.call_connection_id)
+            # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+            # call_conn.start_continuous_dtmf_recognition(target_participant=dest,
+            #                                             operation_context="ivr")
+            # logger.info("📲 DTMF subscription ON for %s", result.call_connection_id)
             return {"status": "created", "call_id": result.call_connection_id}
 
         except HttpResponseError as e:
@@ -316,15 +376,17 @@ class AcsCaller:
 
             logger.info(f"Incoming call answered: {result.call_connection_id}")
 
-            # # Cache call state if Redis manager is available
-            # if redis_mgr:
-            #     await redis_mgr.set_call_state(
-            #         call_connection_id=result.call_connection_id,
-            #         state="answered",
-            #         call_id=result.call_connection_id
-            #     )
+            # Wait for call to be connected and start DTMF recognition
+            # call_conn = self.client.get_call_connection(result.call_connection_id)
+            # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+            
+            # Start continuous DTMF recognition for incoming calls
+            # TODO
+            # Note: For incoming calls, we don't have a specific target participant, so we omit it
+            # call_conn.start_continuous_dtmf_recognition(operation_context="ivr")
+            # logger.info("📲 DTMF subscription ON for incoming call %s", result.call_connection_id)
 
-            # return result
+            return result
 
         except HttpResponseError as e:
             logger.error(

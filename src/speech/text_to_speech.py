@@ -158,51 +158,44 @@ class SpeechSynthesizer:
         Helper method to create and configure the SpeechConfig object.
         Creates a fresh config each time to handle token expiration.
         """
-        speech_config = None
-
         if self.key:
-            # Use subscription key authentication (most reliable)
-            logger.debug("Using subscription key for Azure Speech authentication")
-            speech_config = speechsdk.SpeechConfig(
-                subscription=self.key, region=self.region
-            )
+            # Use API key authentication if provided
+            logger.info("Creating SpeechConfig with API key authentication")
+            speech_config = speechsdk.SpeechConfig(subscription=self.key, region=self.region)
         else:
-            # Try environment variable first as fallback
-            fallback_key = os.getenv("AZURE_SPEECH_KEY")
-            if fallback_key:
-                logger.debug("Using AZURE_SPEECH_KEY from environment")
-                speech_config = speechsdk.SpeechConfig(
-                    subscription=fallback_key, region=self.region
+            # Use Azure Default Credentials (managed identity, service principal, etc.)
+            logger.info("Creating SpeechConfig with Azure Default Credentials")
+            if not self.region:
+                raise ValueError(
+                    "Region must be specified when using Azure Default Credentials"
                 )
-            else:
-                # Use default Azure credential for authentication
-                # Get a fresh token each time to handle token expiration
-                try:
-                    logger.debug(
-                        "Attempting to use DefaultAzureCredential for Azure Speech"
-                    )
-                    credential = DefaultAzureCredential()
-                    speech_resource_id = os.getenv("AZURE_SPEECH_RESOURCE_ID")
-                    token = credential.get_token(
-                        "https://cognitiveservices.azure.com/.default"
-                    )
-                    auth_token = "aad#" + speech_resource_id + "#" + token.token
-                    speech_config = speechsdk.SpeechConfig(
-                        auth_token=auth_token, region=self.region
-                    )
-                    logger.debug(
-                        "Successfully authenticated with DefaultAzureCredential"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to get Azure credential token: {e}")
-                    raise RuntimeError(
-                        f"Failed to authenticate with Azure Speech. Please set AZURE_SPEECH_KEY environment variable or ensure proper Azure credentials are configured: {e}"
-                    )
 
-        if not speech_config:
-            raise RuntimeError(
-                "Failed to create speech config - no valid authentication method found"
-            )
+            endpoint = os.getenv("AZURE_SPEECH_ENDPOINT")
+            credential = DefaultAzureCredential()
+
+            if endpoint:
+                # Use endpoint if provided
+                speech_config = speechsdk.SpeechConfig(endpoint=endpoint)
+            else:
+                speech_config = speechsdk.SpeechConfig(region=self.region)
+
+            # Set the authorization token
+            try:
+                # Get token for Cognitive Services scope
+                token_result = credential.get_token(
+                    "https://cognitiveservices.azure.com/.default"
+                )
+                speech_config.authorization_token = token_result.token
+                logger.info(
+                    "Successfully configured SpeechConfig with Azure Default Credentials"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to get Azure token: {e}. Ensure that the required RBAC role, such as 'Cognitive Services User', is assigned to your identity."
+                )
+                raise ValueError(
+                    f"Failed to authenticate with Azure Default Credentials: {e}. Ensure that the required RBAC role, such as 'Cognitive Services User', is assigned to your identity."
+                )
 
         speech_config.speech_synthesis_language = self.language
         speech_config.speech_synthesis_voice_name = self.voice
