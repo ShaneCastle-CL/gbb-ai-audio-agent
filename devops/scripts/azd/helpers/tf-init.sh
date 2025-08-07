@@ -309,6 +309,12 @@ ensure_terraform_directory() {
 # Update Terraform variables file with azd environment values
 update_terraform_vars() {
     local tfvars_file="./infra-tf/main.tfvars.json"
+
+    # If tfvars file does not exist, create an empty JSON block
+    if [[ ! -f "$tfvars_file" ]]; then
+        log_info "tfvars file not found, creating empty JSON block: $tfvars_file"
+        echo '{}' > "$tfvars_file"
+    fi
     local provider_conf_file="./infra-tf/provider.conf.json"
     local env_name
     local location

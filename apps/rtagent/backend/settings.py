@@ -69,7 +69,7 @@ AZURE_COSMOS_COLLECTION_NAME: str = os.getenv("AZURE_COSMOS_COLLECTION_NAME", ""
 # ------------------------------------------------------------------------------
 # Azure Identity / Authentication
 # ------------------------------------------------------------------------------
-ENABLE_AUTH_VALIDATION: bool = os.getenv("ENABLE_AUTH_VALIDATION", True)
+ENABLE_AUTH_VALIDATION: bool = os.getenv("ENABLE_AUTH_VALIDATION", False)
 BACKEND_AUTH_CLIENT_ID: str = os.getenv("BACKEND_AUTH_CLIENT_ID", "")
 
 ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
