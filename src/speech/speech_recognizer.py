@@ -85,8 +85,8 @@ class StreamingSpeechRecognizerFromBytes:
         self.call_connection_id = call_connection_id or "unknown"
         self.enable_tracing = enable_tracing
 
-        self.final_callback: Optional[Callable[[str, str], None]] = None
-        self.partial_callback: Optional[Callable[[str, str], None]] = None
+        self.partial_callback: Optional[Callable[[str, str, str | None], None]] = None
+        self.final_callback: Optional[Callable[[str, str, str | None], None]] = None
         self.cancel_callback: Optional[Callable[[speechsdk.SessionEventArgs], None]] = (
             None
         )
@@ -425,10 +425,22 @@ class StreamingSpeechRecognizerFromBytes:
 
         return ""
 
+
+    def _extract_speaker_id(self, evt):
+        blob = evt.result.properties.get(
+            speechsdk.PropertyId.SpeechServiceResponse_JsonResult, "")
+        if blob:
+            try:
+                return str(json.loads(blob).get("SpeakerId"))
+            except Exception:
+                pass
+        return None
+
     # callbacks → wrap user callbacks with tracing
     def _on_recognizing(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle partial recognition results with tracing"""
         txt = evt.result.text
+        speaker_id = self._extract_speaker_id(evt)
         if txt and self.partial_callback:
             # Create a span for partial recognition
             if self.enable_tracing and self.tracer:
@@ -456,14 +468,14 @@ class StreamingSpeechRecognizerFromBytes:
                             {"text_length": len(txt), "detected_language": detected},
                         )
 
-            self.partial_callback(txt, detected)
+            self.partial_callback(txt, detected, speaker_id)
         else:
             # extract whatever lang Azure selected (or fallback to first candidate)
             detected = (
                 speechsdk.AutoDetectSourceLanguageResult(evt.result).language
                 or self.candidate_languages[0]
             )
-            self.partial_callback(txt, detected)
+            self.partial_callback(txt, detected, speaker_id)
 
     def _on_recognized(self, evt: speechsdk.SpeechRecognitionEventArgs) -> None:
         """Handle final recognition results with tracing"""
