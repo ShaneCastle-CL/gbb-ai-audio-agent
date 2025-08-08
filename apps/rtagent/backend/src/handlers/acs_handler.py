@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from azure.communication.callautomation import TextSource
+from azure.communication.callautomation import TextSource, PhoneNumberIdentifier
 from azure.core.exceptions import HttpResponseError
 from azure.core.messaging import CloudEvent
 from fastapi import HTTPException, WebSocket
@@ -559,7 +559,18 @@ class ACSHandler:
     ) -> None:
         """Handle call connected event and prepare for media streaming or transcription."""
         await broadcast_message(clients, f"Call Connected: {cid}", "System")
+        call_conn = acs_caller.get_call_connection(cid)
+        # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+        # Get the target participant from event data
+        target_participant = PhoneNumberIdentifier(value=cm.get_context("target_number"))
+        target = call_conn.get_participant(
+            target_participant=target_participant
+        )
 
+        call_conn.start_continuous_dtmf_recognition(
+            target_participant=target_participant,
+            operation_context="ivr"
+        )
         # Store call connection state
         await cm.set_live_context_value(redis_mgr, "call_connected", True)
         await cm.set_live_context_value(redis_mgr, "greeted", False)
