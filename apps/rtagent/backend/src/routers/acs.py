@@ -33,12 +33,25 @@ from apps.rtagent.backend.settings import (
 )
 from apps.rtagent.backend.src.handlers.acs_handler import ACSHandler
 from apps.rtagent.backend.src.handlers.acs_media_handler import ACSMediaHandler
+from apps.rtagent.backend.src.utils.auth import (
+    AuthError,
+    validate_acs_http_auth,
+    validate_acs_ws_auth
+)
 from apps.rtagent.backend.src.handlers.acs_transcript_handler import (
     TranscriptionHandler,
 )
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from src.enums.stream_modes import StreamMode
 from src.stateful.state_managment import MemoManager
+from apps.rtagent.backend.settings import (
+    ACS_CALL_PATH,
+    ACS_CALLBACK_PATH,
+    ACS_STREAMING_MODE,
+    ACS_WEBSOCKET_PATH,
+    ENABLE_AUTH_VALIDATION
+)
+from src.enums.stream_modes import StreamMode
 from utils.ml_logging import get_logger
 
 # Add tracing imports
@@ -48,7 +61,6 @@ from utils.trace_context import NoOpTraceContext, TraceContext
 
 logger = get_logger("routers.acs")
 router = APIRouter()
-
 
 # Tracing configuration for ACS operations
 def _is_acs_tracing_enabled() -> bool:
@@ -131,9 +143,11 @@ async def initiate_call(call: CallRequest, request: Request):
 # --------------------------------------------------------------------------- #
 #  Answer Call  (POST /api/call/inbound)
 # --------------------------------------------------------------------------- #
+
 @router.post("/api/call/inbound")
 async def answer_call(request: Request):
-    """Handle inbound call events and subscription validation."""
+    """Handle inbound call events (Event Grid or direct ACS)."""
+
     try:
         body = await request.json()
         return await ACSHandler.handle_inbound_call(
@@ -155,6 +169,13 @@ async def callbacks(request: Request):
 
     if not request.app.state.stt_client:
         return JSONResponse({"error": "STT client not initialised"}, status_code=503)
+    
+    if ENABLE_AUTH_VALIDATION:
+        try:
+            decoded = validate_acs_http_auth(request)
+            logger.debug("JWT token validated successfully: %s", decoded)
+        except HTTPException as e:
+            return JSONResponse({"error": e.detail}, status_code=e.status_code)
 
     try:
         events = await request.json()
@@ -241,6 +262,18 @@ async def acs_media_ws(ws: WebSocket):
     """
     try:
         await ws.accept()
+
+        if ENABLE_AUTH_VALIDATION:
+            try:
+                # Validate WebSocket authentication using the new ACS auth module
+                decoded = await validate_acs_ws_auth(ws)
+                logger.info(f"Authenticated WebSocket connection with decoded JWT payload: {decoded}")
+
+            except AuthError as e:
+                logger.warning(f"WebSocket authentication failed: {str(e)}")
+                # WebSocket is already closed by the auth module
+                return
+
         # Retrieve session and check call state to avoid reconnect loops
         acs = ws.app.state.acs_caller
         redis_mgr = ws.app.state.redis
@@ -274,6 +307,7 @@ async def acs_media_ws(ws: WebSocket):
             session_id=cm.session_id if hasattr(cm, "session_id") else None,
             metadata={"ws": True},
         )
+        
         with tracer.start_as_current_span(
             "acs_router.websocket_established",
             context=(

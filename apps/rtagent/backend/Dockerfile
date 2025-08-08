@@ -22,16 +22,19 @@ COPY requirements.txt .
 # Install any needed packages specified in requirements.txt
 # Use a virtual environment to isolate dependencies
 RUN apt-get update && \
-	apt-get install -y --no-install-recommends gcc build-essential portaudio19-dev && \
-	rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends gcc build-essential portaudio19-dev && \
+    rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the current directory contents into the container at /app
-COPY ./rtagents/RTAgent/backend /app/rtagents/RTAgent/backend
+COPY ./apps /app/apps
 COPY ./src /app/src
 COPY ./utils /app/utils
+
+# Set PYTHONPATH to include the app directory
+ENV PYTHONPATH="/app:$PYTHONPATH"
 
 # Change ownership of the /app directory to the non-root user
 RUN chown -R appuser:appuser /app
@@ -43,6 +46,5 @@ USER appuser
 EXPOSE 8000
 
 # Define the command to run the application
-# Assuming your FastAPI app instance is named 'app' in 'main.py'
-# And your main.py is in the root of the copied content (i.e., /app/main.py)
-CMD ["uvicorn", "apps.rtagent.backend.src.main:app", "--host", "0.0.0.0", "--port", "8010"]
+# The main.py file should be at /app/apps/rtagent/backend/main.py
+CMD ["uvicorn", "apps.rtagent.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

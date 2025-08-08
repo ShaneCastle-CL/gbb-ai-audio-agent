@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from azure.communication.callautomation import TextSource
+from azure.communication.callautomation import TextSource, PhoneNumberIdentifier
 from azure.core.exceptions import HttpResponseError
 from azure.core.messaging import CloudEvent
 from fastapi import HTTPException, WebSocket
@@ -448,15 +448,6 @@ class ACSHandler:
             "Microsoft.Communication.ContinuousDtmfRecognitionToneReceived": ACSHandler._handle_dtmf_tone_received,
         }
 
-        # # Media events that update bot_speaking context
-        # media_events = {
-        #     "Microsoft.Communication.PlayStarted": True,
-        #     "Microsoft.Communication.PlayCompleted": False,
-        #     "Microsoft.Communication.PlayFailed": False,
-        #     "Microsoft.Communication.PlayCanceled": False,
-        #     "Microsoft.Communication.MediaStreamingFailed": False,
-        # }
-
         try:
             for raw in events:
                 event = CloudEvent.from_dict(raw)
@@ -534,14 +525,26 @@ class ACSHandler:
         cm.persist_to_redis(redis_mgr)
 
         logger.info(f"Target participant joined: {target_joined} for call {cid}")
-        participants_info = [
-            p.get("identifier", {}).get("rawId", "unknown") for p in participants
-        ]
-        # await broadcast_message(
-        #     clients,
-        #     f"\tParticipants updated for call {cid}: {participants_info}",
-        #     "System",
-        # )
+
+    @staticmethod
+    async def _handle_participants_updated(
+        event: CloudEvent, cm: MemoManager, redis_mgr, clients: list, cid: str
+    ) -> None:
+        """Handle participant updates in the call."""
+        participants = event.data.get("participants", [])
+        target_number = cm.get_context("target_number")
+        target_joined = (
+            any(
+                p.get("identifier", {}).get("rawId", "").endswith(target_number or "")
+                for p in participants
+            )
+            if target_number
+            else False
+        )
+        cm.update_context("target_participant_joined", target_joined)
+        cm.persist_to_redis(redis_mgr)
+
+        logger.info(f"Target participant joined: {target_joined} for call {cid}")
 
     @staticmethod
     async def _handle_call_connected(
@@ -556,7 +559,18 @@ class ACSHandler:
     ) -> None:
         """Handle call connected event and prepare for media streaming or transcription."""
         await broadcast_message(clients, f"Call Connected: {cid}", "System")
+        call_conn = acs_caller.get_call_connection(cid)
+        # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+        # Get the target participant from event data
+        target_participant = PhoneNumberIdentifier(value=cm.get_context("target_number"))
+        target = call_conn.get_participant(
+            target_participant=target_participant
+        )
 
+        call_conn.start_continuous_dtmf_recognition(
+            target_participant=target_participant,
+            operation_context="ivr"
+        )
         # Store call connection state
         await cm.set_live_context_value(redis_mgr, "call_connected", True)
         await cm.set_live_context_value(redis_mgr, "greeted", False)

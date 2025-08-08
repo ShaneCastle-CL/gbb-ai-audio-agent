@@ -319,9 +319,9 @@ class AcsCaller:
             )
             logger.info("Call created: %s", result.call_connection_id)
             call_conn = self.client.get_call_connection(result.call_connection_id)
-            await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
-            call_conn.start_continuous_dtmf_recognition(target_participant=dest,
-                                                        operation_context="ivr")
+            # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
+            # call_conn.start_continuous_dtmf_recognition(target_participant=dest,
+            #                                             operation_context="ivr")
             logger.info("📲 DTMF subscription ON for %s", result.call_connection_id)
             return {"status": "created", "call_id": result.call_connection_id}
 

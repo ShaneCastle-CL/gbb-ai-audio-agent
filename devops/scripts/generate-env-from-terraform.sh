@@ -213,16 +213,16 @@ EOF
 # Prompt user for BASE_URL if not set in azd env
 BASE_URL="<Set this to enable ACS callbacks to the app>"
 
-# Backend App Service URL (from Terraform output if available)
+# Backend App Service/Container App URL (from Terraform output if available)
 BACKEND_APP_SERVICE_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_APP_SERVICE_URL" "<Set this if using App Service deployment>")
-
+BACKEND_CONTAINER_APP_URL=$(extract_output_value "${terraform_outputs}" "BACKEND_CONTAINER_APP_URL" "<Set this if using Container App deployment>")
 EOF
 
     # Azure Communication Services Configuration
     cat >> "${ENV_FILE}" << EOF
 # Azure Communication Services Configuration
-ACS_CONNECTION_STRING=
-ACS_SOURCE_PHONE_NUMBER=
+ACS_CONNECTION_STRING=$(extract_output_value "${terraform_outputs}" "ACS_CONNECTION_STRING")
+ACS_SOURCE_PHONE_NUMBER=$(extract_output_value "${terraform_outputs}" "ACS_SOURCE_PHONE_NUMBER")
 ACS_ENDPOINT=$(extract_output_value "${terraform_outputs}" "ACS_ENDPOINT")
 
 EOF
@@ -239,7 +239,7 @@ EOF
     # Azure Storage Configuration
     cat >> "${ENV_FILE}" << EOF
 # Azure Storage Configuration
-AZURE_STORAGE_CONNECTION_STRING=
+AZURE_STORAGE_CONNECTION_STRING=$(extract_output_value "${terraform_outputs}" "AZURE_STORAGE_CONNECTION_STRING")
 AZURE_STORAGE_CONTAINER_URL=$(extract_output_value "${terraform_outputs}" "AZURE_STORAGE_CONTAINER_URL")
 AZURE_STORAGE_ACCOUNT_NAME=$(extract_output_value "${terraform_outputs}" "AZURE_STORAGE_ACCOUNT_NAME")
 
@@ -272,7 +272,7 @@ EOF
     # Application Configuration
     cat >> "${ENV_FILE}" << EOF
 # Application Configuration
-ACS_STREAMING_MODE=media
+ACS_STREAMING_MODE=media # Options: media, transcription
 ENVIRONMENT=${AZURE_ENV_NAME}
 
 EOF
