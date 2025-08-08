@@ -10,21 +10,21 @@ infra:
 services:
   rtaudio-client:
     project: apps/rtagent/frontend
-    host: appservice
+    host: containerapp
     language: js
-
-# Backend is deployed via predeploy hook to support shared dependencies
-# Frontend deployment is handled by the same predeploy hook for consistency
-
-  # rtaudio-server-aca:
-  #   project: apps/RTAgent/backend
-  #   host: containerapp
-  #   language: python
-  #   docker:
-  #     path: ./Dockerfile
-  #     context: ../../../
-  #     platform: linux/amd64
-
+    docker:
+      path: ./Dockerfile
+      context: .
+      platform: linux/amd64
+      
+  rtaudio-server:
+    project: apps/RTAgent/backend
+    host: containerapp
+    language: python
+    docker:
+      path: ./Dockerfile
+      context: ../../../
+      platform: linux/amd64
 
 hooks:
   preprovision:

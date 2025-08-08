@@ -9,6 +9,8 @@
 # 1. ACS phone number setup (interactive or existing)
 # 2. Environment file generation
 # 3. Backend service configuration updates
+#
+# CI/CD Mode: Set AZD_SKIP_INTERACTIVE=true to bypass all prompts
 # ========================================================================
 
 set -e  # Exit on error (we'll handle specific failures with || true)
@@ -19,12 +21,32 @@ set -e  # Exit on error (we'll handle specific failures with || true)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPERS_DIR="$SCRIPT_DIR/helpers"
 
-# Color codes for better readability
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Check for CI/CD mode
+SKIP_INTERACTIVE="${AZD_SKIP_INTERACTIVE:-false}"
+CI_MODE="${CI:-false}"
+GITHUB_ACTIONS_MODE="${GITHUB_ACTIONS:-false}"
+
+# Auto-detect CI/CD environments
+if [ "$CI_MODE" = "true" ] || [ "$GITHUB_ACTIONS_MODE" = "true" ] || [ "$SKIP_INTERACTIVE" = "true" ]; then
+    INTERACTIVE_MODE=false
+else
+    INTERACTIVE_MODE=true
+fi
+
+# Color codes for better readability (disabled in CI/CD)
+if [ "$INTERACTIVE_MODE" = "true" ] && [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+fi
 
 # ========================================================================
 # 🛠️ Helper Functions
@@ -53,6 +75,18 @@ log_section() {
     echo ""
 }
 
+# Log CI/CD mode status
+log_ci_mode() {
+    if [ "$INTERACTIVE_MODE" = "false" ]; then
+        log_info "Running in CI/CD mode (non-interactive)"
+        [ "$CI_MODE" = "true" ] && log_info "  - CI environment detected"
+        [ "$GITHUB_ACTIONS_MODE" = "true" ] && log_info "  - GitHub Actions detected"
+        [ "$SKIP_INTERACTIVE" = "true" ] && log_info "  - AZD_SKIP_INTERACTIVE is set"
+    else
+        log_info "Running in interactive mode"
+    fi
+}
+
 # Safely get azd environment values
 get_azd_env_value() {
     local var_name="$1"
@@ -70,7 +104,7 @@ get_azd_env_value() {
 
 # Check if running in interactive mode
 is_interactive() {
-    [ -t 0 ] && [ -z "${CI:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ]
+    [ "$INTERACTIVE_MODE" = "true" ] && [ -t 0 ]
 }
 
 # Validate E.164 phone number format
@@ -94,11 +128,43 @@ check_existing_phone_number() {
     fi
 }
 
+handle_phone_number_cicd() {
+    log_info "CI/CD mode: Checking for predefined phone number..."
+    
+    # Check environment variable first
+    if [ -n "${ACS_SOURCE_PHONE_NUMBER:-}" ]; then
+        log_info "Found ACS_SOURCE_PHONE_NUMBER in environment"
+        if is_valid_phone_number "$ACS_SOURCE_PHONE_NUMBER"; then
+            azd env set ACS_SOURCE_PHONE_NUMBER "$ACS_SOURCE_PHONE_NUMBER"
+            log_success "Set ACS_SOURCE_PHONE_NUMBER from environment variable"
+            return 0
+        else
+            log_warning "Invalid phone number format in environment variable: $ACS_SOURCE_PHONE_NUMBER"
+        fi
+    fi
+    
+    # Check if auto-provisioning is enabled
+    local auto_provision
+    auto_provision=$(get_azd_env_value "ACS_AUTO_PROVISION_PHONE" "false")
+    
+    if [ "$auto_provision" = "true" ]; then
+        log_info "Auto-provisioning phone number (ACS_AUTO_PROVISION_PHONE=true)"
+        provision_new_phone_number
+        return $?
+    else
+        log_warning "No phone number configured in CI/CD mode"
+        log_info "To configure phone number in CI/CD:"
+        log_info "  - Set ACS_SOURCE_PHONE_NUMBER environment variable"
+        log_info "  - Or set ACS_AUTO_PROVISION_PHONE=true in azd environment"
+        return 1
+    fi
+}
+
 prompt_for_phone_number() {
     if ! is_interactive; then
-        log_warning "Running in non-interactive mode. Cannot prompt for phone number."
-        log_info "To set a phone number later, run: azd env set ACS_SOURCE_PHONE_NUMBER '+1234567890'"
-        return 3  # Return 3 for non-interactive skip
+        # In CI/CD mode, try alternative methods
+        handle_phone_number_cicd
+        return $?
     fi
     
     log_info "ACS_SOURCE_PHONE_NUMBER is not defined."
@@ -116,18 +182,18 @@ prompt_for_phone_number() {
             if is_valid_phone_number "$user_phone"; then
                 azd env set ACS_SOURCE_PHONE_NUMBER "$user_phone"
                 log_success "Set ACS_SOURCE_PHONE_NUMBER to $user_phone"
+                return 0
             else
                 log_error "Invalid phone number format"
+                return 1
             fi
             ;;
         2)
-            # User wants to provision new number
-            provision_new_phone_number || {
-                log_warning "Phone number provisioning failed, continuing with other tasks..."
-            }
+            return 2  # Signal to provision new number
             ;;
         3)
             log_info "Skipping phone number configuration"
+            return 3  # Return 3 for user-initiated skip
             ;;
         *)
             log_error "Invalid choice"
@@ -253,6 +319,7 @@ update_backend_phone_number() {
 
 main() {
     log_section "🚀 Starting Post-Provisioning Script"
+    log_ci_mode
     
     # Step 1: Handle phone number configuration
     log_section "📱 Configuring ACS Phone Number"
@@ -268,7 +335,17 @@ main() {
                 ;;
             1)
                 # Error occurred
-                log_warning "Phone number configuration failed"
+                log_warning "Phone number configuration failed, continuing..."
+                ;;
+            2)
+                # User wants to provision new number
+                provision_new_phone_number || {
+                    log_warning "Phone number provisioning failed, continuing with other tasks..."
+                }
+                ;;
+            3)
+                # User chose to skip or non-interactive mode
+                log_info "Phone number configuration skipped"
                 ;;
         esac
     fi
@@ -304,17 +381,24 @@ main() {
     [ -f "$env_file" ] && echo "  ✓ ${env_file} (Backend environment configuration)"
     echo ""
     
-    echo "🔧 Next Steps:"
-    echo "  1. Review the environment file: cat ${env_file}"
-    echo "  2. Source the environment: source ${env_file}"
-    echo "  3. Test your application"
+    if [ "$INTERACTIVE_MODE" = "true" ]; then
+        echo "🔧 Next Steps:"
+        echo "  1. Review the environment file: cat ${env_file}"
+        echo "  2. Source the environment: source ${env_file}"
+        echo "  3. Test your application"
+    fi
     
     local phone_status
     phone_status=$(get_azd_env_value "ACS_SOURCE_PHONE_NUMBER")
     if [ -z "$phone_status" ]; then
         echo ""
         echo "⚠️  Note: No phone number configured. To add one later:"
-        echo "     azd env set ACS_SOURCE_PHONE_NUMBER '+1234567890'"
+        if [ "$INTERACTIVE_MODE" = "true" ]; then
+            echo "     azd env set ACS_SOURCE_PHONE_NUMBER '+1234567890'"
+        else
+            echo "     Set ACS_SOURCE_PHONE_NUMBER environment variable"
+            echo "     Or set ACS_AUTO_PROVISION_PHONE=true in azd environment"
+        fi
     fi
     
     echo ""
