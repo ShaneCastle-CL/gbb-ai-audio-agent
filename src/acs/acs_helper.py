@@ -18,8 +18,6 @@ from azure.communication.callautomation import (
     StreamingTransportType,
     TranscriptionOptions,
 )
-from azure.communication.callautomation.aio import CallAutomationClient as AsyncCallAutomationClient
-
 from azure.communication.identity import CommunicationIdentityClient
 from azure.core.exceptions import HttpResponseError
 from azure.identity import DefaultAzureCredential, ManagedIdentityCredential
@@ -179,6 +177,7 @@ class AcsCaller:
             content_type=MediaStreamingContentType.AUDIO,
             audio_channel_type=MediaStreamingAudioChannelType.UNMIXED,
             start_media_streaming=True,
+            
             enable_bidirectional=True,
             enable_dtmf_tones=True,
             audio_format=AudioFormat.PCM16_K_MONO,  # Ensure this matches what your STT expects
@@ -318,11 +317,10 @@ class AcsCaller:
                 media_streaming=media_streaming,
             )
             logger.info("Call created: %s", result.call_connection_id)
-            call_conn = self.client.get_call_connection(result.call_connection_id)
+            # call_conn = self.client.get_call_connection(result.call_connection_id)
             # await wait_for_call_connected(call_conn, poll_interval=0.05)  # Poll every 50ms
             # call_conn.start_continuous_dtmf_recognition(target_participant=dest,
             #                                             operation_context="ivr")
-            logger.info("📲 DTMF subscription ON for %s", result.call_connection_id)
             return {"status": "created", "call_id": result.call_connection_id}
 
         except HttpResponseError as e:
