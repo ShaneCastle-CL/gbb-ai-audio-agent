@@ -18,6 +18,8 @@ import sys
 
 from opentelemetry import trace
 
+from apps.rtagent.backend.src.services.acs import acs_caller
+
 tracer = trace.get_tracer(__name__)
 from azure.communication.callautomation import PhoneNumberIdentifier
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -150,9 +152,11 @@ async def answer_call(request: Request):
 
     try:
         body = await request.json()
-        return await ACSHandler.handle_inbound_call(
-            request_body=body, acs_caller=request.app.state.acs_caller
+        acs_caller = request.app.state.acs_caller
+        inbound_call = await ACSHandler.handle_inbound_call(
+            request_body=body, acs_caller=acs_caller
         )
+        return inbound_call
     except Exception as exc:
         logger.error("Error parsing request body: %s", exc, exc_info=True)
         raise HTTPException(400, "Invalid request body") from exc
@@ -175,7 +179,7 @@ async def callbacks(request: Request):
             decoded = validate_acs_http_auth(request)
             logger.debug("JWT token validated successfully: %s", decoded)
         except HTTPException as e:
-            return JSONResponse({"error": e.detail}, status_code=e.status_code)
+            return JSONResponse({"error": e.detail}, status_code=e.status_code) 
 
     try:
         events = await request.json()
