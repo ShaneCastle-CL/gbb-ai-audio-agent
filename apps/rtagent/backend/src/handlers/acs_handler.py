@@ -476,7 +476,6 @@ class ACSHandler:
                     else:
                         await handler(event, cm, redis_mgr, cid)
 
-# ...existing code...
 
                 # # Handle media events that affect bot_speaking state
                 # elif etype in media_events:
@@ -530,26 +529,6 @@ class ACSHandler:
             pass
         # Fallback (outbound case)
         return cm.get_context("target_number")
-
-    @staticmethod
-    async def _handle_participants_updated(
-        event: CloudEvent, cm: MemoManager, redis_mgr, clients: list, cid: str
-    ) -> None:
-        """Handle participant updates in the call."""
-        participants = event.data.get("participants", [])
-        target_number = cm.get_context("target_number")
-        target_joined = (
-            any(
-                p.get("identifier", {}).get("rawId", "").endswith(target_number or "")
-                for p in participants
-            )
-            if target_number
-            else False
-        )
-        cm.update_context("target_participant_joined", target_joined)
-        cm.persist_to_redis(redis_mgr)
-
-        logger.info(f"Target participant joined: {target_joined} for call {cid}")
 
     # @staticmethod
     # async def _handle_participants_updated(
@@ -616,23 +595,44 @@ class ACSHandler:
         cm.update_context("target_participant_joined", target_joined)
         cm.persist_to_redis(redis_mgr)
         logger.info("Target participant joined: %s for call %s", target_joined, cid)
-
+        
+        # If the PSTN participant has joined and DTMF hasn't started, kick off DTMF recognition in the background.
         if target_joined and not cm.get_context("dtmf_started"):
             cm.update_context("dtmf_sequence", "")
             cm.update_context("dtmf_validated", False)
-            try:
-                call_conn = acs_caller.get_call_connection(cid)
-                call_conn.start_continuous_dtmf_recognition(
-                    target_participant=PhoneNumberIdentifier(value=target_phone),
-                    operation_context="ivr",
-                )
-                cm.update_context("dtmf_started", True)
-                cm.persist_to_redis(redis_mgr)
-                logger.info("📲 DTMF recognition ON after participant join for %s (participant=%s)", cid, target_phone)
-            except Exception as e:
-                logger.error("Failed to start DTMF recognition for call %s: %s", cid, e, exc_info=True)
-            else:
-                logger.warning("ParticipantsUpdated: unable to resolve PSTN participant for DTMF on call %s", cid)
+            
+            async def start_dtmf():
+                try:
+                    # Get call connection in the background task
+                    call_conn = acs_caller.get_call_connection(cid)
+                    if not call_conn:
+                        logger.error("Call connection not found for %s", cid)
+                        return
+                    
+                    # Wrap the potentially blocking call in run_in_executor
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,  # Use default executor
+                        lambda: call_conn.start_continuous_dtmf_recognition(
+                            target_participant=PhoneNumberIdentifier(value=target_phone),
+                            operation_context="ivr",
+                        )
+                    )
+                    
+                    # Update state only after successful start
+                    cm.update_context("dtmf_started", True)
+                    cm.persist_to_redis(redis_mgr)
+                    logger.info("📲 DTMF recognition ON after participant join for %s (participant=%s)", cid, target_phone)
+                except Exception as e:
+                    logger.error("Failed to start DTMF recognition for call %s: %s", cid, e, exc_info=True)
+                    # Optionally set a flag to retry later
+                    cm.update_context("dtmf_start_failed", True)
+                    cm.persist_to_redis(redis_mgr)
+
+            # Fire and forget: don't await, so the handler returns immediately
+            asyncio.create_task(start_dtmf())
+        elif not target_joined:
+            logger.warning("ParticipantsUpdated: unable to resolve PSTN participant for DTMF on call %s", cid)
 
 
     @staticmethod
