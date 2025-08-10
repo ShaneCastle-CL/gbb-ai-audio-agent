@@ -112,7 +112,10 @@ async def initiate_call(call: CallRequest, request: Request):
             "acs_router.call_acs_handler", kind=SpanKind.CLIENT, attributes=acs_handler_attrs
         ):
             # after: with tracer.start_as_current_span("acs_router.call_acs_handler", kind=SpanKind.CLIENT, attributes=acs_handler_attrs):
-            acs_host = getattr(request.app.state.acs_caller, "_acs_host", None) or "acs.communication.azure.com"
+            # Determine ACS host from environment or ACS caller
+            acs_host = os.getenv("ACS_ENDPOINT")
+            if not acs_host:
+                acs_host = getattr(request.app.state.acs_caller, "_acs_host", None) or "acs.communication.azure.com"
             span = trace.get_current_span()
             span.set_attribute("peer.service", "azure-communication-services")
             span.set_attribute("server.address", acs_host)
@@ -302,124 +305,138 @@ async def acs_media_ws(ws: WebSocket):
             ),
         ):
             await ws.accept()
+            ws_span = trace.get_current_span()
+            ws_span.set_attribute("network.protocol.name", "websocket")
+            ws_span.set_attribute("server.address", ws.headers.get("host", "0.0.0.0") if hasattr(ws, "headers") else "0.0.0.0")
+            ws_span.set_attribute("server.port", 443)
+            ws_span.set_attribute("pipeline.stage", "acs -> websocket.accept")
+            # Validate auth if enabled
+            if ENABLE_AUTH_VALIDATION:
+                try:
+                    _ = await validate_acs_ws_auth(ws)
+                    logger.info("WebSocket authenticated successfully")
+                except AuthError as e:
+                    logger.warning(f"WebSocket authentication failed: {str(e)}")
+                    return
 
-        # Validate auth if enabled
-        if ENABLE_AUTH_VALIDATION:
-            try:
-                _ = await validate_acs_ws_auth(ws)
-                logger.info("WebSocket authenticated successfully")
-            except AuthError as e:
-                logger.warning(f"WebSocket authentication failed: {str(e)}")
-                return
+            # Initialize connection
+            acs = ws.app.state.acs_caller
+            redis_mgr = ws.app.state.redis
+            cid = ws.headers["x-ms-call-connection-id"]
+            cm = MemoManager.from_redis(cid, redis_mgr)
 
-        # Initialize connection
-        acs = ws.app.state.acs_caller
-        redis_mgr = ws.app.state.redis
-        cid = ws.headers["x-ms-call-connection-id"]
-        cm = MemoManager.from_redis(cid, redis_mgr)
+            # Initialize latency tracking
+            ws.state.lt = LatencyTool(cm)
+            ws.state.lt.start("greeting_ttfb")
+            ws.state._greeting_ttfb_stopped = False
 
-        # Initialize latency tracking
-        ws.state.lt = LatencyTool(cm)
-        ws.state.lt.start("greeting_ttfb")
-        ws.state._greeting_ttfb_stopped = False
+            # Set up call context
+            target_phone_number = cm.get_context("target_number")
+            if target_phone_number:
+                ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
+            ws.app.state.cm = cm
 
-        # Set up call context
-        target_phone_number = cm.get_context("target_number")
-        if target_phone_number:
-            ws.app.state.target_participant = PhoneNumberIdentifier(target_phone_number)
-        ws.app.state.cm = cm
-
-        # Validate call connection
-        call_conn = acs.get_call_connection(cid)
-        if not call_conn:
-            logger.info(f"Call connection {cid} not found, closing WebSocket")
-            await ws.close(code=1000)
-            return
-
-        ws.app.state.call_conn = call_conn
-
-        span_attrs = create_service_handler_attrs(
-            service_name="acs_router",
-            operation="websocket_stream",
-            call_connection_id=cid,
-            session_id=cm.session_id if hasattr(cm, "session_id") else None,
-            stream_mode=ACS_STREAMING_MODE.value if hasattr(ACS_STREAMING_MODE, "value") else str(ACS_STREAMING_MODE),
-        )
-        
-        with tracer.start_as_current_span(
-            "acs_router.websocket", kind=SpanKind.SERVER, attributes=span_attrs
-        ) as span:
-            # Initialize appropriate handler - this creates a dependency on media/transcription handlers
-            if ACS_STREAMING_MODE == StreamMode.MEDIA:
-                # dependency to media handler
-                handler_attrs = create_service_dependency_attrs(
-                    source_service="acs_router",
-                    target_service="acs_media_handler",
-                    operation="handle_media_stream",
-                    call_connection_id=cid,
-                    session_id=cm.session_id if hasattr(cm, "session_id") else None,
-                    ws=True,
-                )
-                
-                with tracer.start_as_current_span(
-                    "acs_router.create_media_handler", kind=SpanKind.CLIENT, attributes=handler_attrs
-                ):
-                    handler = ACSMediaHandler(
-                        ws, 
-                        recognizer=ws.app.state.stt_client, 
-                        call_connection_id=cid, 
-                        cm=cm
-                    )
-                    
-            elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
-                handler_attrs = create_service_dependency_attrs(
-                    source_service="acs_router",
-                    target_service="transcription_handler",
-                    operation="handle_transcription_stream",
-                    call_connection_id=cid,
-                    session_id=cm.session_id if hasattr(cm, "session_id") else None,
-                    ws=True,
-                )
-                
-                with tracer.start_as_current_span(
-                    "acs_router.create_transcription_handler", kind=SpanKind.CLIENT, attributes=handler_attrs
-                ):
-                    handler = TranscriptionHandler(ws, cm=cm)
-            else:
-                logger.error(f"Unknown streaming mode: {ACS_STREAMING_MODE}")
+            # Validate call connection
+            call_conn = acs.get_call_connection(cid)
+            if not call_conn:
+                logger.info(f"Call connection {cid} not found, closing WebSocket")
                 await ws.close(code=1000)
                 return
 
-            ws.app.state.handler = handler
+            ws.app.state.call_conn = call_conn
 
-            log_with_context(
-                logger,
-                "info",
-                "WebSocket stream established",
+            span_attrs = create_service_handler_attrs(
+                service_name="acs_router",
                 operation="websocket_stream",
                 call_connection_id=cid,
-                mode=str(ACS_STREAMING_MODE),
+                session_id=cm.session_id if hasattr(cm, "session_id") else None,
+                stream_mode=ACS_STREAMING_MODE.value if hasattr(ACS_STREAMING_MODE, "value") else str(ACS_STREAMING_MODE),
             )
+            
+            with tracer.start_as_current_span(
+                "acs_router.websocket", kind=SpanKind.SERVER, attributes=span_attrs
+            ) as span:
+                # lightweight trace handshake you can forward to downstream roles later
+                from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+                carrier = {}
+                try:
+                    TraceContextTextMapPropagator().inject(carrier)
+                    ws.state.trace_headers = carrier  # available if you later hop to another service
+                except Exception:
+                    pass
+                span.set_attribute("pipeline.stage", "websocket -> media handler init")
 
-            # Process messages with dependency tracking
-            while ws.client_state == WebSocketState.CONNECTED and ws.application_state == WebSocketState.CONNECTED:
-                msg = await ws.receive_text()
-                if msg:
-                    msg_handler_attrs = create_service_dependency_attrs(
+                # Initialize appropriate handler - this creates a dependency on media/transcription handlers
+                if ACS_STREAMING_MODE == StreamMode.MEDIA:
+                    # dependency to media handler
+                    handler_attrs = create_service_dependency_attrs(
                         source_service="acs_router",
-                        target_service="acs_media_handler" if ACS_STREAMING_MODE == StreamMode.MEDIA else "transcription_handler",
-                        operation="handle_message",
+                        target_service="acs_media_handler",
+                        operation="handle_media_stream",
                         call_connection_id=cid,
+                        session_id=cm.session_id if hasattr(cm, "session_id") else None,
                         ws=True,
                     )
                     
                     with tracer.start_as_current_span(
-                        "acs_router.handle_message", kind=SpanKind.CLIENT, attributes=msg_handler_attrs
+                        "acs_router.create_media_handler", kind=SpanKind.CLIENT, attributes=handler_attrs
                     ):
-                        if ACS_STREAMING_MODE == StreamMode.MEDIA:
-                            await handler.handle_media_message(msg)
-                        elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
-                            await handler.handle_transcription_message(msg)
+                        handler = ACSMediaHandler(
+                            ws, 
+                            recognizer=ws.app.state.stt_client, 
+                            call_connection_id=cid, 
+                            cm=cm
+                        )
+                        
+                elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
+                    handler_attrs = create_service_dependency_attrs(
+                        source_service="acs_router",
+                        target_service="transcription_handler",
+                        operation="handle_transcription_stream",
+                        call_connection_id=cid,
+                        session_id=cm.session_id if hasattr(cm, "session_id") else None,
+                        ws=True,
+                    )
+                    
+                    with tracer.start_as_current_span(
+                        "acs_router.create_transcription_handler", kind=SpanKind.CLIENT, attributes=handler_attrs
+                    ):
+                        handler = TranscriptionHandler(ws, cm=cm)
+                else:
+                    logger.error(f"Unknown streaming mode: {ACS_STREAMING_MODE}")
+                    await ws.close(code=1000)
+                    return
+
+                ws.app.state.handler = handler
+
+                log_with_context(
+                    logger,
+                    "info",
+                    "WebSocket stream established",
+                    operation="websocket_stream",
+                    call_connection_id=cid,
+                    mode=str(ACS_STREAMING_MODE),
+                )
+
+                # Process messages with dependency tracking
+                while ws.client_state == WebSocketState.CONNECTED and ws.application_state == WebSocketState.CONNECTED:
+                    msg = await ws.receive_text()
+                    if msg:
+                        msg_handler_attrs = create_service_dependency_attrs(
+                            source_service="acs_router",
+                            target_service="acs_media_handler" if ACS_STREAMING_MODE == StreamMode.MEDIA else "transcription_handler",
+                            operation="handle_message",
+                            call_connection_id=cid,
+                            ws=True,
+                        )
+                        
+                        with tracer.start_as_current_span(
+                            "acs_router.handle_message", kind=SpanKind.CLIENT, attributes=msg_handler_attrs
+                        ):
+                            if ACS_STREAMING_MODE == StreamMode.MEDIA:
+                                await handler.handle_media_message(msg)
+                            elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
+                                await handler.handle_transcription_message(msg)
 
     except WebSocketDisconnect as e:
         if e.code == 1000:

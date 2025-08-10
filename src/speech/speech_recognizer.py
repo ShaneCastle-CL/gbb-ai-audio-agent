@@ -3,7 +3,7 @@ import os
 from typing import Callable, List, Optional, Final
 
 import azure.cognitiveservices.speech as speechsdk
-from azure.identity import DefaultAzureCredential
+from utils.azure_auth import get_credential
 from dotenv import load_dotenv
 
 # OpenTelemetry imports for tracing
@@ -138,7 +138,7 @@ class StreamingSpeechRecognizerFromBytes:
                 )
 
             endpoint = os.getenv("AZURE_SPEECH_ENDPOINT")
-            credential = DefaultAzureCredential()
+            credential = get_credential()
 
             if endpoint:
                 # Use endpoint if provided
@@ -210,11 +210,32 @@ class StreamingSpeechRecognizerFromBytes:
             )
 
             # Set session attributes for correlation
+            self._session_span.set_attribute("rt.call.connection_id", self.call_connection_id)
+            self._session_span.set_attribute("rt.session.id", self.call_connection_id)
             self._session_span.set_attribute("ai.operation.id", self.call_connection_id)
-            self._session_span.set_attribute(
-                "speech.session.id", self.call_connection_id
-            )
             self._session_span.set_attribute("speech.region", self.region)
+
+            # Help App Map recognize this as an external service dependency
+            self._session_span.set_attribute("peer.service", "azure-cognitive-speech")
+            self._session_span.set_attribute("net.peer.name", f"{self.region}.stt.speech.microsoft.com")
+            # Make it look like an HTTP/WebSocket dependency
+            self._session_span.set_attribute("server.address", f"{self.region}.stt.speech.microsoft.com")
+            self._session_span.set_attribute("server.port", 443)
+            self._session_span.set_attribute("network.protocol.name", "websocket")
+            # Let the exporter classify as HTTP if it prefers http.* (belt & suspenders)
+            self._session_span.set_attribute("http.method", "POST")
+            # Set http.url using endpoint if provided, else construct from region
+            endpoint = os.getenv("AZURE_SPEECH_ENDPOINT")
+            if endpoint:
+                self._session_span.set_attribute(
+                    "http.url",
+                    f"{endpoint.rstrip('/')}/speech/recognition/conversation/cognitiveservices/v1"
+                )
+            else:
+                self._session_span.set_attribute(
+                    "http.url",
+                    f"https://{self.region}.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
+                )
             self._session_span.set_attribute("speech.audio_format", self.audio_format)
             self._session_span.set_attribute(
                 "speech.candidate_languages", ",".join(self.candidate_languages)
@@ -352,22 +373,16 @@ class StreamingSpeechRecognizerFromBytes:
 
 
     def write_bytes(self, audio_chunk: bytes) -> None:
-        """Write audio bytes to the stream with optional tracing"""
+        """Write audio bytes to the stream; avoid per-chunk spans to keep overhead low.
+        Emits an event on the session span instead for coarse visibility.
+        """
         if self.push_stream:
-            # Add tracing for audio data flow if enabled
-            if self.enable_tracing and self.tracer:
-                with self.tracer.start_as_current_span(
-                    "speech_audio_write",
-                    kind=SpanKind.CLIENT,
-                    attributes={
-                        "speech.audio.chunk_size": len(audio_chunk),
-                        "speech.session.id": self.call_connection_id,
-                        "ai.operation.id": self.call_connection_id,
-                    },
-                ):
-                    self.push_stream.write(audio_chunk)
-            else:
-                self.push_stream.write(audio_chunk)
+            if self.enable_tracing and self._session_span:
+                try:
+                    self._session_span.add_event("audio_chunk", {"size": len(audio_chunk)})
+                except Exception:
+                    pass
+            self.push_stream.write(audio_chunk)
 
     def stop(self) -> None:
         """Stop recognition with tracing cleanup"""
@@ -450,8 +465,7 @@ class StreamingSpeechRecognizerFromBytes:
                     attributes={
                         "speech.result.type": "partial",
                         "speech.result.text_length": len(txt),
-                        "speech.session.id": self.call_connection_id,
-                        "ai.operation.id": self.call_connection_id,
+                        "rt.call.connection_id": self.call_connection_id,
                     },
                 ) as span:
                     # extract whatever lang Azure selected (or fallback to first candidate)
@@ -492,8 +506,7 @@ class StreamingSpeechRecognizerFromBytes:
                         "speech.result.type": "final",
                         "speech.result.text_length": len(evt.result.text),
                         "speech.detected_language": detected_lang,
-                        "speech.session.id": self.call_connection_id,
-                        "ai.operation.id": self.call_connection_id,
+                        "rt.call.connection_id": self.call_connection_id,
                         "speech.result.reason": str(evt.result.reason),
                     },
                 ) as span:

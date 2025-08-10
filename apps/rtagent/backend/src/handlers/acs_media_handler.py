@@ -164,6 +164,7 @@ class ACSMediaHandler:
                 kind=SpanKind.INTERNAL,
                 attributes=self._get_trace_metadata("audio_processing", lightweight=True),
             ):
+                trace.get_current_span().set_attribute("pipeline.stage", "ws audio -> stt")
                 await self._handle_media_message_internal(stream_data)
         else:
             await self._handle_media_message_internal(stream_data)
@@ -256,6 +257,7 @@ class ACSMediaHandler:
                     "greeting_playback", greeting_length=len(greeting_text)
                 ),
             ):
+                trace.get_current_span().set_attribute("pipeline.stage", "media -> tts (greeting)")
                 self._play_greeting_internal(greeting_text)
         else:
             self._play_greeting_internal(greeting_text)
@@ -511,17 +513,25 @@ class ACSMediaHandler:
         if self.enable_tracing:
             with tracer.start_as_current_span(
                 "acs_media_handler.route_and_playback",
-                kind=SpanKind.INTERNAL,
-                attributes=create_service_dependency_attrs(
-                    source_service="acs_media_handler",
-                    target_service="orchestration",
-                    operation="orchestrator_processing",
-                    call_connection_id=self.call_connection_id,
-                    session_id=self.session_id,
-                    kind=kind,
-                    text_length=len(text),
-                    queue_size=self.route_turn_queue.qsize(),
-                ),
+                kind=SpanKind.CLIENT,  # was INTERNAL
+                attributes={
+                    **create_service_dependency_attrs(
+                        source_service="acs_media_handler",
+                        target_service="orchestration",
+                        operation="orchestrator_processing",
+                        call_connection_id=self.call_connection_id,
+                        session_id=self.session_id,
+                        kind=kind,
+                        text_length=len(text),
+                        queue_size=self.route_turn_queue.qsize(),
+                    ),
+                    "peer.service": "orchestration",
+                    "pipeline.stage": "media -> orchestrator",
+                    "server.address": "localhost",      # replace when orchestrator becomes a service
+                    "server.port": 8000,
+                    "http.method": "POST",
+                    "http.url": "http://localhost:8000/route-turn",
+                },
             ):
                 await self._route_and_playback_internal(kind, text)
         else:

@@ -74,7 +74,11 @@ async def send_tts_audio(
         frames = SpeechSynthesizer.split_pcm_to_base64_frames(
             pcm_bytes, sample_rate=16000
         )
-
+        try:
+            from opentelemetry import trace as _t
+            _t.get_current_span().set_attribute("pipeline.stage", "tts -> websocket (acs)")
+        except Exception:
+            pass
         logger.debug(f"Generated {len(frames)} audio frames for WebSocket transmission")
 
         # Send audio frames to React frontend
@@ -209,8 +213,10 @@ async def push_final(
     • Browser/WebRTC – we already streamed TTS, just send the final JSON.
     • ACS            – same; streaming audio is finished, no repeat playback.
     """
-    await ws.send_text(json.dumps({"type": role, "content": content}))
-
+    try:
+        await ws.send_text(json.dumps({"type": role, "content": content}))
+    except Exception as e:
+        logger.error(f"Failed to send final message to WebSocket: {e}")
 
 # --------------------------------------------------------------------------- #
 # Re-export for convenience
