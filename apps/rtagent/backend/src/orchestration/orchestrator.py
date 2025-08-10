@@ -12,6 +12,7 @@ specialist agent.  Specialists can still trigger hand‑offs via
 """
 
 from contextlib import asynccontextmanager
+from apps.rtagent.backend.src.services.acs.session_terminator import terminate_session, TerminationReason
 from typing import TYPE_CHECKING, Any, Callable, Dict, Tuple
 import json
 import os
@@ -164,43 +165,58 @@ async def run_auth_agent(
     *,
     is_acs: bool,
 ) -> None:
-    """Execute the *AuthAgent* and, on success, prime routing metadata."""
+    """
+    Run *AuthAgent* once per session.
 
+    • On **emergency escalation**, set `escalated=True`, store reason, and return.  
+    • On **successful auth**, cache caller info & chosen specialist.
+    """
     auth_agent = ws.app.state.auth_agent
 
     async with track_latency(ws.state.lt, "auth_agent", ws.app.state.redis):
         result: Dict[str, Any] | Any = await auth_agent.respond(
             cm, utterance, ws, is_acs=is_acs
         )
+        logger.info("🚨 Auth result: %s", result)
 
-    if not (isinstance(result, dict) and result.get("authenticated")):
-        return
+    if isinstance(result, dict) and result.get("handoff") == "human_agent":
+        reason = result.get("reason") or result.get("escalation_reason")
+        _cm_set(
+            cm,
+            escalated=True,
+            escalation_reason=reason,
+            active_agent="HumanEscalation",
+        )
+        logger.warning(
+            "🚨 Escalation during auth – session=%s reason=%s", cm.session_id, reason
+        )
+        return  # session termination handled upstream
+    
+    if result is not None: 
+        caller_name: str | None = result.get("caller_name")
+        policy_id: str | None = result.get("policy_id")
+        claim_intent: str | None = result.get("claim_intent")
+        topic: str | None = result.get("topic")
+        intent: str = result.get("intent", "general")
+        active_agent: str = "Claims" if intent == "claims" else "General"
 
-    # Cache values locally to avoid repeated look‑ups.
-    caller_name: str | None = result.get("caller_name")
-    policy_id: str | None = result.get("policy_id")
-    claim_intent: str | None = result.get("claim_intent")
-    topic: str | None = result.get("topic")
-    intent: str = result.get("intent", "general")
-    active_agent: str = "Claims" if intent == "claims" else "General"
+        _cm_set(
+            cm,
+            authenticated=True,
+            caller_name=caller_name,
+            policy_id=policy_id,
+            claim_intent=claim_intent,
+            topic=topic,
+            active_agent=active_agent,
+        )
 
-    _cm_set(
-        cm,
-        authenticated=True,
-        caller_name=caller_name,
-        policy_id=policy_id,
-        claim_intent=claim_intent,
-        topic=topic,
-        active_agent=active_agent,
-    )
-
-    logger.info(
-        "✅ Auth OK – session=%s caller=%s policy=%s → %s agent",
-        cm.session_id,
-        caller_name,
-        policy_id,
-        active_agent,
-    )
+        logger.info(
+            "✅ Auth OK – session=%s caller=%s policy=%s → %s agent",
+            cm.session_id,
+            caller_name,
+            policy_id,
+            active_agent,
+        )
 
 # -------------------------------------------------------------
 # 2.  Specialist agents
@@ -349,7 +365,6 @@ SPECIALIST_MAP: Dict[str, Callable[..., Any]] = {
 # -------------------------------------------------------------
 # 4. Public entry‑point (per user turn)
 # -------------------------------------------------------------
-
 async def route_turn(
     cm: "MemoManager",
     transcript: str,
@@ -403,6 +418,15 @@ async def route_turn(
             if not _cm_get(cm, "authenticated", False):
                 span.set_attribute("orchestrator.stage", "authentication")
                 await run_auth_agent(cm, transcript, ws, is_acs=is_acs)
+                if _cm_get(cm, "escalated", False):
+                    call_connection_id, _ = _get_correlation_context(ws, cm)
+                    await terminate_session(
+                        ws,
+                        is_acs=is_acs,
+                        call_connection_id=call_connection_id,
+                        reason=TerminationReason.HUMAN_HANDOFF,
+                    )
+                    return
                 return
 
             # ------------------------------------------------------------------
