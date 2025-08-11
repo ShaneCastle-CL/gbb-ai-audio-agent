@@ -27,7 +27,7 @@ from utils.trace_context import TraceContext
 load_dotenv()
 
 # Set up logger
-logger = get_logger()
+logger = get_logger(__name__)
 
 # # Exports traces to local
 # span_exporter = ConsoleSpanExporter()

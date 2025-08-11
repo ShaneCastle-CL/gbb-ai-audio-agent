@@ -55,13 +55,23 @@ ACS_STREAMING_MODE: StreamMode = StreamMode(
     os.getenv("ACS_STREAMING_MODE", "media").lower()
 )
 
-# API route fragments
-ACS_CALL_OUTBOUND_PATH: str = "/api/call/initiate"
-ACS_CALL_INBOUND_PATH:  str = "/api/call/answer"
-ACS_CALL_CALLBACK_PATH: str = "/api/call/callbacks"
 
-# WSS route fragments
-ACS_WEBSOCKET_PATH:     str = "/ws/call/stream"
+# V1 Endpoints
+ACS_CALL_OUTBOUND_PATH: str = "/api/v1/calls/initiate"
+ACS_CALL_INBOUND_PATH:  str = "/api/v1/calls/answer"
+ACS_CALL_CALLBACK_PATH: str = "/api/v1/calls/callbacks"
+
+# V1 WebSocket Endpoints
+ACS_WEBSOCKET_PATH: str = "/api/v1/media/stream"
+
+# Legacy Endpoint Configs
+# # API route fragments
+# ACS_CALL_OUTBOUND_PATH: str = "/api/call/initiate"
+# ACS_CALL_INBOUND_PATH:  str = "/api/call/answer"
+# ACS_CALL_CALLBACK_PATH: str = "/api/call/callbacks"
+
+# # WSS route fragments
+# ACS_WEBSOCKET_PATH:     str = "/ws/call/stream"
 
 # Cosmos DB
 AZURE_COSMOS_CONNECTION_STRING: str = os.getenv("AZURE_COSMOS_CONNECTION_STRING", "")

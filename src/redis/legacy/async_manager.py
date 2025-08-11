@@ -65,9 +65,9 @@ class AsyncAzureRedisManager:
                 "Azure Redis async connection initialized with access key."
             )
         else:
-            from azure.identity import DefaultAzureCredential
+            from utils.azure_auth import get_credential
 
-            cred = credential or DefaultAzureCredential()
+            cred = credential or get_credential()
             scope = scope or os.getenv(
                 "REDIS_SCOPE", "https://redis.azure.com/.default"
             )

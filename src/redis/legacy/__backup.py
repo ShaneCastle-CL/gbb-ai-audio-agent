@@ -52,7 +52,7 @@ class AzureRedisManager:
             )
         else:
             try:
-                from azure.identity import DefaultAzureCredential
+                from utils.azure_auth import get_credential
             except ImportError:
                 raise ImportError(
                     "azure-identity package is required for AAD authentication."

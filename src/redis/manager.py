@@ -48,7 +48,7 @@ class AzureRedisManager:
         """
         Initialize the Redis connection.
         """
-        self.logger = get_logger()
+        self.logger = get_logger(__name__)
         self.host = host or os.getenv("REDIS_HOST")
         self.access_key = access_key or os.getenv("REDIS_ACCESS_KEY")
         self.port = (
@@ -207,36 +207,75 @@ class AzureRedisManager:
                 None, self.store_session_data, session_id, data
             )
         except asyncio.CancelledError:
-            self.logger.warning("store_session_data_async was cancelled.")
+            self.logger.debug(f"store_session_data_async cancelled for session {session_id}")
+            # Don't log as warning - cancellation is normal during shutdown
             raise
+        except Exception as e:
+            self.logger.error(f"Error in store_session_data_async for session {session_id}: {e}")
+            return False
 
     async def get_session_data_async(self, session_id: str) -> Dict[str, str]:
         """Async version of get_session_data using thread pool executor."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_session_data, session_id)
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.get_session_data, session_id)
+        except asyncio.CancelledError:
+            self.logger.debug(f"get_session_data_async cancelled for session {session_id}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error in get_session_data_async for session {session_id}: {e}")
+            return {}
 
     async def update_session_field_async(
         self, session_id: str, field: str, value: str
     ) -> bool:
         """Async version of update_session_field using thread pool executor."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self.update_session_field, session_id, field, value
-        )
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, self.update_session_field, session_id, field, value
+            )
+        except asyncio.CancelledError:
+            self.logger.debug(f"update_session_field_async cancelled for session {session_id}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error in update_session_field_async for session {session_id}: {e}")
+            return False
 
     async def delete_session_async(self, session_id: str) -> int:
         """Async version of delete_session using thread pool executor."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.delete_session, session_id)
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.delete_session, session_id)
+        except asyncio.CancelledError:
+            self.logger.debug(f"delete_session_async cancelled for session {session_id}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error in delete_session_async for session {session_id}: {e}")
+            return 0
 
     async def get_value_async(self, key: str) -> Optional[str]:
         """Async version of get_value using thread pool executor."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.get_value, key)
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.get_value, key)
+        except asyncio.CancelledError:
+            self.logger.debug(f"get_value_async cancelled for key {key}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error in get_value_async for key {key}: {e}")
+            return None
 
     async def set_value_async(
         self, key: str, value: str, ttl_seconds: Optional[int] = None
     ) -> bool:
         """Async version of set_value using thread pool executor."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.set_value, key, value, ttl_seconds)
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, self.set_value, key, value, ttl_seconds)
+        except asyncio.CancelledError:
+            self.logger.debug(f"set_value_async cancelled for key {key}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error in set_value_async for key {key}: {e}")
+            return False

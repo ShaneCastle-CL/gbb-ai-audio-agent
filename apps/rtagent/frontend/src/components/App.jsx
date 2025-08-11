@@ -481,7 +481,7 @@ const BackendIndicator = ({ url }) => {
   const checkReadiness = async () => {
     try {
       // Simple GET request without extra headers
-      const response = await fetch(`${url}/readiness`);
+      const response = await fetch(`${url}/api/v1/health/readiness`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -1352,7 +1352,7 @@ export default function RealTimeVoiceApp() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/call/initiate`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/calls/initiate`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ target_number: targetPhoneNumber }),

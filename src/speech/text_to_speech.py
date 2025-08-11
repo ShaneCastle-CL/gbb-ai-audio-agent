@@ -22,7 +22,7 @@ from utils.ml_logging import get_logger
 load_dotenv()
 
 # Initialize logger
-logger = get_logger()
+logger = get_logger(__name__)
 
 _SENTENCE_END = re.compile(r"([.!?；？！。]+|\n)")
 
@@ -137,6 +137,8 @@ class SpeechSynthesizer:
             except Exception as e:
                 logger.warning(f"Failed to initialize Azure Monitor tracing: {e}")
                 self.enable_tracing = False
+                # Temporarily disable to avoid startup errors
+                logger.info("Continuing without Azure Monitor tracing")
 
         # DON'T initialize speaker synthesizer during __init__ to avoid audio library issues
         # Only create it when actually needed for speaker playback
