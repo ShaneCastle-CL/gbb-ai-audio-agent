@@ -107,7 +107,23 @@ jobs:
       - name: 🏁 Initialize AZD Environment
         run: |
           # Create a temporary environment for planning
-          azd env new pr-preview --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }}
+          echo "🔍 Creating temporary azd environment for PR preview..."
+          
+          # Ensure we're authenticated
+          az account show --query "name" -o tsv || {
+            echo "❌ Azure authentication failed"
+            exit 1
+          }
+          
+          # Create the environment
+          azd env new pr-preview --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }} || {
+            echo "❌ Failed to create azd environment"
+            echo "🔍 Available environments:"
+            azd env list || echo "No environments found"
+            exit 1
+          }
+          
+          echo "✅ Environment 'pr-preview' created successfully"
           
           # Set required environment variables
           azd env set AZURE_ENV_NAME pr-preview
@@ -115,8 +131,22 @@ jobs:
           azd env set AZURE_SUBSCRIPTION_ID ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
           # Set optional variables if available
-          [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ] && azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
-          [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ] && azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
+          if [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ]; then
+            azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
+            echo "✅ Set AZURE_PRINCIPAL_ID"
+          fi
+          
+          if [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ]; then
+            azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
+            echo "✅ Set ACS_SOURCE_PHONE_NUMBER"
+          fi
+          
+          # Set Terraform backend configuration
+          azd env set TF_STATE_RESOURCE_GROUP "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
+          azd env set TF_STATE_STORAGE_ACCOUNT "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
+          azd env set TF_STATE_CONTAINER_NAME "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+          
+          echo "🎯 Environment variables configured successfully"
           
       - name: 📋 Run Terraform Plan via AZD
         id: plan
@@ -192,7 +222,9 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
       - name: ⚙️ Setup Azure Developer CLI
-        uses: Azure/setup-azd@v1.0.0
+        uses: Azure/setup-azd@v2
+        with:
+            version: 1.18.1
         
       - name: 🔧 Configure Terraform Backend
         working-directory: infra/terraform
@@ -212,28 +244,60 @@ jobs:
           
       - name: 🏁 Initialize AZD Environment
         run: |
+          # Ensure we're authenticated
+          echo "🔍 Verifying Azure authentication..."
+          az account show --query "name" -o tsv || {
+            echo "❌ Azure authentication failed"
+            exit 1
+          }
+          
           # Check if environment exists, create if not
-          if ! azd env list | grep -q "${{ matrix.environment }}"; then
+          echo "🔍 Checking for existing azd environment: ${{ matrix.environment }}"
+          if ! azd env list 2>/dev/null | grep -q "${{ matrix.environment }}"; then
             echo "Creating new azd environment: ${{ matrix.environment }}"
-            azd env new ${{ matrix.environment }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }}
+            azd env new ${{ matrix.environment }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }} || {
+              echo "❌ Failed to create azd environment"
+              echo "🔍 Available environments:"
+              azd env list || echo "No environments found"
+              exit 1
+            }
+            echo "✅ Environment '${{ matrix.environment }}' created successfully"
           else
             echo "Using existing azd environment: ${{ matrix.environment }}"
-            azd env select ${{ matrix.environment }}
+            azd env select ${{ matrix.environment }} || {
+              echo "❌ Failed to select environment"
+              exit 1
+            }
+            echo "✅ Environment '${{ matrix.environment }}' selected successfully"
           fi
           
           # Set required environment variables
+          echo "🔧 Configuring environment variables..."
           azd env set AZURE_ENV_NAME ${{ matrix.environment }}
           azd env set AZURE_LOCATION ${{ env.AZURE_LOCATION }}
           azd env set AZURE_SUBSCRIPTION_ID ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
           # Set optional variables if available
-          [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ] && azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
-          [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ] && azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
+          if [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ]; then
+            azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
+            echo "✅ Set AZURE_PRINCIPAL_ID"
+          fi
+          
+          if [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ]; then
+            azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
+            echo "✅ Set ACS_SOURCE_PHONE_NUMBER"
+          fi
           
           # Set Terraform backend configuration
           azd env set TF_STATE_RESOURCE_GROUP "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
           azd env set TF_STATE_STORAGE_ACCOUNT "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
           azd env set TF_STATE_CONTAINER_NAME "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+          
+          echo "🎯 Environment variables configured successfully"
+          
+          # Show current environment status
+          echo "📊 Current azd environment status:"
+          azd env list
           
       - name: 🚀 Execute AZD Command
         run: |
