@@ -128,6 +128,22 @@ jobs:
           echo "✅ Parameters copied and principal configuration added successfully"
           echo "📋 Current main.tfvars.json contents:"
           cat infra/terraform/main.tfvars.json
+
+      - name: 🔧 Configure Terraform Backend
+        run: |
+          echo "🔧 Configuring Terraform backend for remote state..."
+          cat > infra/terraform/backend.tf << EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
+              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.RS_CONTAINER_NAME }}"
+              key                  = "${{ env.AZURE_ENV_NAME }}/terraform.tfstate"
+              use_azuread_auth     = true
+            }
+          }
+          EOF
+          echo "✅ Backend configuration created successfully"
           
       - name: 🏁 Initialize AZD Environment
         run: |
@@ -317,6 +333,22 @@ jobs:
           echo "✅ Principal configuration added to main.tfvars.json"
           echo "📋 Current main.tfvars.json contents:"
           cat infra/terraform/main.tfvars.json
+
+      - name: 🔧 Configure Terraform Backend
+        run: |
+          echo "🔧 Configuring Terraform backend for remote state..."
+          cat > infra/terraform/backend.tf << EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
+              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.RS_CONTAINER_NAME }}"
+              key                  = "${{ matrix.environment }}/terraform.tfstate"
+              use_azuread_auth     = true
+            }
+          }
+          EOF
+          echo "✅ Backend configuration created successfully for ${{ matrix.environment }}"
           
       - name: 🏁 Initialize AZD Environment
         run: |
