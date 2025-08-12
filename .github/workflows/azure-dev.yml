@@ -129,9 +129,13 @@ jobs:
             echo "✅ Using location from environment variable: ${{ env.AZURE_LOCATION }}"
           fi
           
+          # Get the Object ID (Principal ID) from the Client ID for azd environment
+          echo "🔍 Getting principal Object ID for azd environment..."
+          PRINCIPAL_OBJECT_ID=$(az ad sp show --id "${{ env.AZURE_CLIENT_ID }}" --query objectId --output tsv)
+          
           # Set Terraform principal configuration
-          azd env set AZURE_PRINCIPAL_ID "${{ env.AZURE_CLIENT_ID }}" || echo "Setting AZURE_PRINCIPAL_ID"
-          azd env set AZURE_PRINCIPAL_TYPE "User" || echo "Setting AZURE_PRINCIPAL_TYPE"
+          azd env set AZURE_PRINCIPAL_ID "$PRINCIPAL_OBJECT_ID" || echo "Setting AZURE_PRINCIPAL_ID"
+          azd env set AZURE_PRINCIPAL_TYPE "ServicePrincipal" || echo "Setting AZURE_PRINCIPAL_TYPE"
           echo "✅ Principal and location configuration set for Terraform"
 
       - name: Provision Infrastructure

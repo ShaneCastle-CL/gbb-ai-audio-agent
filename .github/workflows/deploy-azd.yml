@@ -143,7 +143,7 @@ jobs:
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "${{ input.environment }}/${{ env.AZURE_ENV_NAME }}.tfstate"
+              key                  = "prod/${{ env.AZURE_ENV_NAME }}.tfstate"
               use_azuread_auth     = true
             }
           }
@@ -420,11 +420,15 @@ jobs:
           azd env set AZURE_LOCATION "$DEPLOY_LOCATION"
           azd env set AZURE_SUBSCRIPTION_ID ${{ env.AZURE_SUBSCRIPTION_ID }}
           
+          # Get the Object ID (Principal ID) from the Client ID for azd environment
+          echo "🔍 Getting principal Object ID for azd environment..."
+          PRINCIPAL_OBJECT_ID=$(az ad sp show --id "${{ env.AZURE_CLIENT_ID }}" --query objectId --output tsv)
+          
           # Set Terraform principal configuration
-          azd env set AZURE_PRINCIPAL_ID "${{ env.AZURE_CLIENT_ID }}"
-          azd env set AZURE_PRINCIPAL_TYPE "User"
-          echo "✅ Set AZURE_PRINCIPAL_ID to client ID"
-          echo "✅ Set AZURE_PRINCIPAL_TYPE to User"
+          azd env set AZURE_PRINCIPAL_ID "$PRINCIPAL_OBJECT_ID"
+          azd env set AZURE_PRINCIPAL_TYPE "ServicePrincipal"
+          echo "✅ Set AZURE_PRINCIPAL_ID to Object ID: $PRINCIPAL_OBJECT_ID"
+          echo "✅ Set AZURE_PRINCIPAL_TYPE to ServicePrincipal"
           
           # Set optional variables if available
           if [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ]; then
