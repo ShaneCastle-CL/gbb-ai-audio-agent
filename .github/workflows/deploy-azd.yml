@@ -85,7 +85,47 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
       - name: ⚙️ Setup Azure Developer CLI
-        uses: Azure/setup-azd@v1.0.0
+        run: |
+          # Install Azure Developer CLI with fallbacks for network issues
+          echo "Installing Azure Developer CLI..."
+          
+          # Method 1: Try direct download from GitHub releases
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via GitHub releases..."
+            curl -fsSL -o azd-linux-amd64.tar.gz \
+              https://github.com/Azure/azure-dev/releases/latest/download/azd-linux-amd64.tar.gz 2>/dev/null && \
+            tar -xzf azd-linux-amd64.tar.gz && \
+            sudo mv azd /usr/local/bin/ && \
+            rm azd-linux-amd64.tar.gz && \
+            echo "AZD installed via GitHub releases" || echo "GitHub method failed"
+          fi
+          
+          # Method 2: Try package manager (if GitHub fails)
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via package manager..."
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash 2>/dev/null && \
+            echo "AZD installed via package manager" || echo "Package manager method failed"
+          fi
+          
+          # Method 3: Try alternative download source
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via alternative source..."
+            wget -q https://aka.ms/azd-linux-amd64.tar.gz -O azd.tar.gz 2>/dev/null && \
+            tar -xzf azd.tar.gz && \
+            sudo mv azd /usr/local/bin/ && \
+            rm azd.tar.gz && \
+            echo "AZD installed via alternative source" || echo "Alternative method failed"
+          fi
+          
+          # Verify installation
+          if command -v azd &> /dev/null; then
+            echo "✅ Azure Developer CLI installed successfully"
+            azd version
+          else
+            echo "❌ Failed to install Azure Developer CLI"
+            echo "Falling back to manual Terraform operations..."
+            exit 1
+          fi
         
       - name: 🔧 Configure Terraform Backend
         working-directory: infra/terraform
@@ -191,7 +231,47 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           
       - name: ⚙️ Setup Azure Developer CLI
-        uses: Azure/setup-azd@v1.0.0
+        run: |
+          # Install Azure Developer CLI with fallbacks for network issues
+          echo "Installing Azure Developer CLI..."
+          
+          # Method 1: Try direct download from GitHub releases
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via GitHub releases..."
+            curl -fsSL -o azd-linux-amd64.tar.gz \
+              https://github.com/Azure/azure-dev/releases/latest/download/azd-linux-amd64.tar.gz 2>/dev/null && \
+            tar -xzf azd-linux-amd64.tar.gz && \
+            sudo mv azd /usr/local/bin/ && \
+            rm azd-linux-amd64.tar.gz && \
+            echo "AZD installed via GitHub releases" || echo "GitHub method failed"
+          fi
+          
+          # Method 2: Try package manager (if GitHub fails)
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via package manager..."
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash 2>/dev/null && \
+            echo "AZD installed via package manager" || echo "Package manager method failed"
+          fi
+          
+          # Method 3: Try alternative download source
+          if ! command -v azd &> /dev/null; then
+            echo "Attempting installation via alternative source..."
+            wget -q https://aka.ms/azd-linux-amd64.tar.gz -O azd.tar.gz 2>/dev/null && \
+            tar -xzf azd.tar.gz && \
+            sudo mv azd /usr/local/bin/ && \
+            rm azd.tar.gz && \
+            echo "AZD installed via alternative source" || echo "Alternative method failed"
+          fi
+          
+          # Verify installation
+          if command -v azd &> /dev/null; then
+            echo "✅ Azure Developer CLI installed successfully"
+            azd version
+          else
+            echo "❌ Failed to install Azure Developer CLI"
+            echo "Falling back to manual Terraform operations..."
+            exit 1
+          fi
         
       - name: 🔧 Configure Terraform Backend
         working-directory: infra/terraform
