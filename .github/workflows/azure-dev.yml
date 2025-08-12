@@ -62,7 +62,7 @@ jobs:
               --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
               --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
               --ip-address $agentIP
-            sleep 300
+            # sleep 300
 
       - name: Setup Terraform Parameters
         run: |
