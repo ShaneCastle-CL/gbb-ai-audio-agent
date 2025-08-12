@@ -1628,7 +1628,6 @@ export default function RealTimeVoiceApp() {
 
       // 1) open WS
       const socket = new WebSocket(`${WS_URL}/api/v1/conversation`);
-      // const socket = new WebSocket(`${WS_URL}/realtime`);
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
