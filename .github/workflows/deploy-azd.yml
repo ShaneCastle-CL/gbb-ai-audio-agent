@@ -58,9 +58,7 @@ env:
   AZD_SKIP_INTERACTIVE: true
   CI: true
   GITHUB_ACTIONS: true
-  RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
-  RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
-  RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
+
 permissions:
   id-token: write   # Required for OIDC authentication
   contents: read    # Required to checkout repository
@@ -75,6 +73,17 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
+      RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
+      RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
+      ARM_USE_OIDC: "true"
+    
     steps:
       - name: 🛒 Checkout Repository
         uses: actions/checkout@v4
@@ -82,29 +91,43 @@ jobs:
       - name: 🔐 Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
           
       - name: ⚙️ Setup Azure Developer CLI
         uses: Azure/setup-azd@v2
+        
+      - name: 🔧 Install Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-            version: 1.18.1
-      - name: 🔧 Configure Terraform Backend
-        working-directory: infra/terraform
+          terraform_version: 1.9.0
+
+      - name: 🔐 Log in with Azure Developer CLI (OIDC)
         run: |
-          # Create backend configuration from secrets
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
-              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
-              container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "dev/terraform.tfstate"
-              use_azuread_auth     = true
-            }
-          }
-          EOF
+          azd auth login `
+            --client-id "$Env:AZURE_CLIENT_ID" `
+            --federated-credential-provider "github" `
+            --tenant-id "$Env:AZURE_TENANT_ID"
+        shell: pwsh
+
+      - name: ⚙️ Setup Terraform Parameters
+        run: |
+          echo "Setting up dev environment parameters for Terraform..."
+          cp infra/terraform/params/main.tfvars.dev.json infra/terraform/main.tfvars.json
+          
+          # Update the JSON file with principal configuration
+          echo "🔧 Adding principal configuration to main.tfvars.json..."
+          jq --arg principal_id "${{ env.AZURE_CLIENT_ID }}" \
+             --arg principal_type "User" \
+             '. + {principal_id: $principal_id, principal_type: $principal_type}' \
+             infra/terraform/main.tfvars.json > infra/terraform/main.tfvars.json.tmp
+          
+          mv infra/terraform/main.tfvars.json.tmp infra/terraform/main.tfvars.json
+          
+          echo "✅ Parameters copied and principal configuration added successfully"
+          echo "📋 Current main.tfvars.json contents:"
+          cat infra/terraform/main.tfvars.json
           
       - name: 🏁 Initialize AZD Environment
         run: |
@@ -117,8 +140,18 @@ jobs:
             exit 1
           }
           
+          # Prioritize location from main.tfvars.json if available
+          TFVARS_LOCATION=$(jq -r '.location // empty' infra/terraform/main.tfvars.json)
+          if [ -n "$TFVARS_LOCATION" ] && [ "$TFVARS_LOCATION" != "null" ]; then
+            DEPLOY_LOCATION="$TFVARS_LOCATION"
+            echo "✅ Using location from main.tfvars.json: $TFVARS_LOCATION"
+          else
+            DEPLOY_LOCATION="${{ env.AZURE_LOCATION }}"
+            echo "✅ Using location from environment variable: ${{ env.AZURE_LOCATION }}"
+          fi
+          
           # Create the environment
-          azd env new pr-preview --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }} || {
+          azd env new pr-preview --subscription ${{ env.AZURE_SUBSCRIPTION_ID }} --location "$DEPLOY_LOCATION" || {
             echo "❌ Failed to create azd environment"
             echo "🔍 Available environments:"
             azd env list || echo "No environments found"
@@ -129,15 +162,16 @@ jobs:
           
           # Set required environment variables
           azd env set AZURE_ENV_NAME pr-preview
-          azd env set AZURE_LOCATION ${{ env.AZURE_LOCATION }}
-          azd env set AZURE_SUBSCRIPTION_ID ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azd env set AZURE_LOCATION "$DEPLOY_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID ${{ env.AZURE_SUBSCRIPTION_ID }}
+          
+          # Set Terraform principal configuration
+          azd env set PRINCIPAL_ID "${{ env.AZURE_CLIENT_ID }}"
+          azd env set PRINCIPAL_TYPE "User"
+          echo "✅ Set AZURE_PRINCIPAL_ID to client ID"
+          echo "✅ Set AZURE_PRINCIPAL_TYPE to User"
           
           # Set optional variables if available
-          if [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ]; then
-            azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
-            echo "✅ Set AZURE_PRINCIPAL_ID"
-          fi
-          
           if [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ]; then
             azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
             echo "✅ Set ACS_SOURCE_PHONE_NUMBER"
@@ -157,7 +191,7 @@ jobs:
           echo "🔍 Running infrastructure preview..."
           
           # Run azd provision with --preview flag if available, otherwise show what would be deployed
-          azd provision --no-prompt --dry-run || azd provision --no-prompt --help | grep -i preview || echo "⚠️ Plan preview not available, would provision infrastructure"
+          azd provision --no-prompt --preview || azd provision --no-prompt --help | grep -i preview || echo "⚠️ Plan preview not available, would provision infrastructure"
           
           echo "plan-available=true" >> $GITHUB_OUTPUT
           
@@ -207,6 +241,17 @@ jobs:
     
     environment: ${{ matrix.environment }}
     
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
+      RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
+      RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
+      ARM_USE_OIDC: "true"
+    
     outputs:
       resource_group: ${{ steps.outputs.outputs.resource_group }}
       frontend_url: ${{ steps.outputs.outputs.frontend_url }}
@@ -219,30 +264,59 @@ jobs:
       - name: 🔐 Azure Login (OIDC)
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
           
       - name: ⚙️ Setup Azure Developer CLI
         uses: Azure/setup-azd@v2
-        with:
-            version: 1.18.1
         
-      - name: 🔧 Configure Terraform Backend
-        working-directory: infra/terraform
+      - name: 🔧 Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
+      - name: 🔐 Log in with Azure Developer CLI (OIDC)
         run: |
-          # Create backend configuration from secrets
-          cat > backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ vars.RS_RESOURCE_GROUP }}"
-              storage_account_name = "${{ vars.RS_STORAGE_ACCOUNT }}"
-              container_name       = "${{ vars.RS_CONTAINER_NAME }}"
-              key                  = "${{ matrix.environment }}/terraform.tfstate"
-              use_azuread_auth     = true
-            }
-          }
-          EOF
+          azd auth login `
+            --client-id "$Env:AZURE_CLIENT_ID" `
+            --federated-credential-provider "github" `
+            --tenant-id "$Env:AZURE_TENANT_ID"
+        shell: pwsh
+
+      - name: 🔒 Whitelist GitHub Runner IP
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -eu
+            agentIP=$(curl -s https://api.ipify.org/)
+            az storage account network-rule add \
+              --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
+              --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
+              --ip-address $agentIP
+
+      - name: ⚙️ Setup Terraform Parameters
+        run: |
+          echo "Setting up ${{ matrix.environment }} environment parameters for Terraform..."
+          if [ -f "infra/terraform/params/main.tfvars.${{ matrix.environment }}.json" ]; then
+            cp infra/terraform/params/main.tfvars.${{ matrix.environment }}.json infra/terraform/main.tfvars.json
+            echo "Parameters for ${{ matrix.environment }} copied successfully"
+          else
+            echo "⚠️ No specific parameters found for ${{ matrix.environment }}, using existing main.tfvars.json"
+          fi
+          
+          # Update the JSON file with principal configuration
+          echo "🔧 Adding principal configuration to main.tfvars.json..."
+          jq --arg principal_id "${{ env.AZURE_CLIENT_ID }}" \
+             --arg principal_type "User" \
+             '. + {principal_id: $principal_id, principal_type: $principal_type}' \
+             infra/terraform/main.tfvars.json > infra/terraform/main.tfvars.json.tmp
+          
+          mv infra/terraform/main.tfvars.json.tmp infra/terraform/main.tfvars.json
+          
+          echo "✅ Principal configuration added to main.tfvars.json"
+          echo "📋 Current main.tfvars.json contents:"
+          cat infra/terraform/main.tfvars.json
           
       - name: 🏁 Initialize AZD Environment
         run: |
@@ -253,11 +327,21 @@ jobs:
             exit 1
           }
           
+          # Prioritize location from main.tfvars.json if available
+          TFVARS_LOCATION=$(jq -r '.location // empty' infra/terraform/main.tfvars.json)
+          if [ -n "$TFVARS_LOCATION" ] && [ "$TFVARS_LOCATION" != "null" ]; then
+            DEPLOY_LOCATION="$TFVARS_LOCATION"
+            echo "✅ Using location from main.tfvars.json: $TFVARS_LOCATION"
+          else
+            DEPLOY_LOCATION="${{ env.AZURE_LOCATION }}"
+            echo "✅ Using location from environment variable: ${{ env.AZURE_LOCATION }}"
+          fi
+          
           # Check if environment exists, create if not
           echo "🔍 Checking for existing azd environment: ${{ matrix.environment }}"
           if ! azd env list 2>/dev/null | grep -q "${{ matrix.environment }}"; then
             echo "Creating new azd environment: ${{ matrix.environment }}"
-            azd env new ${{ matrix.environment }} --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }} --location ${{ env.AZURE_LOCATION }} || {
+            azd env new ${{ matrix.environment }} --subscription ${{ env.AZURE_SUBSCRIPTION_ID }} --location "$DEPLOY_LOCATION" || {
               echo "❌ Failed to create azd environment"
               echo "🔍 Available environments:"
               azd env list || echo "No environments found"
@@ -276,24 +360,25 @@ jobs:
           # Set required environment variables
           echo "🔧 Configuring environment variables..."
           azd env set AZURE_ENV_NAME ${{ matrix.environment }}
-          azd env set AZURE_LOCATION ${{ env.AZURE_LOCATION }}
-          azd env set AZURE_SUBSCRIPTION_ID ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          azd env set AZURE_LOCATION "$DEPLOY_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID ${{ env.AZURE_SUBSCRIPTION_ID }}
+          
+          # Set Terraform principal configuration
+          azd env set AZURE_PRINCIPAL_ID "${{ env.AZURE_CLIENT_ID }}"
+          azd env set AZURE_PRINCIPAL_TYPE "User"
+          echo "✅ Set AZURE_PRINCIPAL_ID to client ID"
+          echo "✅ Set AZURE_PRINCIPAL_TYPE to User"
           
           # Set optional variables if available
-          if [ -n "${{ secrets.AZURE_PRINCIPAL_ID }}" ]; then
-            azd env set AZURE_PRINCIPAL_ID "${{ secrets.AZURE_PRINCIPAL_ID }}"
-            echo "✅ Set AZURE_PRINCIPAL_ID"
-          fi
-          
           if [ -n "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}" ]; then
             azd env set ACS_SOURCE_PHONE_NUMBER "${{ secrets.ACS_SOURCE_PHONE_NUMBER }}"
             echo "✅ Set ACS_SOURCE_PHONE_NUMBER"
           fi
           
           # Set Terraform backend configuration
-          azd env set TF_STATE_RESOURCE_GROUP "${{ vars.RS_RESOURCE_GROUP }}"
-          azd env set TF_STATE_STORAGE_ACCOUNT "${{ vars.RS_STORAGE_ACCOUNT }}"
-          azd env set TF_STATE_CONTAINER_NAME "${{ vars.RS_CONTAINER_NAME }}"
+          azd env set TF_STATE_RESOURCE_GROUP "${{ env.RS_RESOURCE_GROUP }}"
+          azd env set TF_STATE_STORAGE_ACCOUNT "${{ env.RS_STORAGE_ACCOUNT }}"
+          azd env set TF_STATE_CONTAINER_NAME "${{ env.RS_CONTAINER_NAME }}"
           
           echo "🎯 Environment variables configured successfully"
           
@@ -361,6 +446,23 @@ jobs:
           echo "📊 Deployment Status:"
           azd show --output table || echo "⚠️ Could not show deployment status"
           
+      - name: 🔓 Remove GitHub Runner IP from Whitelist
+        if: always()
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -eu
+            agentIP=$(curl -s https://api.ipify.org/)
+            az storage account network-rule remove \
+              --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
+              --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
+              --ip-address $agentIP
+
+      - name: 🚪 Logout
+        if: always()
+        run: |
+          az logout
+          
       - name: 📋 Deployment Summary
         run: |
           ACTION="${{ inputs.action || 'up' }}"
@@ -376,14 +478,14 @@ jobs:
             echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
             echo "| Environment | \`${{ matrix.environment }}\` |" >> $GITHUB_STEP_SUMMARY
             echo "| Action | \`$ACTION\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Resource Group | \`${{ steps.outputs.outputs.resource-group }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Resource Group | \`${{ steps.outputs.outputs.resource_group }}\` |" >> $GITHUB_STEP_SUMMARY
             
-            if [ -n "${{ steps.outputs.outputs.frontend-url }}" ]; then
-              echo "| Frontend URL | [${{ steps.outputs.outputs.frontend-url }}](${{ steps.outputs.outputs.frontend-url }}) |" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ steps.outputs.outputs.frontend_url }}" ]; then
+              echo "| Frontend URL | [${{ steps.outputs.outputs.frontend_url }}](${{ steps.outputs.outputs.frontend_url }}) |" >> $GITHUB_STEP_SUMMARY
             fi
             
-            if [ -n "${{ steps.outputs.outputs.backend-url }}" ]; then
-              echo "| Backend URL | [${{ steps.outputs.outputs.backend-url }}](${{ steps.outputs.outputs.backend-url }}) |" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ steps.outputs.outputs.backend_url }}" ]; then
+              echo "| Backend URL | [${{ steps.outputs.outputs.backend_url }}](${{ steps.outputs.outputs.backend_url }}) |" >> $GITHUB_STEP_SUMMARY
             fi
             
             echo "" >> $GITHUB_STEP_SUMMARY
