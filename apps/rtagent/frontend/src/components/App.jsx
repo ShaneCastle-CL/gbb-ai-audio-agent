@@ -1627,7 +1627,8 @@ export default function RealTimeVoiceApp() {
       appendLog("🎤 PCM streaming started");
 
       // 1) open WS
-      const socket = new WebSocket(`${WS_URL}/realtime`);
+      const socket = new WebSocket(`${WS_URL}/api/v1/conversation`);
+      // const socket = new WebSocket(`${WS_URL}/realtime`);
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
@@ -1894,7 +1895,7 @@ export default function RealTimeVoiceApp() {
       appendLog("📞 Call initiated");
 
       // relay WS
-      const relay = new WebSocket(`${WS_URL}/ws/relay`);
+      const relay = new WebSocket(`${WS_URL}/api/v1/dashboard/relay`);
       relay.onopen = () => appendLog("Relay WS connected");
       relay.onmessage = ({data}) => {
         try {
