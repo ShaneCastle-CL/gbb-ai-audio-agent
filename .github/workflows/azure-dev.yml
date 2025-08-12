@@ -45,6 +45,17 @@ jobs:
             --tenant-id "$Env:AZURE_TENANT_ID"
         shell: pwsh
 
+      - name: Whitelist GitHub Runner IP
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -eu
+            agentIP=$(curl -s https://api.ipify.org/)
+            az storage account network-rule add \
+              --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
+              --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
+              --ip-address $agentIP
+            sleep 300
 
       - name: Provision Infrastructure
         run: azd provision --no-prompt
@@ -52,3 +63,19 @@ jobs:
       - name: Deploy Application
         run: azd deploy --no-prompt
         
+      - name: Remove GitHub Runner IP from Whitelist
+        if: always()
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            set -eu
+            agentIP=$(curl -s https://api.ipify.org/)
+            az storage account network-rule remove  \
+              --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
+              --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
+              --ip-address $agentIP
+
+      - name: logout
+        if: always()
+        run: |
+          az logout
