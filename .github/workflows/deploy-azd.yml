@@ -58,7 +58,9 @@ env:
   AZD_SKIP_INTERACTIVE: true
   CI: true
   GITHUB_ACTIONS: true
-
+  RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
+  RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
+  RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
 permissions:
   id-token: write   # Required for OIDC authentication
   contents: read    # Required to checkout repository
@@ -95,9 +97,9 @@ jobs:
           cat > backend.tf << EOF
           terraform {
             backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-              container_name       = "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
+              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.RS_CONTAINER_NAME }}"
               key                  = "dev/terraform.tfstate"
               use_azuread_auth     = true
             }
@@ -142,9 +144,9 @@ jobs:
           fi
           
           # Set Terraform backend configuration
-          azd env set TF_STATE_RESOURCE_GROUP "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-          azd env set TF_STATE_STORAGE_ACCOUNT "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-          azd env set TF_STATE_CONTAINER_NAME "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+          azd env set RS_RESOURCE_GROUP "${{ env.RS_RESOURCE_GROUP }}"
+          azd env set RS_STORAGE_ACCOUNT "${{ env.RS_STORAGE_ACCOUNT }}"
+          azd env set RS_CONTAINER_NAME "${{ env.RS_CONTAINER_NAME }}"
           
           echo "🎯 Environment variables configured successfully"
           
@@ -233,9 +235,9 @@ jobs:
           cat > backend.tf << EOF
           terraform {
             backend "azurerm" {
-              resource_group_name  = "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-              storage_account_name = "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-              container_name       = "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+              resource_group_name  = "${{ vars.RS_RESOURCE_GROUP }}"
+              storage_account_name = "${{ vars.RS_STORAGE_ACCOUNT }}"
+              container_name       = "${{ vars.RS_CONTAINER_NAME }}"
               key                  = "${{ matrix.environment }}/terraform.tfstate"
               use_azuread_auth     = true
             }
@@ -289,9 +291,9 @@ jobs:
           fi
           
           # Set Terraform backend configuration
-          azd env set TF_STATE_RESOURCE_GROUP "${{ secrets.TF_STATE_RESOURCE_GROUP }}"
-          azd env set TF_STATE_STORAGE_ACCOUNT "${{ secrets.TF_STATE_STORAGE_ACCOUNT }}"
-          azd env set TF_STATE_CONTAINER_NAME "${{ secrets.TF_STATE_CONTAINER_NAME }}"
+          azd env set TF_STATE_RESOURCE_GROUP "${{ vars.RS_RESOURCE_GROUP }}"
+          azd env set TF_STATE_STORAGE_ACCOUNT "${{ vars.RS_STORAGE_ACCOUNT }}"
+          azd env set TF_STATE_CONTAINER_NAME "${{ vars.RS_CONTAINER_NAME }}"
           
           echo "🎯 Environment variables configured successfully"
           

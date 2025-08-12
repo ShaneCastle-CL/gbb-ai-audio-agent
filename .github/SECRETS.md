@@ -16,13 +16,15 @@ For secure, password-less authentication using OpenID Connect:
 
 ### 🗄️ Terraform Remote State Configuration
 
-Configure these secrets for Terraform backend state storage:
+Configure these repository variables for Terraform backend state storage:
 
-| Secret Name | Description | Example Value |
-|-------------|-------------|---------------|
-| `TF_STATE_RESOURCE_GROUP` | Resource group containing state storage | `rg-terraform-state-prod` |
-| `TF_STATE_STORAGE_ACCOUNT` | Storage account for Terraform state | `tfstateprod12345` |
-| `TF_STATE_CONTAINER_NAME` | Blob container for state files | `tfstate` |
+| Variable Name | Type | Description | Example Value |
+|---------------|------|-------------|---------------|
+| `RS_RESOURCE_GROUP` | Repository Variable | Resource group containing state storage | `rg-terraform-state-prod` |
+| `RS_STORAGE_ACCOUNT` | Repository Variable | Storage account for Terraform state | `tfstateprod12345` |
+| `RS_CONTAINER_NAME` | Repository Variable | Blob container for state files | `tfstate` |
+| `AZURE_LOCATION` | Repository Variable | Azure region for deployments | `eastus` |
+| `AZURE_ENV_NAME` | Repository Variable | Environment name for deployments | `dev` |
 
 ### 🔧 Application Configuration
 
@@ -143,14 +145,28 @@ az storage container create \
     --account-name $STORAGE_ACCOUNT \
     --auth-mode login
 
-echo "TF_STATE_STORAGE_ACCOUNT: $STORAGE_ACCOUNT"
+echo "RS_STORAGE_ACCOUNT: $STORAGE_ACCOUNT"
 ```
 
-### Step 5: Configure GitHub Repository Secrets
+### Step 5: Configure GitHub Repository Secrets and Variables
 
-Navigate to your GitHub repository → Settings → Secrets and variables → Actions → New repository secret
+Navigate to your GitHub repository → Settings → Secrets and variables → Actions
 
-Add each secret with the values obtained from the previous steps.
+#### Repository Secrets
+Add these secrets under "Repository secrets":
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`  
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_PRINCIPAL_ID`
+- `ACS_SOURCE_PHONE_NUMBER` (optional)
+
+#### Repository Variables  
+Add these variables under "Repository variables":
+- `RS_RESOURCE_GROUP`
+- `RS_STORAGE_ACCOUNT`
+- `RS_CONTAINER_NAME`
+- `AZURE_LOCATION`
+- `AZURE_ENV_NAME`
 
 ---
 
