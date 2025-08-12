@@ -21,8 +21,7 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
-      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_ENV_NAME: 'gha'
       RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
       RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
       RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
@@ -74,16 +73,17 @@ jobs:
           PRINCIPAL_OBJECT_ID=$(az ad sp show --id "${{ env.AZURE_CLIENT_ID }}" --query objectId --output tsv)
           echo "✅ Principal Object ID: $PRINCIPAL_OBJECT_ID"
           
-          # Update the JSON file with principal configuration
-          echo "🔧 Adding principal configuration to main.tfvars.json..."
+          # Update the JSON file with principal configuration and environment_name
+          echo "🔧 Adding principal and environment configuration to main.tfvars.json..."
           jq --arg principal_id "$PRINCIPAL_OBJECT_ID" \
              --arg principal_type "ServicePrincipal" \
-             '. + {principal_id: $principal_id, principal_type: $principal_type}' \
+             --arg environment_name "${{ env.AZURE_ENV_NAME }}" \
+             '. + {principal_id: $principal_id, principal_type: $principal_type, environment_name: $environment_name}' \
              infra/terraform/main.tfvars.json > infra/terraform/main.tfvars.json.tmp
           
           mv infra/terraform/main.tfvars.json.tmp infra/terraform/main.tfvars.json
           
-          echo "✅ Parameters copied and principal configuration added successfully"
+          echo "✅ Parameters copied and principal/environment configuration added successfully"
 
       - name: Configure Terraform Backend
         run: |
