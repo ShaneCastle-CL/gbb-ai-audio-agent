@@ -37,14 +37,14 @@ jobs:
         with:
           terraform_version: 1.9.0
           
-      - name: Azure CLI Login
+      - name: Azure CLI Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ env.AZURE_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log in with Azure (Federated Credentials)
+      - name: Log in with Azure Developer CLI (OIDC)
         run: |
           azd auth login `
             --client-id "$Env:AZURE_CLIENT_ID" `
@@ -63,6 +63,12 @@ jobs:
               --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
               --ip-address $agentIP
             sleep 300
+
+      - name: Setup Terraform Parameters
+        run: |
+          echo "Setting up dev environment parameters for Terraform..."
+          cp infra/terraform/params/main.tfvars.dev.json infra/terraform/main.tfvars.json
+          echo "Parameters copied successfully"
 
       - name: Provision Infrastructure
         run: azd provision --no-prompt
