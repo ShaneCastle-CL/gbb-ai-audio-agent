@@ -138,7 +138,7 @@ jobs:
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "${{ env.AZURE_ENV_NAME }}/terraform.tfstate"
+              key                  = "${{ input.environment }}/${{ env.AZURE_ENV_NAME }}.tfstate"
               use_azuread_auth     = true
             }
           }
@@ -353,7 +353,7 @@ jobs:
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "${{ matrix.environment }}/terraform.tfstate"
+              key                  = "${{ matrix.environment }}/${{ env.AZURE_ENV_NAME }}.tfstate"
               use_azuread_auth     = true
             }
           }
