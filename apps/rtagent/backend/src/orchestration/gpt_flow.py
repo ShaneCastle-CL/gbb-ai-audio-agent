@@ -67,6 +67,21 @@ _STREAM_TRACING = (
 )  # High frequency ops
 
 
+def _get_agent_voice_config(cm: "MemoManager") -> tuple[Optional[str], Optional[str]]:
+    """Extract agent voice configuration from memory manager.
+    
+    Returns:
+        Tuple of (voice_name, voice_style) or (None, None) if not available
+    """
+    try:
+        voice_name = cm.get_value_from_corememory("current_agent_voice")
+        voice_style = cm.get_value_from_corememory("current_agent_voice_style", "conversational")
+        return voice_name, voice_style
+    except Exception as e:
+        logger.warning(f"Failed to get agent voice config: {e}")
+        return None, None
+
+
 # ---------------------------------------------------------------------------
 # Main entry-point
 # ---------------------------------------------------------------------------
@@ -319,13 +334,28 @@ async def _emit_streaming_text(
         )
         
         with tracer.start_as_current_span("gpt_flow.emit_streaming_text", attributes=span_attrs) as span:
+            # Get agent voice configuration
+            agent_voice, agent_voice_style = _get_agent_voice_config(cm)
+            
             if is_acs:
                 span.set_attribute("output_channel", "acs")
                 # Note: broadcast_message is handled separately for final responses to avoid duplication
-                await send_response_to_acs(ws, text, latency_tool=ws.state.lt)
+                await send_response_to_acs(
+                    ws, 
+                    text, 
+                    latency_tool=ws.state.lt,
+                    voice_name=agent_voice,
+                    voice_style=agent_voice_style
+                )
             else:
                 span.set_attribute("output_channel", "websocket_tts")
-                await send_tts_audio(text, ws, latency_tool=ws.state.lt)
+                await send_tts_audio(
+                    text, 
+                    ws, 
+                    latency_tool=ws.state.lt,
+                    voice_name=agent_voice,
+                    voice_style=agent_voice_style
+                )
                 await ws.send_text(
                     json.dumps({"type": "assistant_streaming", "content": text})
                 )
@@ -333,10 +363,25 @@ async def _emit_streaming_text(
             span.add_event("text_emitted", {"text_length": len(text)})
     else:
         # Fast path when high-frequency tracing is disabled
+        # Get agent voice configuration
+        agent_voice, agent_voice_style = _get_agent_voice_config(cm)
+        
         if is_acs:
-            await send_response_to_acs(ws, text, latency_tool=ws.state.lt)
+            await send_response_to_acs(
+                ws, 
+                text, 
+                latency_tool=ws.state.lt,
+                voice_name=agent_voice,
+                voice_style=agent_voice_style
+            )
         else:
-            await send_tts_audio(text, ws, latency_tool=ws.state.lt)
+            await send_tts_audio(
+                text, 
+                ws, 
+                latency_tool=ws.state.lt,
+                voice_name=agent_voice,
+                voice_style=agent_voice_style
+            )
             await ws.send_text(
                 json.dumps({"type": "assistant_streaming", "content": text})
             )

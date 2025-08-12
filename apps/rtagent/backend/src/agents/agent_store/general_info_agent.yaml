@@ -14,9 +14,13 @@ agent:
 
 model:
   deployment_id: gpt-4o-mini
-  temperature: 0.25
+  temperature: 0.50
   top_p: 0.9
   max_tokens: 1024
+
+voice:
+  name: en-US-Andrew2:DragonHDLatestNeural # Voice for TTS output
+  style: conversational # Voice style (conversational, professional, friendly)
 
 prompts:
   path: voice_agent_general_info.jinja   # see template below

@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING, VOICE_TTS
+from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING, GREETING_VOICE_TTS
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 
 from src.enums.stream_modes import StreamMode

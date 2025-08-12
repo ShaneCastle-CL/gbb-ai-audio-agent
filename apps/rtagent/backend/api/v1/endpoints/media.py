@@ -310,8 +310,16 @@ async def _create_media_handler(
     
     redis_mgr = websocket.app.state.redis
     
-    # Load conversation memory
-    memory_manager = MemoManager.from_redis(call_connection_id, redis_mgr)
+    # Load conversation memory - ensure we always have a valid memory manager
+    try:
+        memory_manager = MemoManager.from_redis(call_connection_id, redis_mgr)
+        if memory_manager is None:
+            logger.warning(f"Memory manager from Redis returned None for {call_connection_id}, creating new one")
+            memory_manager = MemoManager(session_id=call_connection_id)
+    except Exception as e:
+        logger.error(f"Failed to load memory manager from Redis for {call_connection_id}: {e}")
+        logger.info(f"Creating new memory manager for {call_connection_id}")
+        memory_manager = MemoManager(session_id=call_connection_id)
     
     # Initialize latency tracking  
     websocket.state.lt = LatencyTool(memory_manager)

@@ -735,9 +735,11 @@ class SpeechSynthesizer:
         text: str,
         voice: str = "en-US-JennyMultilingualNeural",
         sample_rate: int = 16000,
+        style: str = "chat",
+        rate: str = "+3%",
     ) -> bytes:
         speech_config = self.cfg
-        speech_config.speech_synthesis_voice_name = self.voice
+        speech_config.speech_synthesis_voice_name = voice  # Use the voice parameter, not self.voice
         speech_config.set_speech_synthesis_output_format(
             {
                 16000: speechsdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm,
@@ -745,12 +747,19 @@ class SpeechSynthesizer:
             }[sample_rate]
         )
 
-        ssml = f"""
-<speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
+        # Build SSML with style support, similar to ssml_voice_wrap function
+        sanitized_text = self._sanitize(text)
+        
+        # Apply prosody rate if specified
+        inner_content = f'<prosody rate="{rate}">{sanitized_text}</prosody>' if rate else sanitized_text
+        
+        # Apply style if specified
+        if style:
+            inner_content = f'<mstts:express-as style="{style}">{inner_content}</mstts:express-as>'
+
+        ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
     <voice name="{voice}">
-        <prosody rate="15%" pitch="default">
-            {text}
-        </prosody>
+        {inner_content}
     </voice>
 </speak>"""
 

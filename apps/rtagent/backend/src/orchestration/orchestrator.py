@@ -59,6 +59,20 @@ def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> Tuple[str, str
 
     :returns: ``(call_connection_id, session_id)``
     """
+    if cm is None:
+        logger.warning("⚠️ MemoManager is None in _get_correlation_context, using WebSocket fallbacks")
+        call_connection_id = (
+            getattr(ws.state, "call_connection_id", None)
+            or ws.headers.get("x-call-connection-id")
+            or "unknown"
+        )
+        session_id = (
+            getattr(ws.state, "session_id", None)
+            or ws.headers.get("x-session-id")
+            or "unknown"
+        )
+        return call_connection_id, session_id
+    
     call_connection_id = (
         getattr(ws.state, "call_connection_id", None)
         or ws.headers.get("x-call-connection-id")
@@ -74,11 +88,17 @@ def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> Tuple[str, str
 
 def _cm_get(cm: "MemoManager", key: str, default: Any = None) -> Any:
     """Shorthand for ``cm.get_value_from_corememory`` with a default."""
+    if cm is None:
+        logger.warning(f"⚠️ MemoManager is None when trying to get key '{key}', returning default: {default}")
+        return default
     return cm.get_value_from_corememory(key, default)
 
 
 def _cm_set(cm: "MemoManager", **kwargs: Dict[str, Any]) -> None:
     """Bulk update core‑memory with ``key=value`` pairs."""
+    if cm is None:
+        logger.warning(f"⚠️ MemoManager is None when trying to set values: {kwargs}")
+        return
     for k, v in kwargs.items():
         cm.update_corememory(k, v)
 
@@ -92,9 +112,25 @@ async def _send_agent_greeting(
     that subsequent returns use "Hi again…".
     """
 
+    # Validate cm parameter
+    if cm is None:
+        logger.error(f"❌ MemoManager is None in _send_agent_greeting for agent: {agent_name}")
+        return
+
     # Prevent duplicate greeting on consecutive turns.
     if agent_name == _cm_get(cm, _LAST_ANNOUNCED_KEY):
         return
+
+    # Get the agent instance to access voice configuration
+    agent = None
+    if agent_name == "Claims":
+        agent = ws.app.state.claim_intake_agent
+    elif agent_name == "General":
+        agent = ws.app.state.general_info_agent
+    
+    # Extract voice configuration from agent
+    agent_voice = getattr(agent, 'voice_name', None) if agent else None
+    agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
 
     # ------------------------------------------------------------------
     # Fetch / update counters stored in app‑state.
@@ -130,19 +166,31 @@ async def _send_agent_greeting(
     _cm_set(cm, **{_LAST_ANNOUNCED_KEY: agent_name})
 
     # ------------------------------------------------------------------
-    # Deliver greeting via correct channel.
+    # Deliver greeting via correct channel with agent-specific voice.
     # ------------------------------------------------------------------
     if is_acs:
-        logger.info("🎤 ACS greeting #%s for %s: %s", counter + 1, agent_name, greeting)
+        logger.info("🎤 ACS greeting #%s for %s (voice: %s): %s", counter + 1, agent_name, agent_voice or "default", greeting)
         await broadcast_message(ws.app.state.clients, greeting, "Assistant")
         try:
-             ws.app.state.handler.play_greeting(greeting_text=greeting)  # type: ignore[attr-defined]
+            # Pass agent voice configuration to ACS media handler
+            ws.app.state.handler.play_greeting(
+                greeting_text=greeting,
+                voice_name=agent_voice,
+                voice_style=agent_voice_style
+            )  # type: ignore[attr-defined]
         except AttributeError:
             logger.warning("Media handler lacks play_greeting(); sent text only.")
     else:
-        logger.info("💬 WS greeting #%s for %s", counter + 1, agent_name)
+        logger.info("💬 WS greeting #%s for %s (voice: %s)", counter + 1, agent_name, agent_voice or "default")
         await ws.send_text(json.dumps({"type": "status", "message": greeting}))
-        await send_tts_audio(greeting, ws, latency_tool=ws.state.lt)
+        # Pass agent voice configuration to WebSocket TTS
+        await send_tts_audio(
+            greeting, 
+            ws, 
+            latency_tool=ws.state.lt,
+            voice_name=agent_voice,
+            voice_style=agent_voice_style
+        )
 
 
 @asynccontextmanager
@@ -171,15 +219,22 @@ async def run_auth_agent(
     • On **emergency escalation**, set `escalated=True`, store reason, and return.  
     • On **successful auth**, cache caller info & chosen specialist.
     """
+    
+    # Validate cm parameter
+    if cm is None:
+        logger.error("❌ MemoManager is None in run_auth_agent")
+        raise ValueError("MemoManager (cm) parameter cannot be None in run_auth_agent")
+    
     auth_agent = ws.app.state.auth_agent
 
     async with track_latency(ws.state.lt, "auth_agent", ws.app.state.redis):
         result: Dict[str, Any] | Any = await auth_agent.respond(
             cm, utterance, ws, is_acs=is_acs
         )
-        logger.info("🚨 Auth result: %s", result)
+        logger.info("🚨 Auth result type: %s, value: %s", type(result).__name__, result)
 
     if isinstance(result, dict) and result.get("handoff") == "human_agent":
+        logger.info("🔀 Processing human_agent handoff...")
         reason = result.get("reason") or result.get("escalation_reason")
         _cm_set(
             cm,
@@ -192,14 +247,16 @@ async def run_auth_agent(
         )
         return  # session termination handled upstream
     
-    if result is not None: 
+    logger.info("🔍 Processing auth result - type: %s, is_dict: %s", type(result).__name__, isinstance(result, dict))
+    
+    if isinstance(result, dict) and result.get("authenticated"):
         caller_name: str | None = result.get("caller_name")
         policy_id: str | None = result.get("policy_id")
         claim_intent: str | None = result.get("claim_intent")
         topic: str | None = result.get("topic")
         intent: str = result.get("intent", "general")
         active_agent: str = "Claims" if intent == "claims" else "General"
-
+                
         _cm_set(
             cm,
             authenticated=True,
@@ -215,8 +272,26 @@ async def run_auth_agent(
             cm.session_id,
             caller_name,
             policy_id,
-            active_agent,
+            active_agent
         )
+
+        # Store voice configuration for the active agent in memory
+        if active_agent == "Claims":
+            agent = ws.app.state.claim_intake_agent
+        else:  # General
+            agent = ws.app.state.general_info_agent
+        
+        agent_voice = getattr(agent, 'voice_name', None) if agent else None
+        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        
+        _cm_set(
+            cm,
+            current_agent_voice=agent_voice,
+            current_agent_voice_style=agent_voice_style,
+        )
+
+        # Send greeting with the correct agent voice
+        await _send_agent_greeting(cm, ws, active_agent, is_acs)
 
 # -------------------------------------------------------------
 # 2.  Specialist agents
@@ -230,6 +305,11 @@ async def run_general_agent(
     is_acs: bool,
 ) -> None:
     """Handle a turn with the *GeneralInfoAgent*."""
+
+    # Validate cm parameter
+    if cm is None:
+        logger.error("❌ MemoManager is None in run_general_agent")
+        raise ValueError("MemoManager (cm) parameter cannot be None in run_general_agent")
 
     agent = ws.app.state.general_info_agent
     caller_name = _cm_get(cm, "caller_name")
@@ -266,6 +346,11 @@ async def run_claims_agent(
     is_acs: bool,
 ) -> None:
     """Handle a turn with the *ClaimIntakeAgent*."""
+
+    # Validate cm parameter
+    if cm is None:
+        logger.error("❌ MemoManager is None in run_claims_agent")
+        raise ValueError("MemoManager (cm) parameter cannot be None in run_claims_agent")
 
     agent = ws.app.state.claim_intake_agent
     caller_name = _cm_get(cm, "caller_name")
@@ -309,6 +394,11 @@ async def _process_tool_response(  # pylint: disable=too-complex
 ) -> None:
     """Inspect structured tool outputs and update core‑memory accordingly."""
 
+    # Validate cm parameter
+    if cm is None:
+        logger.error("❌ MemoManager is None in _process_tool_response")
+        return
+
     if not isinstance(resp, dict):
         return
 
@@ -330,6 +420,21 @@ async def _process_tool_response(  # pylint: disable=too-complex
         new_agent: str = "Claims" if intent == "claims" else "General"
         _cm_set(cm, active_agent=new_agent, claim_intent=claim_intent, topic=topic)
 
+        # Update voice configuration for the new agent
+        if new_agent == "Claims":
+            agent = ws.app.state.claim_intake_agent
+        else:  # General
+            agent = ws.app.state.general_info_agent
+        
+        agent_voice = getattr(agent, 'voice_name', None) if agent else None
+        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        
+        _cm_set(
+            cm,
+            current_agent_voice=agent_voice,
+            current_agent_voice_style=agent_voice_style,
+        )
+
         if new_agent != prev_agent:
             logger.info("🔀 Routed via intent → %s", new_agent)
             await _send_agent_greeting(cm, ws, new_agent, is_acs)
@@ -339,10 +444,23 @@ async def _process_tool_response(  # pylint: disable=too-complex
     if handoff_type == "ai_agent" and target_agent:
         if "Claim" in target_agent:
             new_agent = "Claims"
+            agent = ws.app.state.claim_intake_agent
             _cm_set(cm, active_agent=new_agent, claim_intent=claim_intent)
         else:
             new_agent = "General"
+            agent = ws.app.state.general_info_agent
             _cm_set(cm, active_agent=new_agent, topic=topic)
+        
+        # Update voice configuration for the new agent
+        agent_voice = getattr(agent, 'voice_name', None) if agent else None
+        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        
+        _cm_set(
+            cm,
+            current_agent_voice=agent_voice,
+            current_agent_voice_style=agent_voice_style,
+        )
+        
         logger.info("🔀 Hand‑off → %s", new_agent)
         if new_agent != prev_agent:
             await _send_agent_greeting(cm, ws, new_agent, is_acs)
@@ -384,6 +502,11 @@ async def route_turn(
     * Detecting when a live human transfer is required.
     * Persisting conversation state to Redis for resilience.
     """
+    
+    # Validate cm parameter to prevent NameError
+    if cm is None:
+        logger.error("❌ MemoManager (cm) is None - cannot process orchestration")
+        raise ValueError("MemoManager (cm) parameter cannot be None")
     
     # Extract correlation context
     call_connection_id, session_id = _get_correlation_context(ws, cm)

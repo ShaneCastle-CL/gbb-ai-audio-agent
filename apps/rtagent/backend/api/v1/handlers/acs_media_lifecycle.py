@@ -518,6 +518,11 @@ class RouteTurnThread:
             try:
                 logger.info(f"🤖 Processing speech through orchestrator: {event.text}")
                 
+                # Check if memory manager is available
+                if not self.memory_manager:
+                    logger.error("❌ Memory manager is None, cannot process speech event")
+                    return
+                
                 # Delegate to orchestrator using the new simplified signature
                 if self.orchestrator_func:
                     await self.orchestrator_func(
@@ -539,10 +544,8 @@ class RouteTurnThread:
                     )
                 
             except Exception as e:
-                if isinstance(span.status, Status) and span.status.status_code == StatusCode.ERROR:
+                if hasattr(span, 'set_status'):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
-                else:
-                    span.set_status(Status(StatusCode.ERROR))
                 logger.error(f"Error processing speech: {e}")
     
     async def _process_direct_text_playback(self, event: SpeechEvent, playback_type: str = "audio"):
@@ -583,6 +586,8 @@ class RouteTurnThread:
                         blocking=False,
                         latency_tool=latency_tool,
                         stream_mode=StreamMode.MEDIA,
+                        voice_name=None,  # Use default voice
+                        voice_style=None,  # Use default style
                     )
                 )
                 
@@ -593,14 +598,13 @@ class RouteTurnThread:
                 logger.info(f"✅ {playback_type.capitalize()} playback completed successfully")
                 
             except asyncio.CancelledError:
-                span.set_status(Status(StatusCode.OK))  # Cancellation is normal behavior
+                if hasattr(span, 'set_status'):
+                    span.set_status(Status(StatusCode.OK))  # Cancellation is normal behavior
                 logger.info(f"🛑 {playback_type.capitalize()} playback cancelled (barge-in)")
                 raise  # Re-raise to complete cancellation
             except Exception as e:
-                if isinstance(span.status, Status) and span.status.status_code == StatusCode.ERROR:
+                if hasattr(span, 'set_status'):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
-                else:
-                    span.set_status(Status(StatusCode.ERROR))
                 logger.error(f"❌ Error playing {playback_type}: {e}")
             finally:
                 # Clear the current response task reference
@@ -1035,10 +1039,8 @@ class ACSMediaHandler:
                 logger.info("✅ Three-thread ACS media handler started successfully")
                 
             except Exception as e:
-                if isinstance(span.status, Status) and span.status.status_code == StatusCode.ERROR:
+                if hasattr(span, 'set_status'):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
-                else:
-                    span.set_status(Status(StatusCode.ERROR))
                 logger.error(f"❌ Failed to start media handler: {e}")
                 await self.stop()  # Clean shutdown on startup failure
                 raise
@@ -1081,10 +1083,8 @@ class ACSMediaHandler:
                 logger.info("✅ Three-thread ACS media handler stopped successfully")
                 
             except Exception as e:
-                if isinstance(span.status, Status) and span.status.status_code == StatusCode.ERROR:
+                if hasattr(span, 'set_status'):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
-                else:
-                    span.set_status(Status(StatusCode.ERROR))
                 logger.error(f"❌ Error stopping media handler: {e}")
     
     @property

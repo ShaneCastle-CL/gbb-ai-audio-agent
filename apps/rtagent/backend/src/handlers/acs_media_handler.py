@@ -247,8 +247,16 @@ class ACSMediaHandler:
     def play_greeting(
         self,
         greeting_text: str = GREETING,
+        voice_name: Optional[str] = None,
+        voice_style: Optional[str] = None,
     ):
-        """Send a greeting message to ACS using TTS (CLIENT)."""
+        """Send a greeting message to ACS using TTS (CLIENT).
+        
+        Args:
+            greeting_text: Text to speak
+            voice_name: Optional agent-specific voice name
+            voice_style: Optional agent-specific voice style
+        """
         if self.enable_tracing:
             with tracer.start_as_current_span(
                 "acs_media_handler.play_greeting",
@@ -258,11 +266,11 @@ class ACSMediaHandler:
                 ),
             ):
                 trace.get_current_span().set_attribute("pipeline.stage", "media -> tts (greeting)")
-                self._play_greeting_internal(greeting_text)
+                self._play_greeting_internal(greeting_text, voice_name, voice_style)
         else:
-            self._play_greeting_internal(greeting_text)
+            self._play_greeting_internal(greeting_text, voice_name, voice_style)
 
-    def _play_greeting_internal(self, greeting_text: str):
+    def _play_greeting_internal(self, greeting_text: str, voice_name: Optional[str] = None, voice_style: Optional[str] = None):
         try:
             self.playback_task = asyncio.create_task(
                 send_response_to_acs(
@@ -271,6 +279,8 @@ class ACSMediaHandler:
                     blocking=False,
                     latency_tool=self.latency_tool,
                     stream_mode=StreamMode.MEDIA,
+                    voice_name=voice_name,
+                    voice_style=voice_style,
                 )
             )
         except Exception as e:

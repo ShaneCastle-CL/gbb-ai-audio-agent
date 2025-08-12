@@ -189,11 +189,23 @@ class TracedOperation:
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.span:
+        if self.span and hasattr(self.span, 'set_status'):
             if exc_type:
-                self.span.set_status(Status(StatusCode.ERROR, str(exc_val)))
-                self.log_error(f"Operation failed: {exc_val}")
+                try:
+                    self.span.set_status(Status(StatusCode.ERROR, str(exc_val)))
+                    self.log_error(f"Operation failed: {exc_val}")
+                except AttributeError:
+                    # Handle NonRecordingSpan which doesn't have set_status
+                    self.log_error(f"Operation failed (tracing disabled): {exc_val}")
             self.span.end()
+        elif self.span:
+            # Handle spans that don't support set_status
+            if exc_type:
+                self.log_error(f"Operation failed (span without status): {exc_val}")
+            try:
+                self.span.end()
+            except AttributeError:
+                pass
     
     def log_info(self, message: str, **kwargs):
         """Log info with consistent context."""
@@ -227,8 +239,12 @@ class TracedOperation:
     
     def set_error(self, error_message: str):
         """Mark span as error with message."""
-        if self.span:
-            self.span.set_status(Status(StatusCode.ERROR, error_message))
+        if self.span and hasattr(self.span, 'set_status'):
+            try:
+                self.span.set_status(Status(StatusCode.ERROR, error_message))
+            except AttributeError:
+                # Handle NonRecordingSpan which doesn't have set_status
+                pass
 
 
 def trace_acs_operation(

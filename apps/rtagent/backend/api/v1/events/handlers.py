@@ -373,13 +373,13 @@ class CallEventHandlers:
             if not context.acs_caller or not context.memo_manager:
                 return
             
-            from apps.rtagent.backend.settings import GREETING, VOICE_TTS
+            from apps.rtagent.backend.settings import GREETING, GREETING_VOICE_TTS
             from azure.communication.callautomation import TextSource
             
             # Create greeting source
             text_source = TextSource(
                 text=GREETING,
-                voice_name=VOICE_TTS,
+                voice_name=GREETING_VOICE_TTS,
                 custom_voice_endpoint_id=None
             )
             
