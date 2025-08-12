@@ -988,6 +988,39 @@ class ACSHandler:
         logger.info(f"Disconnect reason: {disconnect_reason}")
         logger.info(f"Participants at disconnect: {participants}")
 
+        # Signal disconnect event for session terminator
+        try:
+            # Import here to avoid circular imports
+            from fastapi import Request
+            # Try to get WebSocket app state to set disconnect event
+            # This is a bit hacky but necessary for event signaling
+            if hasattr(cm, '_ws_app_state'):  # Custom attribute we could add
+                app_state = cm._ws_app_state
+                if hasattr(app_state, 'acs_disconnect_events'):
+                    disconnect_events = app_state.acs_disconnect_events
+                    if cid in disconnect_events:
+                        disconnect_events[cid].set()
+                        logger.info(f"Set disconnect event for call {cid}")
+        except Exception as e:
+            logger.debug(f"Could not set disconnect event for call {cid}: {e}")
+
+        # Clean up active handlers registry
+        try:
+            from apps.rtagent.backend.api.v1.endpoints.media import _active_handlers
+            if cid in _active_handlers:
+                handler = _active_handlers[cid]
+                logger.info(f"Stopping media handler for disconnected call {cid}")
+                try:
+                    if hasattr(handler, 'stop') and callable(handler.stop):
+                        await handler.stop()
+                except Exception as handler_exc:
+                    logger.error(f"Failed to stop media handler during disconnect: {handler_exc}")
+                
+                del _active_handlers[cid]
+                logger.info(f"Removed disconnected call {cid} from active handlers")
+        except Exception as cleanup_exc:
+            logger.debug(f"Could not cleanup active handlers for call {cid}: {cleanup_exc}")
+
         # Clean up conversation state
         try:
             cm.persist_to_redis(redis_mgr)
