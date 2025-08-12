@@ -83,6 +83,15 @@ jobs:
       - name: Configure Terraform Backend
         run: |
           echo "🔧 Configuring Terraform backend for remote state..."
+          
+          # Set required Terraform ARM environment variables for OIDC
+          export ARM_CLIENT_ID="${{ env.AZURE_CLIENT_ID }}"
+          export ARM_TENANT_ID="${{ env.AZURE_TENANT_ID }}"
+          export ARM_SUBSCRIPTION_ID="${{ env.AZURE_SUBSCRIPTION_ID }}"
+          export ARM_USE_OIDC=true
+          
+          echo "✅ ARM environment variables configured for OIDC authentication"
+          
           cat > infra/terraform/backend.tf << EOF
           terraform {
             backend "azurerm" {
@@ -95,6 +104,11 @@ jobs:
           }
           EOF
           echo "✅ Backend configuration created successfully"
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
 
       - name: Configure AZD Environment
         run: |
@@ -117,9 +131,19 @@ jobs:
 
       - name: Provision Infrastructure
         run: azd provision --no-prompt
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
 
       - name: Deploy Application
         run: azd deploy --no-prompt
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
         
       - name: Remove GitHub Runner IP from Whitelist
         if: always()
