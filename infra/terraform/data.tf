@@ -190,12 +190,6 @@ resource "azapi_resource" "cosmos_backend_db_user" {
     }
   }
   lifecycle {
-    # Prevent destruction to avoid long-running delete operations
-    # This role assignment will only be created when a new Cosmos DB instance is provisioned
-    # To actually remove role assignments, set var.prevent_cosmos_role_destroy = false
-    prevent_destroy = var.prevent_cosmos_role_destroy
-
-    # Suppress diffs for output and principalType casing
     ignore_changes = [
       body["properties"]["identityProvider"]["properties"]["principalType"],
       output["properties"]["provisioningState"],
@@ -229,11 +223,6 @@ resource "azapi_resource" "cosmos_principal_user" {
     }
   }
   lifecycle {
-    # Prevent destruction to avoid long-running delete operations
-    # This role assignment will only be created when a new Cosmos DB instance is provisioned
-    # To actually remove role assignments, set var.prevent_cosmos_role_destroy = false
-    prevent_destroy = var.prevent_cosmos_role_destroy
-
     ignore_changes = [
       body["properties"]["identityProvider"]["properties"]["principalType"],
       output["properties"]["provisioningState"],
