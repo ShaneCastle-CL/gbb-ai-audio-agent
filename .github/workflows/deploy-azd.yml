@@ -169,10 +169,7 @@ jobs:
             }
           }
           EOF
-
-          azd env set RS_RESOURCE_GROUP ${{ env.RS_RESOURCE_GROUP }}
-          azd env set RS_STORAGE_ACCOUNT ${{ env.RS_STORAGE_ACCOUNT }}
-          azd env set RS_CONTAINER_NAME ${{ env.RS_CONTAINER_NAME }}
+          
           echo "✅ Backend configured"
         env:
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
@@ -185,7 +182,12 @@ jobs:
         run: |
           # Use azd to run terraform plan
           echo "🔍 Running infrastructure preview..."
-          
+          # Ensure the correct azd environment exists and is set
+          if ! azd env list --output json | jq -e ".[] | select(.name==\"${{ env.AZURE_ENV_NAME }}\")" > /dev/null; then
+            echo "🔧 Creating azd environment: ${{ env.AZURE_ENV_NAME }}"
+            azd env new "${{ env.AZURE_ENV_NAME }}" --no-prompt
+          fi
+          azd env select "${{ env.AZURE_ENV_NAME }}"
           azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" || \
             azd provision --no-prompt --help | grep -i preview || \
             echo "⚠️ Plan preview not available, would provision infrastructure"
