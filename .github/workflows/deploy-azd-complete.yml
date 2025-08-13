@@ -23,6 +23,25 @@ on:
           - up         # Both infrastructure and application
           - down       # Destroy everything
 
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/terraform/**'
+      - 'src/**'
+      - 'apps/**'
+      - 'azure.yaml'
+      - '.github/workflows/deploy-azd.yml'
+      - '.github/workflows/deploy-azd-complete.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/terraform/**'
+      - 'azure.yaml'
+      - '.github/workflows/deploy-azd.yml'
+      - '.github/workflows/deploy-azd-complete.yml'
+
 jobs:
   # ============================================================================
   # COMPLETE DEPLOYMENT WITH AZD
