@@ -874,7 +874,8 @@ class MainEventLoop:
                 
                 # Warn if processing is taking too long
                 if total_time > 0.020:  # 20ms threshold for real-time audio (50 fps)
-                    logger.warning(f"⚠️ Audio chunk processing slow: {total_time:.3f}s for {len(audio_bytes)} bytes")
+                    pass
+                    # logger.warning(f"⚠️ Audio chunk processing slow: {total_time:.3f}s for {len(audio_bytes)} bytes")
                     
             except asyncio.TimeoutError:
                 timeout_duration = time.time() - executor_start

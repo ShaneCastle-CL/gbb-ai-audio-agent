@@ -52,7 +52,7 @@ class DynamicDocsManager:
             str: Markdown-formatted description.
         """
         return (
-            "## Real-Time Voice Agent API powered by Azure Communication Services\n\n"
+            "## Real-Time Agentic Voice API powered by Azure Communication Services\n\n"
             "### Overview\n"
             "This API enables low-latency, real-time voice interactions with advanced call management, event processing, and media streaming capabilities.\n\n"
             "### Features\n"

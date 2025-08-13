@@ -253,6 +253,19 @@ const styles = {
     whiteSpace: "pre-wrap",
   },
   
+  // Agent name label (appears above specialist bubbles)
+  agentNameLabel: {
+    fontSize: "10px",
+    fontWeight: "400",
+    color: "#64748b",
+    opacity: 0.7,
+    marginBottom: "2px",
+    marginLeft: "8px",
+    letterSpacing: "0.5px",
+    textTransform: "none",
+    fontStyle: "italic",
+  },
+  
   // Control section - blended footer design
   controlSection: {
     padding: "12px",
@@ -1486,6 +1499,8 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
 const ChatBubble = ({ message }) => {
   const { speaker, text, isTool, streaming } = message;
   const isUser = speaker === "User";
+  const isSpecialist = speaker?.includes("Specialist");
+  const isAuthAgent = speaker === "Auth Agent";
   
   if (isTool) {
     return (
@@ -1504,6 +1519,12 @@ const ChatBubble = ({ message }) => {
   
   return (
     <div style={isUser ? styles.userMessage : styles.assistantMessage}>
+      {/* Show agent name for specialist agents and auth agent */}
+      {!isUser && (isSpecialist || isAuthAgent) && (
+        <div style={styles.agentNameLabel}>
+          {speaker}
+        </div>
+      )}
       <div style={isUser ? styles.userBubble : styles.assistantBubble}>
         {text.split("\n").map((line, i) => (
           <div key={i}>{line}</div>

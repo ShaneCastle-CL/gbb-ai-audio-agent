@@ -17,7 +17,8 @@ model:
 
 voice:
   name: en-US-Ava:DragonHDLatestNeural # Voice for TTS output
-  style: conversational # Voice style (conversational, professional, friendly)
+  style: chat # Voice style (chat, professional, friendly)
+  rate: "+5%" # Speech rate (slower for authentication)
 
 prompts:
   path: voice_agent_authentication.jinja # imput prompt

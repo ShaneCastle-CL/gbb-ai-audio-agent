@@ -177,6 +177,9 @@ class V1RealtimeHandler:
                 auth_agent = websocket.app.state.auth_agent
                 cm.append_to_history(auth_agent.name, "assistant", GREETING)
                 
+                # Broadcast greeting to dashboard with Auth Agent label
+                await broadcast_message(websocket.app.state.clients, GREETING, "Auth Agent")
+                
                 # Send greeting audio
                 with trace_acs_dependency(
                     tracer, logger, "tts_service", "send_greeting",

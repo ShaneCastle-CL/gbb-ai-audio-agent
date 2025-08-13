@@ -19,7 +19,8 @@ model:
 
 voice:
   name: en-US-Andrew2:DragonHDLatestNeural # Voice for TTS output
-  style: conversational # Voice style (conversational, professional, friendly)
+  style: chat # Voice style (chat, professional, friendly)
+  rate: "+10%" # Speech rate (slightly faster for claim intake)
 
 prompts:
   path: fnol_intake_agent.jinja

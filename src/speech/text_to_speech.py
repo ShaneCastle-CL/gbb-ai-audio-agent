@@ -50,9 +50,23 @@ def auto_style(lang_code: str) -> Dict[str, str]:
 
 
 def ssml_voice_wrap(
-    voice: str, language: str, sentences: List[str], sanitizer: Callable[[str], str]
+    voice: str, 
+    language: str, 
+    sentences: List[str], 
+    sanitizer: Callable[[str], str],
+    style: str = None,
+    rate: str = None
 ) -> str:
-    """Build one SSML doc with a single <voice> tag for efficiency."""
+    """Build one SSML doc with a single <voice> tag for efficiency.
+    
+    Args:
+        voice: Voice name to use
+        language: Language code
+        sentences: List of text sentences
+        sanitizer: Function to sanitize text for XML
+        style: Optional voice style
+        rate: Optional speech rate
+    """
     body = []
     for seg in sentences:
         try:
@@ -62,13 +76,15 @@ def ssml_voice_wrap(
         attrs = auto_style(lang)
         inner = sanitizer(seg)
 
-        # optional prosody
-        if rate := attrs.get("rate"):
-            inner = f'<prosody rate="{rate}">{inner}</prosody>'
+        # Apply custom rate or auto-detected rate
+        prosody_rate = rate or attrs.get("rate")
+        if prosody_rate:
+            inner = f'<prosody rate="{prosody_rate}">{inner}</prosody>'
 
-        # optional style
-        if style := attrs.get("style"):
-            inner = f'<mstts:express-as style="{style}">{inner}</mstts:express-as>'
+        # Apply custom style or auto-detected style
+        voice_style = style or attrs.get("style")
+        if voice_style:
+            inner = f'<mstts:express-as style="{voice_style}">{inner}</mstts:express-as>'
 
         # optional language switch
         if lang != language:
@@ -288,13 +304,20 @@ class SpeechSynthesizer:
         """
         return html.escape(text, quote=True)
 
-    def start_speaking_text(self, text: str) -> None:
+    def start_speaking_text(self, text: str, voice: str = None, rate: str = "15%", style: str = None) -> None:
         """
         Synthesize and play text through the server's speakers (if available).
         In headless environments, this will log a warning and skip playback.
+        
+        Args:
+            text: Text to synthesize
+            voice: Voice name (defaults to self.voice)
+            rate: Speech rate (defaults to "15%")
+            style: Voice style (defaults to None)
         """
         # Check environment variable to determine if playback is enabled
         playback_env = os.getenv("TTS_ENABLE_LOCAL_PLAYBACK", "true").lower()
+        voice = voice or self.voice
         if playback_env not in ("1", "true", "yes"):
             logger.info(
                 "TTS_ENABLE_LOCAL_PLAYBACK is set to false; skipping audio playback."
@@ -312,7 +335,7 @@ class SpeechSynthesizer:
 
             # Service specific attributes
             self._session_span.set_attribute("tts.region", self.region)
-            self._session_span.set_attribute("tts.voice", self.voice)
+            self._session_span.set_attribute("tts.voice", voice or self.voice)
             self._session_span.set_attribute("tts.language", self.language)
             self._session_span.set_attribute("tts.text_length", len(text))
             self._session_span.set_attribute("tts.operation_type", "speaker_synthesis")
@@ -343,18 +366,19 @@ class SpeechSynthesizer:
 
             # Make this span current for the duration
             with trace.use_span(self._session_span):
-                self._start_speaking_text_internal(text)
+                self._start_speaking_text_internal(text, voice, rate, style)
         else:
-            self._start_speaking_text_internal(text)
+            self._start_speaking_text_internal(text, voice, rate, style)
 
-    def _start_speaking_text_internal(self, text: str) -> None:
+    def _start_speaking_text_internal(self, text: str, voice: str = None, rate: str = "15%", style: str = None) -> None:
         """Internal method to perform speaker synthesis with tracing events"""
+        voice = voice or self.voice
         try:
             # Add event for speaker synthesis start
             if self._session_span:
                 self._session_span.add_event(
                     "tts_speaker_synthesis_started",
-                    {"text_length": len(text), "voice": self.voice},
+                    {"text_length": len(text), "voice": voice},
                 )
 
             speaker = self._create_speaker_synthesizer()
@@ -377,12 +401,17 @@ class SpeechSynthesizer:
                 text[:50] + "...",
             )
 
+            # Build SSML with consistent voice, rate, and style support
+            sanitized_text = self._sanitize(text)
+            inner_content = f'<prosody rate="{rate}" pitch="default">{sanitized_text}</prosody>'
+            
+            if style:
+                inner_content = f'<mstts:express-as style="{style}">{inner_content}</mstts:express-as>'
+
             ssml = f"""
                 <speak version="1.0" xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="en-US">
-                    <voice name="{self.voice}">
-                        <prosody rate="15%" pitch="default">
-                            {self._sanitize(text)}
-                        </prosody>
+                    <voice name="{voice}">
+                        {inner_content}
                     </voice>
                 </speak>"""
 
@@ -422,11 +451,18 @@ class SpeechSynthesizer:
             except Exception as e:
                 logger.warning(f"Could not stop speech synthesis: {e}")
 
-    def synthesize_speech(self, text: str) -> bytes:
+    def synthesize_speech(self, text: str, voice: str = None, style: str = None, rate: str = None) -> bytes:
         """
         Synthesizes text to speech in memory (returning WAV bytes).
         Does NOT play audio on server speakers.
+        
+        Args:
+            text: Text to synthesize
+            voice: Voice name (defaults to self.voice)
+            style: Voice style
+            rate: Speech rate
         """
+        voice = voice or self.voice
         # Start session-level span for synthesis if tracing is enabled
         if self.enable_tracing and self.tracer:
             self._session_span = self.tracer.start_span(
@@ -449,24 +485,25 @@ class SpeechSynthesizer:
 
             # Make this span current for the duration
             with trace.use_span(self._session_span):
-                return self._synthesize_speech_internal(text)
+                return self._synthesize_speech_internal(text, voice, style, rate)
         else:
-            return self._synthesize_speech_internal(text)
+            return self._synthesize_speech_internal(text, voice, style, rate)
 
-    def _synthesize_speech_internal(self, text: str) -> bytes:
+    def _synthesize_speech_internal(self, text: str, voice: str = None, style: str = None, rate: str = None) -> bytes:
         """Internal method to perform synthesis with tracing events"""
+        voice = voice or self.voice
         try:
             # Add event for synthesis start
             if self._session_span:
                 self._session_span.add_event(
                     "tts_synthesis_started",
-                    {"text_length": len(text), "voice": self.voice},
+                    {"text_length": len(text), "voice": voice},
                 )
 
             # Create speech config for memory synthesis
             speech_config = self.cfg
             speech_config.speech_synthesis_language = self.language
-            speech_config.speech_synthesis_voice_name = self.voice
+            speech_config.speech_synthesis_voice_name = voice
             speech_config.set_speech_synthesis_output_format(
                 speechsdk.SpeechSynthesisOutputFormat.Riff48Khz16BitMonoPcm
             )
@@ -482,7 +519,25 @@ class SpeechSynthesizer:
             if self._session_span:
                 self._session_span.add_event("tts_synthesizer_created")
 
-            result = synthesizer.speak_text_async(text).get()
+            # Build SSML if style or rate are specified, otherwise use plain text
+            if style or rate:
+                sanitized_text = self._sanitize(text)
+                inner_content = sanitized_text
+                
+                if rate:
+                    inner_content = f'<prosody rate="{rate}">{inner_content}</prosody>'
+                    
+                if style:
+                    inner_content = f'<mstts:express-as style="{style}">{inner_content}</mstts:express-as>'
+                    
+                ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="{voice}">
+        {inner_content}
+    </voice>
+</speak>"""
+                result = synthesizer.speak_ssml_async(ssml).get()
+            else:
+                result = synthesizer.speak_text_async(text).get()
 
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                 if self._session_span:
@@ -527,16 +582,28 @@ class SpeechSynthesizer:
             return b""
 
     def synthesize_to_base64_frames(
-        self, text: str, sample_rate: int = 16000
+        self, 
+        text: str, 
+        sample_rate: int = 16000,
+        voice: str = None,
+        style: str = None,
+        rate: str = None
     ) -> list[str]:
         """
         Synthesize `text` via Azure TTS into raw 16-bit PCM mono at either 16 kHz or 24 kHz,
         then split into 20 ms frames (50 fps), returning each frame as a base64 string.
 
-        - sample_rate: 16000 or 24000
-        - frame_size:  0.02s * sample_rate * 2 bytes/sample
-                    =  640 bytes @16 kHz, 960 bytes @24 kHz
+        Args:
+            text: Text to synthesize
+            sample_rate: 16000 or 24000
+            voice: Voice name (defaults to self.voice)
+            style: Voice style
+            rate: Speech rate
+        
+        Returns:
+            List of base64-encoded audio frames
         """
+        voice = voice or self.voice
         # Start session-level span for frame synthesis if tracing is enabled
         if self.enable_tracing and self.tracer:
             self._session_span = self.tracer.start_span(
@@ -560,14 +627,20 @@ class SpeechSynthesizer:
 
             # Make this span current for the duration
             with trace.use_span(self._session_span):
-                return self._synthesize_to_base64_frames_internal(text, sample_rate)
+                return self._synthesize_to_base64_frames_internal(text, sample_rate, voice, style, rate)
         else:
-            return self._synthesize_to_base64_frames_internal(text, sample_rate)
+            return self._synthesize_to_base64_frames_internal(text, sample_rate, voice, style, rate)
 
     def _synthesize_to_base64_frames_internal(
-        self, text: str, sample_rate: int
+        self, 
+        text: str, 
+        sample_rate: int,
+        voice: str = None,
+        style: str = None,
+        rate: str = None
     ) -> list[str]:
         """Internal method to perform frame synthesis with tracing events"""
+        voice = voice or self.voice
         try:
             # Add event for synthesis start
             if self._session_span:
@@ -575,7 +648,7 @@ class SpeechSynthesizer:
                     "tts_frame_synthesis_started",
                     {
                         "text_length": len(text),
-                        "voice": self.voice,
+                        "voice": voice,
                         "sample_rate": sample_rate,
                     },
                 )
@@ -593,7 +666,7 @@ class SpeechSynthesizer:
             logger.debug(f"Creating speech config for TTS synthesis")
             speech_config = self.cfg
             speech_config.speech_synthesis_language = self.language
-            speech_config.speech_synthesis_voice_name = self.voice
+            speech_config.speech_synthesis_voice_name = voice
             speech_config.set_speech_synthesis_output_format(sdk_format)
 
             if self._session_span:
@@ -607,8 +680,27 @@ class SpeechSynthesizer:
             if self._session_span:
                 self._session_span.add_event("tts_frame_synthesizer_created")
 
-            logger.debug(f"Synthesizing text with Azure TTS: {text[:100]}...")
-            result = synth.speak_text_async(text).get()
+            logger.debug(f"Synthesizing text with Azure TTS (voice: {voice}): {text[:100]}...")
+            
+            # Build SSML if style or rate are specified, otherwise use plain text
+            if style or rate:
+                sanitized_text = self._sanitize(text)
+                inner_content = sanitized_text
+                
+                if rate:
+                    inner_content = f'<prosody rate="{rate}">{inner_content}</prosody>'
+                    
+                if style:
+                    inner_content = f'<mstts:express-as style="{style}">{inner_content}</mstts:express-as>'
+                    
+                ssml = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="{voice}">
+        {inner_content}
+    </voice>
+</speak>"""
+                result = synth.speak_ssml_async(ssml).get()
+            else:
+                result = synth.speak_text_async(text).get()
 
             # 3) Check result
             if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
@@ -733,13 +825,27 @@ class SpeechSynthesizer:
     def synthesize_to_pcm(
         self,
         text: str,
-        voice: str = "en-US-JennyMultilingualNeural",
+        voice: str = None,
         sample_rate: int = 16000,
-        style: str = "chat",
-        rate: str = "+3%",
+        style: str = None,
+        rate: str = None,
     ) -> bytes:
+        """
+        Synthesize text to PCM bytes with consistent voice parameter support.
+        
+        Args:
+            text: Text to synthesize
+            voice: Voice name (defaults to self.voice)
+            sample_rate: Sample rate (16000 or 24000)
+            style: Voice style
+            rate: Speech rate
+        """
+        voice = voice or self.voice
+        style = style or "chat"
+        rate = rate or "+3%"
+        
         speech_config = self.cfg
-        speech_config.speech_synthesis_voice_name = voice  # Use the voice parameter, not self.voice
+        speech_config.speech_synthesis_voice_name = voice
         speech_config.set_speech_synthesis_output_format(
             {
                 16000: speechsdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm,
@@ -747,11 +853,13 @@ class SpeechSynthesizer:
             }[sample_rate]
         )
 
-        # Build SSML with style support, similar to ssml_voice_wrap function
+        # Build SSML with consistent style support
         sanitized_text = self._sanitize(text)
+        inner_content = sanitized_text
         
         # Apply prosody rate if specified
-        inner_content = f'<prosody rate="{rate}">{sanitized_text}</prosody>' if rate else sanitized_text
+        if rate:
+            inner_content = f'<prosody rate="{rate}">{inner_content}</prosody>'
         
         # Apply style if specified
         if style:

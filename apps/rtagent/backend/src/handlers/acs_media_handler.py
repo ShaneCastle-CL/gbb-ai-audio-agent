@@ -249,6 +249,7 @@ class ACSMediaHandler:
         greeting_text: str = GREETING,
         voice_name: Optional[str] = None,
         voice_style: Optional[str] = None,
+        voice_rate: Optional[str] = None,
     ):
         """Send a greeting message to ACS using TTS (CLIENT).
         
@@ -266,12 +267,21 @@ class ACSMediaHandler:
                 ),
             ):
                 trace.get_current_span().set_attribute("pipeline.stage", "media -> tts (greeting)")
-                self._play_greeting_internal(greeting_text, voice_name, voice_style)
+                self._play_greeting_internal(greeting_text, voice_name, voice_style, voice_rate)
         else:
-            self._play_greeting_internal(greeting_text, voice_name, voice_style)
+            self._play_greeting_internal(greeting_text, voice_name, voice_style, voice_rate)
 
-    def _play_greeting_internal(self, greeting_text: str, voice_name: Optional[str] = None, voice_style: Optional[str] = None):
+    def _play_greeting_internal(self, greeting_text: str, voice_name: Optional[str] = None, voice_style: Optional[str] = None, voice_rate: Optional[str] = None):
         try:
+            # Cancel any existing playback task before starting greeting
+            if self.playback_task and not self.playback_task.done():
+                logger.info("🛑 Cancelling existing playback task for greeting")
+                try:
+                    self.playback_task.cancel()
+                except Exception as cancel_error:
+                    logger.warning(f"⚠️ Failed to cancel existing playback task: {cancel_error}")
+            
+            # Create new greeting playback task
             self.playback_task = asyncio.create_task(
                 send_response_to_acs(
                     ws=self.incoming_websocket,
@@ -281,8 +291,10 @@ class ACSMediaHandler:
                     stream_mode=StreamMode.MEDIA,
                     voice_name=voice_name,
                     voice_style=voice_style,
+                    rate=voice_rate,
                 )
             )
+            logger.info(f"🎤 Started greeting playback task with voice: {voice_name or 'default'}, style: {voice_style or 'chat'}, rate: {voice_rate or '+3%'}")
         except Exception as e:
             log_with_context(
                 logger,

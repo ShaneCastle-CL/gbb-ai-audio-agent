@@ -78,7 +78,7 @@ The infrastructure consists of several interconnected Azure services that work t
 - **Custom Domain**: Requires manual DNS configuration for domain verification.
 
 ### 🤖 AI & Intelligence Layer
-- **Azure OpenAI**: GPT-4o and other models for conversational AI
+- **Azure OpenAI**: GPT-4o and other models for chat AI
 - **API Management**: Load balancing and gateway for OpenAI endpoints
 - **Event Grid**: Event-driven architecture for call state and transcript events
 - **Application Insights**: Real-time monitoring and performance analytics
@@ -192,7 +192,7 @@ The FastAPI backend must be configured for:
    - Custom voice models and multi-language support enhance the transcription and synthesis quality.
 
 5. **Speech Services → Azure OpenAI**:
-   - Azure OpenAI models (e.g., GPT-4o) process transcriptions and generate conversational responses.
+   - Azure OpenAI models (e.g., GPT-4o) process transcriptions and generate chat responses.
    - API Management ensures secure and scalable access to OpenAI endpoints.
 
 6. **Call Events → Event Grid**:

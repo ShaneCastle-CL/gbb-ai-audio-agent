@@ -27,8 +27,8 @@
             "--reload",
             "--port",
             "8010",
-            "--log-level",
-            "debug"
+            // "--log-level",
+            // "debug"
             ],
             "jinja": true,
             "env": {

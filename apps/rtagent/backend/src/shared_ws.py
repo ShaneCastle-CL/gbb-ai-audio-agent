@@ -71,10 +71,17 @@ async def send_tts_audio(
         synth: SpeechSynthesizer = ws.app.state.tts_client
         ws.state.is_synthesizing = True  # type: ignore[attr-defined]
         logger.info(f"Synthesizing text: {ws.state.is_synthesizing}...")
-        synth.start_speaking_text(text)
-
+        
         # Use agent voice if provided, otherwise fallback to default
         voice_to_use = voice_name or GREETING_VOICE_TTS
+        
+        # Start speaking with agent-specific voice parameters
+        synth.start_speaking_text(
+            text=text, 
+            voice=voice_to_use, 
+            rate=rate or "+3%", 
+            style=voice_style or "chat"
+        )
         
         # Synthesize text to PCM bytes for browser playback
         logger.debug(f"Synthesizing text (voice: {voice_to_use}): {text[:100]}...")
@@ -179,7 +186,7 @@ async def send_response_to_acs(
             
             # Add timeout and retry logic for TTS synthesis
             pcm_bytes = synth.synthesize_to_pcm(
-                text=text, voice=voice_to_use, sample_rate=16000, style=voice_style or "chat", rate=rate or "+15%"
+                text=text, voice=voice_to_use, sample_rate=16000, style=voice_style or "chat", rate=rate or "+3%"
             )
             frames = SpeechSynthesizer.split_pcm_to_base64_frames(
                 pcm_bytes, sample_rate=16000

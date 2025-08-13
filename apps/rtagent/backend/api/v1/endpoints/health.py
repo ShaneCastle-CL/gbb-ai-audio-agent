@@ -540,7 +540,7 @@ async def get_agents_info(request: Request):
             try:
                 # Get voice setting from agent configuration
                 agent_voice = getattr(agent, 'voice_name', None)
-                agent_voice_style = getattr(agent, 'voice_style', 'conversational')
+                agent_voice_style = getattr(agent, 'voice_style', 'chat')
                 
                 # Fallback to global GREETING_VOICE_TTS if agent doesn't have voice configured
                 from settings import GREETING_VOICE_TTS

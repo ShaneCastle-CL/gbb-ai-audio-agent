@@ -130,7 +130,8 @@ async def _send_agent_greeting(
     
     # Extract voice configuration from agent
     agent_voice = getattr(agent, 'voice_name', None) if agent else None
-    agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+    agent_voice_style = getattr(agent, 'voice_style', 'chat') if agent else 'chat'
+    agent_voice_rate = getattr(agent, 'voice_rate', '+3%') if agent else '+3%'
 
     # ------------------------------------------------------------------
     # Fetch / update counters stored in app‑state.
@@ -170,13 +171,21 @@ async def _send_agent_greeting(
     # ------------------------------------------------------------------
     if is_acs:
         logger.info("🎤 ACS greeting #%s for %s (voice: %s): %s", counter + 1, agent_name, agent_voice or "default", greeting)
-        await broadcast_message(ws.app.state.clients, greeting, "Assistant")
+        # Use agent-specific sender name for UI display
+        if agent_name == "Claims":
+            agent_sender = "Claims Specialist"
+        elif agent_name == "General":
+            agent_sender = "General Info"
+        else:
+            agent_sender = "Assistant"
+        await broadcast_message(ws.app.state.clients, greeting, agent_sender)
         try:
             # Pass agent voice configuration to ACS media handler
             ws.app.state.handler.play_greeting(
                 greeting_text=greeting,
                 voice_name=agent_voice,
-                voice_style=agent_voice_style
+                voice_style=agent_voice_style,
+                voice_rate=agent_voice_rate
             )  # type: ignore[attr-defined]
         except AttributeError:
             logger.warning("Media handler lacks play_greeting(); sent text only.")
@@ -189,7 +198,8 @@ async def _send_agent_greeting(
             ws, 
             latency_tool=ws.state.lt,
             voice_name=agent_voice,
-            voice_style=agent_voice_style
+            voice_style=agent_voice_style,
+            rate=agent_voice_rate
         )
 
 
@@ -282,12 +292,14 @@ async def run_auth_agent(
             agent = ws.app.state.general_info_agent
         
         agent_voice = getattr(agent, 'voice_name', None) if agent else None
-        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        agent_voice_style = getattr(agent, 'voice_style', 'chat') if agent else 'chat'
+        agent_voice_rate = getattr(agent, 'voice_rate', '+3%') if agent else '+3%'
         
         _cm_set(
             cm,
             current_agent_voice=agent_voice,
             current_agent_voice_style=agent_voice_style,
+            current_agent_voice_rate=agent_voice_rate,
         )
 
         # Send greeting with the correct agent voice
@@ -427,12 +439,14 @@ async def _process_tool_response(  # pylint: disable=too-complex
             agent = ws.app.state.general_info_agent
         
         agent_voice = getattr(agent, 'voice_name', None) if agent else None
-        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        agent_voice_style = getattr(agent, 'voice_style', 'chat') if agent else 'chat'
+        agent_voice_rate = getattr(agent, 'voice_rate', '+3%') if agent else '+3%'
         
         _cm_set(
             cm,
             current_agent_voice=agent_voice,
             current_agent_voice_style=agent_voice_style,
+            current_agent_voice_rate=agent_voice_rate,
         )
 
         if new_agent != prev_agent:
@@ -453,12 +467,14 @@ async def _process_tool_response(  # pylint: disable=too-complex
         
         # Update voice configuration for the new agent
         agent_voice = getattr(agent, 'voice_name', None) if agent else None
-        agent_voice_style = getattr(agent, 'voice_style', 'conversational') if agent else 'conversational'
+        agent_voice_style = getattr(agent, 'voice_style', 'chat') if agent else 'chat'
+        agent_voice_rate = getattr(agent, 'voice_rate', '+3%') if agent else '+3%'
         
         _cm_set(
             cm,
             current_agent_voice=agent_voice,
             current_agent_voice_style=agent_voice_style,
+            current_agent_voice_rate=agent_voice_rate,
         )
         
         logger.info("🔀 Hand‑off → %s", new_agent)

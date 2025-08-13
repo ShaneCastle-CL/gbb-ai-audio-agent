@@ -67,19 +67,24 @@ _STREAM_TRACING = (
 )  # High frequency ops
 
 
-def _get_agent_voice_config(cm: "MemoManager") -> tuple[Optional[str], Optional[str]]:
+def _get_agent_voice_config(cm: "MemoManager") -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Extract agent voice configuration from memory manager.
     
     Returns:
-        Tuple of (voice_name, voice_style) or (None, None) if not available
+        Tuple of (voice_name, voice_style, voice_rate) or (None, None, None) if not available
     """
+    if cm is None:
+        logger.warning("MemoManager is None, using default voice configuration")
+        return None, None, None
+        
     try:
         voice_name = cm.get_value_from_corememory("current_agent_voice")
-        voice_style = cm.get_value_from_corememory("current_agent_voice_style", "conversational")
-        return voice_name, voice_style
+        voice_style = cm.get_value_from_corememory("current_agent_voice_style", "chat")
+        voice_rate = cm.get_value_from_corememory("current_agent_voice_rate", "+3%")
+        return voice_name, voice_style, voice_rate
     except Exception as e:
         logger.warning(f"Failed to get agent voice config: {e}")
-        return None, None
+        return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +232,7 @@ async def process_gpt_response(  # noqa: D401
                             streaming,
                         )
                         await _emit_streaming_text(
-                            streaming, ws, is_acs, call_connection_id, session_id
+                            streaming, ws, is_acs, cm, call_connection_id, session_id
                         )
                         final_chunks.append(streaming)
                         collected.clear()
@@ -241,7 +246,7 @@ async def process_gpt_response(  # noqa: D401
         if collected:
             pending = "".join(collected).strip()
             await _emit_streaming_text(
-                pending, ws, is_acs, call_connection_id, session_id
+                pending, ws, is_acs, cm, call_connection_id, session_id
             )
             final_chunks.append(pending)
 
@@ -251,7 +256,19 @@ async def process_gpt_response(  # noqa: D401
             await push_final(ws, "assistant", full_text, is_acs=is_acs)
             # Broadcast the final assistant response to relay dashboard
             try:
-                await broadcast_message(ws.app.state.clients, full_text, "Assistant")
+                # Get current agent name for specialist display
+                active_agent = cm.get_value_from_corememory("active_agent") if cm else None
+                authenticated = cm.get_value_from_corememory("authenticated") if cm else False
+                
+                if active_agent == "Claims":
+                    agent_sender = "Claims Specialist"
+                elif active_agent == "General":
+                    agent_sender = "General Info"
+                elif not authenticated:  # Auth agent (before authentication)
+                    agent_sender = "Auth Agent"
+                else:
+                    agent_sender = "Assistant"
+                await broadcast_message(ws.app.state.clients, full_text, agent_sender)
             except Exception as e:
                 logger.error(f"Failed to broadcast assistant message: {e}")
             span.set_attribute("response.length", len(full_text))
@@ -318,9 +335,10 @@ async def _emit_streaming_text(
     text: str,
     ws: WebSocket,
     is_acs: bool,
+    cm: "MemoManager",
     call_connection_id: Optional[str] = None,
     session_id: Optional[str] = None,
-) -> None:  # noqa: D401,E501
+    ) -> None:  # noqa: D401,E501
     """Emit one assistant text chunk via either ACS or WebSocket + TTS."""
     if _STREAM_TRACING:
         span_attrs = create_service_handler_attrs(
@@ -335,7 +353,7 @@ async def _emit_streaming_text(
         
         with tracer.start_as_current_span("gpt_flow.emit_streaming_text", attributes=span_attrs) as span:
             # Get agent voice configuration
-            agent_voice, agent_voice_style = _get_agent_voice_config(cm)
+            agent_voice, agent_voice_style, agent_voice_rate = _get_agent_voice_config(cm)
             
             if is_acs:
                 span.set_attribute("output_channel", "acs")
@@ -345,7 +363,8 @@ async def _emit_streaming_text(
                     text, 
                     latency_tool=ws.state.lt,
                     voice_name=agent_voice,
-                    voice_style=agent_voice_style
+                    voice_style=agent_voice_style,
+                    rate=agent_voice_rate
                 )
             else:
                 span.set_attribute("output_channel", "websocket_tts")
@@ -354,7 +373,8 @@ async def _emit_streaming_text(
                     ws, 
                     latency_tool=ws.state.lt,
                     voice_name=agent_voice,
-                    voice_style=agent_voice_style
+                    voice_style=agent_voice_style,
+                    rate=agent_voice_rate
                 )
                 await ws.send_text(
                     json.dumps({"type": "assistant_streaming", "content": text})
@@ -364,7 +384,7 @@ async def _emit_streaming_text(
     else:
         # Fast path when high-frequency tracing is disabled
         # Get agent voice configuration
-        agent_voice, agent_voice_style = _get_agent_voice_config(cm)
+        agent_voice, agent_voice_style, agent_voice_rate = _get_agent_voice_config(cm)
         
         if is_acs:
             await send_response_to_acs(
@@ -372,7 +392,8 @@ async def _emit_streaming_text(
                 text, 
                 latency_tool=ws.state.lt,
                 voice_name=agent_voice,
-                voice_style=agent_voice_style
+                voice_style=agent_voice_style,
+                rate=agent_voice_rate
             )
         else:
             await send_tts_audio(
@@ -380,7 +401,8 @@ async def _emit_streaming_text(
                 ws, 
                 latency_tool=ws.state.lt,
                 voice_name=agent_voice,
-                voice_style=agent_voice_style
+                voice_style=agent_voice_style,
+                rate=agent_voice_rate
             )
             await ws.send_text(
                 json.dumps({"type": "assistant_streaming", "content": text})
@@ -472,8 +494,20 @@ async def _handle_tool_call(  # noqa: PLR0913
         # Broadcast tool completion to relay dashboard (only for ACS calls)
         if is_acs:
             try:
+                # Get current agent name for specialist display
+                active_agent = cm.get_value_from_corememory("active_agent") if cm else None
+                authenticated = cm.get_value_from_corememory("authenticated") if cm else False
+                
+                if active_agent == "Claims":
+                    agent_sender = "Claims Specialist"
+                elif active_agent == "General":
+                    agent_sender = "General Info"
+                elif not authenticated:  # Auth agent (before authentication)
+                    agent_sender = "Auth Agent"
+                else:
+                    agent_sender = "Assistant"
                 await broadcast_message(
-                    ws.app.state.clients, f"🛠️ {tool_name} ✔️", "Assistant"
+                    ws.app.state.clients, f"🛠️ {tool_name} ✔️", agent_sender
                 )
             except Exception as e:
                 logger.error(f"Failed to broadcast tool completion: {e}")

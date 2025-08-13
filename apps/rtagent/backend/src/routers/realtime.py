@@ -79,7 +79,7 @@ async def realtime_ws(ws: WebSocket):
         auth_agent = ws.app.state.auth_agent
         cm.append_to_history(auth_agent.name, "assistant", GREETING)
         await send_tts_audio(GREETING, ws, latency_tool=ws.state.lt)
-        # await broadcast_message(ws.app.state.clients, GREETING, "Assistant")
+        await broadcast_message(ws.app.state.clients, GREETING, "Auth Agent")
         await cm.persist_to_redis_async(redis_mgr)
 
         def on_partial(txt: str, lang: str):
