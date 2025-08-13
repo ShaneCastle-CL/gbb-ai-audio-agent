@@ -193,11 +193,35 @@ jobs:
             azd env new "$ENV_NAME" --no-prompt
           fi
           azd env select "$ENV_NAME"
+            # Confirm azd env contains remote state values for RS_RESOURCE_GROUP, RS_STORAGE_ACCOUNT, RS_CONTAINER_NAME
+            echo "🔍 Checking azd environment values for remote state variables..."
+            azd env get-values > /tmp/azd-env-values.env
+            source /tmp/azd-env-values.env
+
+            missing=0
+            for var in RS_RESOURCE_GROUP RS_STORAGE_ACCOUNT RS_CONTAINER_NAME; do
+            value=$(grep "^$var=" /tmp/azd-env-values.env | cut -d'=' -f2-)
+            if [ -z "$value" ]; then
+              echo "❌ Missing required remote state variable: $var"
+              missing=1
+            else
+              echo "✅ $var is set to: $value"
+            fi
+            done
+
+            if [ "$missing" -eq 1 ]; then
+            echo "❌ One or more remote state variables are missing in azd environment."
+            exit 1
+            fi
+            echo "✅ All required remote state variables are present in azd environment."
           azd provision --no-prompt --preview --environment "$ENV_NAME" || \
             azd provision --no-prompt --help | grep -i preview || \
             echo "⚠️ Plan preview not available, would provision infrastructure"
           echo "plan-available=true" >> $GITHUB_OUTPUT
         env:
+          RS_RESOURCE_GROUP: ${{ inputs.rs_resource_group }}
+          RS_STORAGE_ACCOUNT: ${{ inputs.rs_storage_account }}
+          RS_CONTAINER_NAME: ${{ inputs.rs_container_name }}
           AZURE_ENV_NAME: ${{ env.AZURE_ENV_NAME }}
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
