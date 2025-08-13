@@ -25,14 +25,14 @@ from fastapi.websockets import WebSocketDisconnect, WebSocketState
 from websockets.exceptions import ConnectionClosedError
 
 from apps.rtagent.backend.settings import (
-    ACS_CALLBACK_PATH,
+    ACS_CALL_CALLBACK_PATH,
     ACS_CONNECTION_STRING,
     ACS_SOURCE_PHONE_NUMBER,
     ACS_WEBSOCKET_PATH,
     AZURE_SPEECH_ENDPOINT,
     AZURE_STORAGE_CONTAINER_URL,
     BASE_URL,
-    VOICE_TTS,
+    GREETING_VOICE_TTS,
 )
 from src.acs.acs_helper import AcsCaller
 from utils.ml_logging import get_logger
@@ -86,7 +86,7 @@ def initialize_acs_caller_instance() -> Optional[AcsCaller]:
         )
         return None
 
-    acs_callback_url = f"{BASE_URL.strip('/')}{ACS_CALLBACK_PATH}"
+    acs_callback_url = f"{BASE_URL.strip('/')}{ACS_CALL_CALLBACK_PATH}"
     acs_websocket_url = construct_websocket_url(BASE_URL, ACS_WEBSOCKET_PATH)
 
     if not acs_websocket_url:
@@ -265,7 +265,7 @@ async def play_response(
     ws: WebSocket,
     response_text: str,
     use_ssml: bool = False,
-    voice_name: str = VOICE_TTS,
+    voice_name: str = GREETING_VOICE_TTS,
     locale: str = "en-US",
     participants: list = None,
     max_retries: int = 5,
@@ -436,7 +436,7 @@ async def play_response_with_queue(
     ws: WebSocket,
     response_text: str,
     use_ssml: bool = False,
-    voice_name: str = VOICE_TTS,
+    voice_name: str = GREETING_VOICE_TTS,
     locale: str = "en-US",
     participants: list = None,
     max_retries: int = 5,
@@ -539,7 +539,7 @@ async def process_message_queue(ws: WebSocket):
                     ws=ws,
                     response_text=message_data["response_text"],
                     use_ssml=message_data["use_ssml"],
-                    voice_name=message_data["voice_name"] or VOICE_TTS,
+                    voice_name=message_data["voice_name"] or GREETING_VOICE_TTS,
                     locale=message_data["locale"],
                     participants=message_data["participants"],
                     max_retries=message_data["max_retries"],
@@ -571,7 +571,7 @@ async def _play_response_direct(
     ws: WebSocket,
     response_text: str,
     use_ssml: bool = False,
-    voice_name: str = VOICE_TTS,
+    voice_name: str = GREETING_VOICE_TTS,
     locale: str = "en-US",
     participants: list = None,
     max_retries: int = 5,

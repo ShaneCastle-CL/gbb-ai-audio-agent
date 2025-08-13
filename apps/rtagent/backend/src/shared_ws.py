@@ -19,7 +19,7 @@ from typing import Optional, Set
 from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 
-from apps.rtagent.backend.settings import ACS_STREAMING_MODE, VOICE_TTS
+from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING_VOICE_TTS
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.services.acs.acs_helpers import (
     broadcast_message,
@@ -34,13 +34,25 @@ logger = get_logger("shared_ws")
 
 
 async def send_tts_audio(
-    text: str, ws: WebSocket, latency_tool: Optional[LatencyTool] = None
+    text: str,
+    ws: WebSocket,
+    latency_tool: Optional[LatencyTool] = None,
+    voice_name: Optional[str] = None,
+    voice_style: Optional[str] = None,
+    rate: Optional[str] = None,
 ) -> None:
     """
     Synthesize speech and send audio data to browser WebSocket client.
 
     Uses the synthesizer cached on FastAPI `app.state.tts_client`.
     Adds latency tracking for TTS step and sends audio frames to React frontend.
+
+    Args:
+        text: Text to synthesize
+        ws: WebSocket connection
+        latency_tool: Optional latency tracking tool
+        voice_name: Optional agent-specific voice name (overrides default)
+        voice_style: Optional agent-specific voice style
     """
     # Validate WebSocket connection
     if ws.client_state != WebSocketState.CONNECTED:
@@ -59,12 +71,26 @@ async def send_tts_audio(
         synth: SpeechSynthesizer = ws.app.state.tts_client
         ws.state.is_synthesizing = True  # type: ignore[attr-defined]
         logger.info(f"Synthesizing text: {ws.state.is_synthesizing}...")
-        synth.start_speaking_text(text)
+
+        # Use agent voice if provided, otherwise fallback to default
+        voice_to_use = voice_name or GREETING_VOICE_TTS
+
+        # Start speaking with agent-specific voice parameters
+        synth.start_speaking_text(
+            text=text,
+            voice=voice_to_use,
+            rate=rate or "+3%",
+            style=voice_style or "chat",
+        )
 
         # Synthesize text to PCM bytes for browser playback
-        logger.debug(f"Synthesizing text: {text[:100]}...")
+        logger.debug(f"Synthesizing text (voice: {voice_to_use}): {text[:100]}...")
         pcm_bytes = synth.synthesize_to_pcm(
-            text=text, voice=VOICE_TTS, sample_rate=16000
+            text=text,
+            voice=voice_to_use,
+            sample_rate=16000,
+            style=voice_style or "chat",
+            rate=rate or "+3%",
         )
 
         if latency_tool:
@@ -74,7 +100,14 @@ async def send_tts_audio(
         frames = SpeechSynthesizer.split_pcm_to_base64_frames(
             pcm_bytes, sample_rate=16000
         )
+        try:
+            from opentelemetry import trace as _t
 
+            _t.get_current_span().set_attribute(
+                "pipeline.stage", "tts -> websocket (acs)"
+            )
+        except Exception:
+            pass
         logger.debug(f"Generated {len(frames)} audio frames for WebSocket transmission")
 
         # Send audio frames to React frontend
@@ -123,11 +156,23 @@ async def send_response_to_acs(
     blocking: bool = False,
     latency_tool: Optional[LatencyTool] = None,
     stream_mode: StreamMode = ACS_STREAMING_MODE,
+    voice_name: Optional[str] = None,
+    voice_style: Optional[str] = None,
+    rate: Optional[str] = None,
 ) -> Optional[asyncio.Task]:
     """
     Synthesizes speech and sends it as audio data to the ACS WebSocket.
 
     Adds latency tracking for TTS step.
+
+    Args:
+        ws: WebSocket connection
+        text: Text to synthesize
+        blocking: Whether to wait for completion
+        latency_tool: Optional latency tracking tool
+        stream_mode: Streaming mode for ACS
+        voice_name: Optional agent-specific voice name (overrides default)
+        voice_style: Optional agent-specific voice style
     """
 
     if latency_tool:
@@ -143,35 +188,64 @@ async def send_response_to_acs(
         synth: SpeechSynthesizer = ws.app.state.tts_client
 
         try:
+            # Use agent voice if provided, otherwise fallback to default
+            voice_to_use = voice_name or GREETING_VOICE_TTS
+
             # Add timeout and retry logic for TTS synthesis
             pcm_bytes = synth.synthesize_to_pcm(
-                text=text, voice=VOICE_TTS, sample_rate=16000
+                text=text,
+                voice=voice_to_use,
+                sample_rate=16000,
+                style=voice_style or "chat",
+                rate=rate or "+3%",
             )
             frames = SpeechSynthesizer.split_pcm_to_base64_frames(
                 pcm_bytes, sample_rate=16000
             )
-            latency_tool.stop("tts:synthesis", ws.app.state.redis)
+
+            if latency_tool:
+                latency_tool.stop("tts:synthesis", ws.app.state.redis)
 
         except asyncio.TimeoutError:
             logger.error(f"TTS synthesis timed out for text: {text[:50]}...")
+            if latency_tool:
+                latency_tool.stop("tts", ws.app.state.redis)
             raise RuntimeError("TTS synthesis timed out")
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
+            if latency_tool:
+                latency_tool.stop("tts", ws.app.state.redis)
+            raise RuntimeError(f"TTS synthesis failed: {e}")
 
-        for frame in frames:
-            if (
-                hasattr(ws.state, "lt")
-                and ws.state.lt
-                and not getattr(ws.state, "_greeting_ttfb_stopped", False)
-            ):
-                ws.state.lt.stop("greeting_ttfb", ws.app.state.redis)
-                ws.state._greeting_ttfb_stopped = True
-            await ws.send_json(
-                {"kind": "AudioData", "AudioData": {"data": frame}, "StopAudio": None}
-            )
+        # Send audio frames to ACS WebSocket
+        try:
+            for frame in frames:
+                if (
+                    hasattr(ws.state, "lt")
+                    and ws.state.lt
+                    and not getattr(ws.state, "_greeting_ttfb_stopped", False)
+                ):
+                    ws.state.lt.stop("greeting_ttfb", ws.app.state.redis)
+                    ws.state._greeting_ttfb_stopped = True
+                try:
+                    await ws.send_json(
+                        {
+                            "kind": "AudioData",
+                            "AudioData": {"data": frame},
+                            "StopAudio": None,
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send ACS audio frame: {e}")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to send audio frames to ACS: {e}")
+        finally:
+            if latency_tool:
+                latency_tool.stop("tts", ws.app.state.redis)
 
-        if latency_tool:
-            latency_tool.stop("tts", ws.app.state.redis)
+        # Return None for MEDIA mode (synchronous completion)
+        return None
 
     elif stream_mode == StreamMode.TRANSCRIPTION:
         acs_caller = ws.app.state.acs_caller
@@ -205,7 +279,10 @@ async def push_final(
     • Browser/WebRTC – we already streamed TTS, just send the final JSON.
     • ACS            – same; streaming audio is finished, no repeat playback.
     """
-    await ws.send_text(json.dumps({"type": role, "content": content}))
+    try:
+        await ws.send_text(json.dumps({"type": role, "content": content}))
+    except Exception as e:
+        logger.error(f"Failed to send final message to WebSocket: {e}")
 
 
 # --------------------------------------------------------------------------- #

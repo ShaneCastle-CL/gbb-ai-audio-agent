@@ -7,9 +7,11 @@ import "reactflow/dist/style.css";
 /* ------------------------------------------------------------------ *
  *  ENV VARS
  * ------------------------------------------------------------------ */
-const {
-  VITE_BACKEND_BASE_URL: API_BASE_URL,
-} = import.meta.env;
+// Simple placeholder that gets replaced at container startup, with fallback for local dev
+const backendPlaceholder = '__BACKEND_URL__';
+const API_BASE_URL = backendPlaceholder.startsWith('__') 
+  ? import.meta.env.VITE_BACKEND_BASE_URL || 'http://localhost:8000'
+  : backendPlaceholder;
 
 const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
 
@@ -253,6 +255,19 @@ const styles = {
     whiteSpace: "pre-wrap",
   },
   
+  // Agent name label (appears above specialist bubbles)
+  agentNameLabel: {
+    fontSize: "10px",
+    fontWeight: "400",
+    color: "#64748b",
+    opacity: 0.7,
+    marginBottom: "2px",
+    marginLeft: "8px",
+    letterSpacing: "0.5px",
+    textTransform: "none",
+    fontStyle: "italic",
+  },
+  
   // Control section - blended footer design
   controlSection: {
     padding: "12px",
@@ -297,14 +312,6 @@ const styles = {
     boxShadow: isActive ? "0 4px 16px rgba(103,216,239,0.4)" : "0 2px 8px rgba(0,0,0,0.05)",
   }),
   
-  // Health indicator in top right
-  healthIndicator: {
-    position: "absolute",
-    top: "20px",
-    right: "20px",
-    zIndex: 10,
-  },
-  
   // Input section for phone calls
   phoneInputSection: {
     position: "absolute",
@@ -331,6 +338,121 @@ const styles = {
     transition: "border-color 0.2s ease",
   },
   
+
+  // Backend status indicator - enhanced for component health - relocated to bottom left
+  backendIndicator: {
+    position: "fixed",
+    bottom: "20px",
+    left: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    padding: "12px 16px",
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    border: "1px solid #e2e8f0",
+    borderRadius: "12px",
+    fontSize: "11px",
+    color: "#64748b",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+    zIndex: 1000,
+    minWidth: "280px",
+    maxWidth: "320px",
+    backdropFilter: "blur(8px)",
+  },
+
+  backendHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "4px",
+    cursor: "pointer",
+  },
+
+  backendStatus: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#10b981",
+    animation: "pulse 2s ease-in-out infinite",
+    flexShrink: 0,
+  },
+
+  backendUrl: {
+    fontFamily: "monospace",
+    fontSize: "10px",
+    color: "#475569",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  backendLabel: {
+    fontWeight: "600",
+    color: "#334155",
+    fontSize: "12px",
+    letterSpacing: "0.3px",
+  },
+
+  expandIcon: {
+    marginLeft: "auto",
+    fontSize: "12px",
+    color: "#94a3b8",
+    transition: "transform 0.2s ease",
+  },
+
+  componentGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr",
+    gap: "8px",
+    marginTop: "8px",
+    paddingTop: "8px",
+    borderTop: "1px solid #f1f5f9",
+  },
+
+  componentItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "6px 10px",
+    backgroundColor: "#f8fafc",
+    borderRadius: "8px",
+    fontSize: "10px",
+    border: "1px solid #f1f5f9",
+    transition: "all 0.2s ease",
+  },
+
+  componentDot: (status) => ({
+    width: "6px",
+    height: "6px",
+    borderRadius: "50%",
+    backgroundColor: status === "healthy" ? "#10b981" : 
+                     status === "degraded" ? "#f59e0b" : 
+                     status === "unhealthy" ? "#ef4444" : "#6b7280",
+    flexShrink: 0,
+  }),
+
+  componentName: {
+    fontWeight: "500",
+    color: "#475569",
+    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+
+  responseTime: {
+    fontSize: "9px",
+    color: "#94a3b8",
+    marginLeft: "auto",
+  },
+
+  errorMessage: {
+    fontSize: "10px",
+    color: "#ef4444",
+    marginTop: "4px",
+    fontStyle: "italic",
+  },
+
   phoneButton: (isActive) => ({
     padding: "12px 20px",
     background: isActive ? "#ef4444" : "#67d8ef",
@@ -342,6 +464,878 @@ const styles = {
     fontWeight: "600",
     transition: "all 0.2s ease",
   }),
+
+  // Help button in top right corner
+  helpButton: {
+    position: "absolute",
+    top: "16px",
+    right: "16px",
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    border: "1px solid #e2e8f0",
+    background: "#f8fafc",
+    color: "#64748b",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "14px",
+    transition: "all 0.2s ease",
+    zIndex: 1000,
+    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+  },
+
+  helpButtonHover: {
+    background: "#f1f5f9",
+    color: "#334155",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+    transform: "scale(1.05)",
+  },
+
+  helpTooltip: {
+    position: "absolute",
+    top: "40px",
+    right: "0px",
+    background: "white",
+    border: "1px solid #e2e8f0",
+    borderRadius: "12px",
+    padding: "16px",
+    width: "280px",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08)",
+    fontSize: "12px",
+    lineHeight: "1.5",
+    color: "#334155",
+    zIndex: 1001,
+    opacity: 0,
+    transform: "translateY(-8px)",
+    pointerEvents: "none",
+    transition: "all 0.2s ease",
+  },
+
+  helpTooltipVisible: {
+    opacity: 1,
+    transform: "translateY(0px)",
+    pointerEvents: "auto",
+  },
+
+  helpTooltipTitle: {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#1e293b",
+    marginBottom: "8px",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+
+  helpTooltipText: {
+    marginBottom: "12px",
+    color: "#64748b",
+  },
+
+  helpTooltipContact: {
+    fontSize: "11px",
+    color: "#67d8ef",
+    fontFamily: "monospace",
+    background: "#f8fafc",
+    padding: "4px 8px",
+    borderRadius: "6px",
+    border: "1px solid #e2e8f0",
+  },
+};
+// Add keyframe animation for pulse effect
+const styleSheet = document.createElement("style");
+styleSheet.textContent = `
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+    }
+    70% {
+      box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    }
+  }
+`;
+document.head.appendChild(styleSheet);
+
+/* ------------------------------------------------------------------ *
+ *  BACKEND HELP BUTTON COMPONENT
+ * ------------------------------------------------------------------ */
+const BackendHelpButton = () => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isClicked, setIsClicked] = useState(false);
+
+  const handleClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsClicked(!isClicked);
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+  };
+
+  return (
+    <div 
+      style={{
+        width: '14px',
+        height: '14px',
+        borderRadius: '50%',
+        backgroundColor: isHovered ? '#3b82f6' : '#64748b',
+        color: 'white',
+        fontSize: '9px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        fontWeight: '600',
+        position: 'relative',
+        flexShrink: 0
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
+    >
+      ?
+      <div style={{
+        visibility: (isHovered || isClicked) ? 'visible' : 'hidden',
+        opacity: (isHovered || isClicked) ? 1 : 0,
+        position: 'absolute',
+        bottom: '20px',
+        left: '0',
+        backgroundColor: 'rgba(0, 0, 0, 0.95)',
+        color: 'white',
+        padding: '12px',
+        borderRadius: '8px',
+        fontSize: '11px',
+        lineHeight: '1.4',
+        minWidth: '280px',
+        maxWidth: '320px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        zIndex: 10000,
+        transition: 'all 0.2s ease',
+        backdropFilter: 'blur(8px)'
+      }}>
+        <div style={{
+          fontSize: '12px',
+          fontWeight: '600',
+          color: '#67d8ef',
+          marginBottom: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px'
+        }}>
+          🔧 Backend Status Monitor
+        </div>
+        <div style={{ marginBottom: '8px' }}>
+          Real-time health monitoring for all RTAgent backend services including Redis cache, Azure OpenAI, Speech Services, and Communication Services.
+        </div>
+        <div style={{ marginBottom: '8px' }}>
+          <strong>Status Colors:</strong><br/>
+          🟢 Healthy - All systems operational<br/>
+          🟡 Degraded - Some performance issues<br/>
+          🔴 Unhealthy - Service disruption
+        </div>
+        <div style={{ fontSize: '10px', color: '#94a3b8', fontStyle: 'italic' }}>
+          Auto-refreshes every 30 seconds • Click to expand for details
+        </div>
+        {isClicked && (
+          <div style={{
+            textAlign: 'center',
+            marginTop: '8px',
+            fontSize: '9px',
+            color: '#94a3b8',
+            fontStyle: 'italic'
+          }}>
+            Click ? again to close
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ *
+ *  HELP BUTTON COMPONENT
+ * ------------------------------------------------------------------ */
+const HelpButton = () => {
+  const [isHovered, setIsHovered] = useState(false);
+  const [isClicked, setIsClicked] = useState(false);
+
+  const handleClick = (e) => {
+    // Don't prevent default for links
+    if (e.target.tagName !== 'A') {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsClicked(!isClicked);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+    // Only hide if not clicked
+    if (!isClicked) {
+      // Tooltip will hide via CSS
+    }
+  };
+
+  return (
+    <div 
+      style={{
+        ...styles.helpButton,
+        ...(isHovered ? styles.helpButtonHover : {})
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
+    >
+      ?
+      <div style={{
+        ...styles.helpTooltip,
+        ...((isHovered || isClicked) ? styles.helpTooltipVisible : {})
+      }}>
+        <div style={styles.helpTooltipTitle}>
+        </div>
+        <div style={{
+          ...styles.helpTooltipText,
+          color: '#dc2626',
+          fontWeight: '600',
+          fontSize: '12px',
+          marginBottom: '12px',
+          padding: '8px',
+          backgroundColor: '#fef2f2',
+          borderRadius: '4px',
+          border: '1px solid #fecaca'
+        }}>
+          This is a demo available for Microsoft employees only.
+        </div>
+        <div style={styles.helpTooltipTitle}>
+          🤖 RTAgent Demo
+        </div>
+        <div style={styles.helpTooltipText}>
+          RTAgent is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click "Call Me" in a web app. Built entirely on Azure services, it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
+        </div>
+        <div style={styles.helpTooltipText}>
+          Design a single agent or orchestrate multiple specialist agents. The framework allows you to build your voice agent from scratch, incorporate memory, configure actions, and fine-tune your TTS and STT layers.
+        </div>
+        <div style={styles.helpTooltipText}>
+          🤔 <strong>How to use:</strong> Click the microphone to start speaking, or use the "Call Me" button to receive a phone call. Try different scenarios like claims intake, general questions, or authentication.
+        </div>
+        <div style={styles.helpTooltipText}>
+         📑 <a 
+            href="https://microsoft.sharepoint.com/teams/rtaudioagent" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            style={{
+              color: '#3b82f6',
+              textDecoration: 'underline'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Visit the Project Hub
+          </a> for instructions, deep dives and more.
+        </div>
+        <div style={styles.helpTooltipText}>
+          📧 Questions or feedback? <a 
+            href="mailto:rtvoiceagent@microsoft.com?subject=RTAgent Feedback"
+            style={{
+              color: '#3b82f6',
+              textDecoration: 'underline'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Contact the team
+          </a>
+        </div>
+        {isClicked && (
+          <div style={{
+            textAlign: 'center',
+            marginTop: '8px',
+            fontSize: '10px',
+            color: '#64748b',
+            fontStyle: 'italic'
+          }}>
+            Click ? again to close
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ *
+ *  ENHANCED BACKEND INDICATOR WITH HEALTH MONITORING & AGENT CONFIG
+ * ------------------------------------------------------------------ */
+const BackendIndicator = ({ url, onConfigureClick }) => {
+  const [isConnected, setIsConnected] = useState(null);
+  const [displayUrl, setDisplayUrl] = useState(url);
+  const [readinessData, setReadinessData] = useState(null);
+  const [agentsData, setAgentsData] = useState(null);
+  const [error, setError] = useState(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [screenWidth, setScreenWidth] = useState(window.innerWidth);
+  const [showAgentConfig, setShowAgentConfig] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [configChanges, setConfigChanges] = useState({});
+  const [updateStatus, setUpdateStatus] = useState({});
+
+  // Track screen width for responsive positioning
+  useEffect(() => {
+    const handleResize = () => setScreenWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Check readiness endpoint
+  const checkReadiness = async () => {
+    try {
+      // Simple GET request without extra headers
+      const response = await fetch(`${url}/readiness`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Validate expected structure
+      if (data.status && data.checks && Array.isArray(data.checks)) {
+        setReadinessData(data);
+        setIsConnected(data.status === "ready");
+        setError(null);
+      } else {
+        throw new Error("Invalid response structure");
+      }
+    } catch (err) {
+      console.error("Readiness check failed:", err);
+      setIsConnected(false);
+      setError(err.message);
+      setReadinessData(null);
+    }
+  };
+
+  // Check agents endpoint
+  const checkAgents = async () => {
+    try {
+      const response = await fetch(`${url}/agents`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.status === "success" && data.agents && Array.isArray(data.agents)) {
+        setAgentsData(data);
+      } else {
+        throw new Error("Invalid agents response structure");
+      }
+    } catch (err) {
+      console.error("Agents check failed:", err);
+      setAgentsData(null);
+    }
+  };
+
+  // Update agent configuration
+  const updateAgentConfig = async (agentName, config) => {
+    try {
+      setUpdateStatus({...updateStatus, [agentName]: 'updating'});
+      
+      const response = await fetch(`${url}/agents/${agentName}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      setUpdateStatus({...updateStatus, [agentName]: 'success'});
+      
+      // Refresh agents data
+      checkAgents();
+      
+      // Clear success status after 3 seconds
+      setTimeout(() => {
+        setUpdateStatus(prev => {
+          const newStatus = {...prev};
+          delete newStatus[agentName];
+          return newStatus;
+        });
+      }, 3000);
+      
+      return data;
+    } catch (err) {
+      console.error("Agent config update failed:", err);
+      setUpdateStatus({...updateStatus, [agentName]: 'error'});
+      
+      // Clear error status after 5 seconds
+      setTimeout(() => {
+        setUpdateStatus(prev => {
+          const newStatus = {...prev};
+          delete newStatus[agentName];
+          return newStatus;
+        });
+      }, 5000);
+      
+      throw err;
+    }
+  };
+
+  useEffect(() => {
+    // Parse and format the URL for display
+    try {
+      const urlObj = new URL(url);
+      const host = urlObj.hostname;
+      const protocol = urlObj.protocol.replace(':', '');
+      
+      // Shorten Azure URLs
+      if (host.includes('.azurewebsites.net')) {
+        const appName = host.split('.')[0];
+        setDisplayUrl(`${protocol}://${appName}.azure...`);
+      } else if (host === 'localhost') {
+        setDisplayUrl(`${protocol}://localhost:${urlObj.port || '8000'}`);
+      } else {
+        setDisplayUrl(`${protocol}://${host}`);
+      }
+    } catch (e) {
+      setDisplayUrl(url);
+    }
+
+    // Initial check
+    checkReadiness();
+    checkAgents();
+
+    // Set up periodic checks every 30 seconds
+    const interval = setInterval(() => {
+      checkReadiness();
+      checkAgents();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [url]);
+
+  // Get overall health status
+  const getOverallStatus = () => {
+    if (isConnected === null) return "checking";
+    if (!isConnected) return "unhealthy";
+    if (!readinessData?.checks) return "unhealthy";
+    
+    const hasUnhealthy = readinessData.checks.some(c => c.status === "unhealthy");
+    const hasDegraded = readinessData.checks.some(c => c.status === "degraded");
+    
+    if (hasUnhealthy) return "unhealthy";
+    if (hasDegraded) return "degraded";
+    return "healthy";
+  };
+
+  const overallStatus = getOverallStatus();
+  const statusColor = overallStatus === "healthy" ? "#10b981" : 
+                     overallStatus === "degraded" ? "#f59e0b" :
+                     overallStatus === "unhealthy" ? "#ef4444" : "#6b7280";
+
+  // Dynamic sizing based on screen width - keep in bottom left but adjust size to maintain separation
+  const getResponsiveStyle = () => {
+    const baseStyle = {
+      ...styles.backendIndicator,
+      transition: "all 0.3s ease",
+    };
+
+    // Calculate available space for the status box to avoid RTAgent overlap
+    const containerWidth = 768;
+    const containerLeftEdge = (screenWidth / 2) - (containerWidth / 2);
+    const availableWidth = containerLeftEdge - 40 - 20; // 40px margin from container, 20px from screen edge
+    
+    // Adjust size based on available space
+    if (availableWidth < 200) {
+      // Very narrow - compact size
+      return {
+        ...baseStyle,
+        minWidth: "150px",
+        maxWidth: "180px",
+        padding: !isExpanded && overallStatus === "healthy" ? "8px 12px" : "10px 14px",
+        fontSize: "10px",
+      };
+    } else if (availableWidth < 280) {
+      // Medium space - reduced size
+      return {
+        ...baseStyle,
+        minWidth: "180px",
+        maxWidth: "250px",
+        padding: !isExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
+      };
+    } else {
+      // Plenty of space - full size
+      return {
+        ...baseStyle,
+        minWidth: !isExpanded && overallStatus === "healthy" ? "200px" : "280px",
+        maxWidth: "320px",
+        padding: !isExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
+      };
+    }
+  };
+
+  // Component icon mapping with descriptions
+  const componentIcons = {
+    redis: "💾",
+    azure_openai: "🧠",
+    speech_services: "🎙️",
+    acs_caller: "📞",
+    rt_agents: "🤖"
+  };
+
+  // Component descriptions
+  const componentDescriptions = {
+    redis: "Redis Cache - Session & state management",
+    azure_openai: "Azure OpenAI - GPT models & embeddings",
+    speech_services: "Speech Services - STT/TTS processing",
+    acs_caller: "Communication Services - Voice calling",
+    rt_agents: "RT Agents - Real-time Voice Agents"
+  };
+
+  return (
+    <div 
+      style={getResponsiveStyle()} 
+      title={`Click to expand backend status`}
+      onClick={() => setIsExpanded(!isExpanded)}
+      onMouseEnter={() => !isExpanded && setIsExpanded(true)}
+      onMouseLeave={() => setIsExpanded(false)}
+    >
+      <div style={styles.backendHeader}>
+        <div style={{
+          ...styles.backendStatus,
+          backgroundColor: statusColor,
+        }}></div>
+        <span style={styles.backendLabel}>Backend Status</span>
+        <BackendHelpButton />
+        <span style={{
+          ...styles.expandIcon,
+          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+        }}>▼</span>
+      </div>
+      
+      {/* Compact URL display when collapsed */}
+      {!isExpanded && (
+        <div style={{
+          ...styles.backendUrl,
+          fontSize: "9px",
+          opacity: 0.7,
+          marginTop: "2px",
+        }}>
+          {displayUrl}
+        </div>
+      )}
+
+      {/* Only show component health when expanded or when there's an issue */}
+      {(isExpanded || overallStatus !== "healthy") && (
+        <>
+          {/* Expanded information display */}
+          {isExpanded && (
+            <>
+              
+              {/* API Entry Point Info */}
+              <div style={{
+                padding: "8px 10px",
+                backgroundColor: "#f8fafc",
+                borderRadius: "8px",
+                marginBottom: "10px",
+                fontSize: "10px",
+                border: "1px solid #e2e8f0",
+              }}>
+                <div style={{
+                  fontWeight: "600",
+                  color: "#475569",
+                  marginBottom: "4px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}>
+                  🌐 Backend API Entry Point
+                </div>
+                <div style={{
+                  color: "#64748b",
+                  fontSize: "9px",
+                  fontFamily: "monospace",
+                  marginBottom: "6px",
+                  padding: "3px 6px",
+                  backgroundColor: "white",
+                  borderRadius: "4px",
+                  border: "1px solid #f1f5f9",
+                }}>
+                  {url}
+                </div>
+                <div style={{
+                  color: "#64748b",
+                  fontSize: "9px",
+                  lineHeight: "1.3",
+                }}>
+                  Main FastAPI server handling WebSocket connections, voice processing, and AI agent orchestration
+                </div>
+              </div>
+
+              {/* System status summary */}
+              {readinessData && (
+                <div style={{
+                  padding: "6px 8px",
+                  backgroundColor: overallStatus === "healthy" ? "#f0fdf4" : 
+                                 overallStatus === "degraded" ? "#fffbeb" : "#fef2f2",
+                  borderRadius: "6px",
+                  marginBottom: "8px",
+                  fontSize: "10px",
+                  border: `1px solid ${overallStatus === "healthy" ? "#bbf7d0" : 
+                                      overallStatus === "degraded" ? "#fed7aa" : "#fecaca"}`,
+                }}>
+                  <div style={{
+                    fontWeight: "600",
+                    color: overallStatus === "healthy" ? "#166534" : 
+                          overallStatus === "degraded" ? "#92400e" : "#dc2626",
+                    marginBottom: "2px",
+                  }}>
+                    System Status: {overallStatus.charAt(0).toUpperCase() + overallStatus.slice(1)}
+                  </div>
+                  <div style={{
+                    color: "#64748b",
+                    fontSize: "9px",
+                  }}>
+                    {readinessData.checks.length} components monitored • 
+                    Last check: {new Date().toLocaleTimeString()}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {error ? (
+            <div style={styles.errorMessage}>
+              ⚠️ Connection failed: {error}
+            </div>
+          ) : readinessData?.checks ? (
+            <>
+              <div style={styles.componentGrid}>
+                {readinessData.checks.map((check, idx) => (
+                  <div 
+                    key={idx} 
+                    style={{
+                      ...styles.componentItem,
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      padding: "8px 10px",
+                    }}
+                    title={check.details || `${check.component} status: ${check.status}`}
+                  >
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      width: "100%",
+                    }}>
+                      <span>{componentIcons[check.component] || "•"}</span>
+                      <div style={styles.componentDot(check.status)}></div>
+                      <span style={styles.componentName}>
+                        {check.component.replace(/_/g, ' ')}
+                      </span>
+                      {check.check_time_ms !== undefined && (
+                        <span style={styles.responseTime}>
+                          {check.check_time_ms.toFixed(0)}ms
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Component description when expanded */}
+                    {isExpanded && (
+                      <div style={{
+                        fontSize: "9px",
+                        color: "#64748b",
+                        marginTop: "4px",
+                        lineHeight: "1.3",
+                        fontStyle: "italic",
+                      }}>
+                        {componentDescriptions[check.component] || "Backend service component"}
+                      </div>
+                    )}
+                    
+                    {/* Status details when expanded */}
+                    {isExpanded && check.details && (
+                      <div style={{
+                        fontSize: "9px",
+                        color: check.status === "healthy" ? "#10b981" : 
+                              check.status === "degraded" ? "#f59e0b" : "#ef4444",
+                        marginTop: "2px",
+                        fontWeight: "500",
+                      }}>
+                        {check.details}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Show component details if expanded */}
+              {isExpanded && readinessData.checks.some(c => c.details) && (
+                <div style={{
+                  marginTop: "8px",
+                  paddingTop: "8px",
+                  borderTop: "1px solid #f1f5f9",
+                  fontSize: "9px",
+                  color: "#64748b",
+                }}>
+                  {readinessData.checks
+                    .filter(c => c.details)
+                    .map((check, idx) => (
+                      <div key={idx} style={{ marginBottom: "4px" }}>
+                        <strong>{check.component.replace(/_/g, ' ')}:</strong> {check.details}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={styles.errorMessage}>
+              Checking components...
+            </div>
+          )}
+          
+          {readinessData?.response_time_ms && isExpanded && (
+            <div style={{
+              fontSize: "9px",
+              color: "#94a3b8",
+              marginTop: "8px",
+              paddingTop: "8px",
+              borderTop: "1px solid #f1f5f9",
+              textAlign: "center",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}>
+              <span>Health check latency: {readinessData.response_time_ms.toFixed(0)}ms</span>
+              <span title="Auto-refreshes every 30 seconds">🔄</span>
+            </div>
+          )}
+
+          {/* Agents Configuration Section */}
+          {isExpanded && agentsData?.agents && (
+            <div style={{
+              marginTop: "10px",
+              paddingTop: "10px",
+              borderTop: "2px solid #e2e8f0",
+            }}>
+              {/* Agents Header */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "8px",
+                padding: "6px 8px",
+                backgroundColor: "#f1f5f9",
+                borderRadius: "6px",
+              }}>
+                <div style={{
+                  fontWeight: "600",
+                  color: "#475569",
+                  fontSize: "11px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}>
+                  🤖 RT Agents ({agentsData.agents.length})
+                </div>
+              </div>
+
+              {/* Agents List */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr",
+                gap: "6px",
+                fontSize: "10px",
+              }}>
+                {agentsData.agents.map((agent, idx) => (
+                  <div 
+                    key={idx} 
+                    style={{
+                      padding: "8px 10px",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "6px",
+                      backgroundColor: "white",
+                      cursor: showAgentConfig ? "pointer" : "default",
+                      transition: "all 0.2s ease",
+                      ...(showAgentConfig && selectedAgent === agent.name ? {
+                        borderColor: "#3b82f6",
+                        backgroundColor: "#f0f9ff",
+                      } : {}),
+                    }}
+                    onClick={() => showAgentConfig && setSelectedAgent(selectedAgent === agent.name ? null : agent.name)}
+                    title={agent.description || `${agent.name} - Real-time voice agent`}
+                  >
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: "4px",
+                    }}>
+                      <div style={{
+                        fontWeight: "600",
+                        color: "#374151",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}>
+                        <span style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          backgroundColor: agent.status === "loaded" ? "#10b981" : "#ef4444",
+                          display: "inline-block",
+                        }}></span>
+                        {agent.name}
+                      </div>
+                      <div style={{
+                        fontSize: "9px",
+                        color: "#64748b",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}>
+                        {agent.model?.deployment_id && (
+                          <span title={`Model: ${agent.model.deployment_id}`}>
+                            💭 {agent.model.deployment_id.replace('gpt-', '')}
+                          </span>
+                        )}
+                        {agent.voice?.current_voice && (
+                          <span title={`Voice: ${agent.voice.current_voice}`}>
+                            🔊 {agent.voice.current_voice.split('-').pop()?.replace('Neural', '')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Agents Info Footer */}
+              <div style={{
+                fontSize: "8px",
+                color: "#94a3b8",
+                marginTop: "8px",
+                textAlign: "center",
+                fontStyle: "italic",
+              }}>
+                Runtime configuration • Changes require restart for persistence • Contact rtvoiceagent@microsoft.com
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
 };
 
 /* ------------------------------------------------------------------ *
@@ -507,6 +1501,8 @@ const WaveformVisualization = ({ speaker, audioLevel = 0, outputAudioLevel = 0 }
 const ChatBubble = ({ message }) => {
   const { speaker, text, isTool, streaming } = message;
   const isUser = speaker === "User";
+  const isSpecialist = speaker?.includes("Specialist");
+  const isAuthAgent = speaker === "Auth Agent";
   
   if (isTool) {
     return (
@@ -525,6 +1521,12 @@ const ChatBubble = ({ message }) => {
   
   return (
     <div style={isUser ? styles.userMessage : styles.assistantMessage}>
+      {/* Show agent name for specialist agents and auth agent */}
+      {!isUser && (isSpecialist || isAuthAgent) && (
+        <div style={styles.agentNameLabel}>
+          {speaker}
+        </div>
+      )}
       <div style={isUser ? styles.userBubble : styles.assistantBubble}>
         {text.split("\n").map((line, i) => (
           <div key={i}>{line}</div>
@@ -648,7 +1650,7 @@ export default function RealTimeVoiceApp() {
       appendLog("🎤 PCM streaming started");
 
       // 1) open WS
-      const socket = new WebSocket(`${WS_URL}/realtime`);
+      const socket = new WebSocket(`${WS_URL}/api/v1/realtime/conversation`);
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
@@ -811,12 +1813,13 @@ export default function RealTimeVoiceApp() {
 
       /* ---------- ASSISTANT STREAM ---------- */
       if (type === "assistant_streaming") {
-        setActiveSpeaker("Assistant");
+        const streamingSpeaker = speaker || "Assistant";
+        setActiveSpeaker(streamingSpeaker);
         setMessages(prev => {
           if (prev.at(-1)?.streaming) {
             return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt} : m);
           }
-          return [...prev, { speaker:"Assistant", text:txt, streaming:true }];
+          return [...prev, { speaker:streamingSpeaker, text:txt, streaming:true }];
         });
         return;
       }
@@ -897,7 +1900,7 @@ export default function RealTimeVoiceApp() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE_URL}/api/call`, {
+      const res = await fetch(`${API_BASE_URL}/api/v1/calls/initiate`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ target_number: targetPhoneNumber }),
@@ -915,7 +1918,7 @@ export default function RealTimeVoiceApp() {
       appendLog("📞 Call initiated");
 
       // relay WS
-      const relay = new WebSocket(`${WS_URL}/relay`);
+      const relay = new WebSocket(`${WS_URL}/api/v1/realtime/dashboard/relay`);
       relay.onopen = () => appendLog("Relay WS connected");
       relay.onmessage = ({data}) => {
         try {
@@ -950,6 +1953,9 @@ export default function RealTimeVoiceApp() {
   return (
     <div style={styles.root}>
       <div style={styles.mainContainer}>
+        {/* Backend Status Indicator */}
+        <BackendIndicator url={API_BASE_URL} />
+
         {/* App Header */}
         <div style={styles.appHeader}>
           <div style={styles.appTitleContainer}>
@@ -959,6 +1965,8 @@ export default function RealTimeVoiceApp() {
             </div>
             <p style={styles.appSubtitle}>Transforming customer interactions with real-time, intelligent voice interactions</p>
           </div>
+          {/* Top Right Help Button */}
+          <HelpButton />
         </div>
 
         {/* Waveform Section */}

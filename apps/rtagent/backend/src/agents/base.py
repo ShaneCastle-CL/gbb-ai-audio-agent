@@ -48,6 +48,12 @@ class RTAgent:
         self.top_p: float = float(m.get("top_p", 1.0))
         self.max_tokens: int = int(m.get("max_tokens", 4096))
 
+        # Voice configuration (optional)
+        voice_cfg = self._cfg.get("voice", {})
+        self.voice_name: Optional[str] = voice_cfg.get("name")
+        self.voice_style: str = voice_cfg.get("style", "chat")
+        self.voice_rate: str = voice_cfg.get("rate", "+3%")
+
         self.prompt_path: str = self._cfg.get("prompts", {}).get(
             "path", "voice_agent_authentication.jinja"
         )
@@ -78,7 +84,6 @@ class RTAgent:
         is_acs: bool = False,
         **prompt_kwargs,
     ) -> Any:
-
         # For context-rich prompting
         system_prompt = self.pm.get_prompt(self.prompt_path, **prompt_kwargs)
         cm.ensure_system_prompt(
@@ -120,13 +125,19 @@ class RTAgent:
     def _log_loaded_summary(self) -> None:
         desc_preview = shorten(self.description, width=60, placeholder="…")
         tool_names = [t["function"]["name"] for t in self.tools]
+        voice_info = (
+            f"voice={self.voice_name or 'default'}"
+            + (f"/{self.voice_style}" if self.voice_name else "")
+            + (f"@{self.voice_rate}" if hasattr(self, "voice_rate") else "")
+        )
         logger.info(
-            "Loaded agent '%s' | org='%s' | desc='%s' | model=%s | prompt=%s | "
+            "Loaded agent '%s' | org='%s' | desc='%s' | model=%s | %s | prompt=%s | "
             "tools=%s",
             self.name,
             self.organization or "-",
             desc_preview,
             self.model_id,
+            voice_info,
             self.prompt_path,
             tool_names or "∅",
         )

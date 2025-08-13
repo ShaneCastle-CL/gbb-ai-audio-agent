@@ -11,13 +11,17 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import List
+import yaml
 
 from dotenv import load_dotenv
 
 from src.enums.stream_modes import StreamMode
+from utils.ml_logging import get_logger
 
 # Load environment variables from .env file
 load_dotenv(override=True)
+logger = get_logger("settings")
+
 
 AZURE_CLIENT_ID: str = os.getenv("AZURE_CLIENT_ID", "")
 AZURE_TENANT_ID: str = os.getenv("AZURE_TENANT_ID", "")
@@ -55,10 +59,23 @@ ACS_STREAMING_MODE: StreamMode = StreamMode(
     os.getenv("ACS_STREAMING_MODE", "media").lower()
 )
 
-# API route fragments (keep them in one place so routers can import)
-ACS_CALL_PATH = "/api/call"
-ACS_CALLBACK_PATH: str = "/call/callbacks"
-ACS_WEBSOCKET_PATH: str = "/call/stream"
+
+# V1 Endpoints
+ACS_CALL_OUTBOUND_PATH: str = "/api/v1/calls/initiate"
+ACS_CALL_INBOUND_PATH: str = "/api/v1/calls/answer"
+ACS_CALL_CALLBACK_PATH: str = "/api/v1/calls/callbacks"
+
+# V1 WebSocket Endpoints
+ACS_WEBSOCKET_PATH: str = "/api/v1/media/stream"
+
+# Legacy Endpoint Configs
+# # API route fragments
+# ACS_CALL_OUTBOUND_PATH: str = "/api/call/initiate"
+# ACS_CALL_INBOUND_PATH:  str = "/api/call/answer"
+# ACS_CALL_CALLBACK_PATH: str = "/api/call/callbacks"
+
+# # WSS route fragments
+# ACS_WEBSOCKET_PATH:     str = "/ws/call/stream"
 
 # Cosmos DB
 AZURE_COSMOS_CONNECTION_STRING: str = os.getenv("AZURE_COSMOS_CONNECTION_STRING", "")
@@ -69,17 +86,24 @@ AZURE_COSMOS_COLLECTION_NAME: str = os.getenv("AZURE_COSMOS_COLLECTION_NAME", ""
 # ------------------------------------------------------------------------------
 # Azure Identity / Authentication
 # ------------------------------------------------------------------------------
-ENABLE_AUTH_VALIDATION: bool = os.getenv("ENABLE_AUTH_VALIDATION", False)
+ENABLE_AUTH_VALIDATION: bool = os.getenv("ENABLE_AUTH_VALIDATION", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+    "on",
+)
 BACKEND_AUTH_CLIENT_ID: str = os.getenv("BACKEND_AUTH_CLIENT_ID", "")
 
-ENTRA_JWKS_URL = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
+ENTRA_JWKS_URL = (
+    f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
+)
 ENTRA_ISSUER = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0"
 ENTRA_AUDIENCE = f"api://{BACKEND_AUTH_CLIENT_ID}"
 ENTRA_EXEMPT_PATHS = [
-    ACS_CALLBACK_PATH,
+    ACS_CALL_CALLBACK_PATH,
     ACS_WEBSOCKET_PATH,
     "/health",
-    "/readiness"
+    "/readiness",
 ]
 
 # ACS Websocket and HTTP Callback Auth Config
@@ -129,7 +153,45 @@ AGENT_GENERAL_INFO_CONFIG: str = (
 # ------------------------------------------------------------------------------
 # TTS behaviour
 # ------------------------------------------------------------------------------
-VOICE_TTS = "en-US-AlloyTurboMultilingualNeural" # "en-US-Ava:DragonHDLatestNeural"
+# Cache for loaded voices to avoid repeated file reads
+_voice_cache = {}
+
+
+# Load voice from agent config YAML file
+def get_agent_voice(agent_config_path: str) -> str:
+    """Extract voice from agent YAML configuration. Cached to avoid repeated file reads."""
+    # Return cached voice if already loaded
+    if agent_config_path in _voice_cache:
+        return _voice_cache[agent_config_path]
+
+    try:
+        logger.info(f"Loading agent voice from: {agent_config_path}")
+        with open(agent_config_path, "r", encoding="utf-8") as file:
+            agent_config = yaml.safe_load(file)
+            voice_config = agent_config.get("voice", {})
+            if isinstance(voice_config, dict):
+                voice_name = voice_config.get("voice_name") or voice_config.get("name")
+                if voice_name:
+                    _voice_cache[agent_config_path] = voice_name
+                    return voice_name
+            elif isinstance(voice_config, str):
+                _voice_cache[agent_config_path] = voice_config
+                return voice_config
+        logger.warning("No valid voice configuration found, using default")
+        _voice_cache[agent_config_path] = "en-US-AvaMultilingualNeural"
+        return "en-US-AvaMultilingualNeural"
+    except FileNotFoundError as e:
+        logger.error(f"Agent config file not found: {agent_config_path} - {e}")
+        _voice_cache[agent_config_path] = "en-US-AvaMultilingualNeural"
+        return "en-US-AvaMultilingualNeural"
+    except Exception as e:
+        logger.error(f"Failed to load voice from {agent_config_path}: {e}")
+        _voice_cache[agent_config_path] = "en-US-AvaMultilingualNeural"
+        return "en-US-AvaMultilingualNeural"
+
+
+# Get voice from environment variable or auth agent config
+GREETING_VOICE_TTS = get_agent_voice(AGENT_AUTH_CONFIG)
 # en-US-AvaMultilingualNeural4 (Female)
 # en-US-AndrewMultilingualNeural4 (Male)
 # en-US-EmmaMultilingualNeural4 (Female)

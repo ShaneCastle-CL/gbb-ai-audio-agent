@@ -10,10 +10,15 @@ agent:
     agent—or a live human—based on intent and context.
 
 model:
-  deployment_id: gpt-4o-mini
-  temperature: 0.15 # Temperature setting for response variability
+  deployment_id: gpt-4o
+  temperature: 1 # Temperature setting for response variability
   top_p: 0.9 # Top-p setting for response variability
   max_tokens: 1024 # Maximum number of tokens in response
+
+voice:
+  name: en-US-Ava:DragonHDLatestNeural # Voice for TTS output
+  style: chat # Voice style (chat, professional, friendly)
+  rate: "+5%" # Speech rate (slower for authentication)
 
 prompts:
   path: voice_agent_authentication.jinja # imput prompt
