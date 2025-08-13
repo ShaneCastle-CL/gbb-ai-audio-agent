@@ -203,11 +203,55 @@ jobs:
           ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
           ARM_USE_OIDC: true
+
+      - name: 🧪 Generate Terraform Plan Output
+        id: tfplan
+        run: |
+          set -e
+          echo "🧪 Generating raw Terraform plan output..."
+          cd infra/terraform
+          terraform init -input=false -no-color
+          # Create plan file with provided variables
+          if ! terraform plan -input=false -no-color -var-file=main.tfvars.json -out=tfplan; then
+            echo "Terraform plan failed. See previous step logs for details." > "$GITHUB_WORKSPACE/tfplan.txt"
+            exit 0
+          fi
+          # Render plan to text
+          if ! terraform show -no-color tfplan > "$GITHUB_WORKSPACE/tfplan.txt"; then
+            echo "Could not render plan output with 'terraform show'." > "$GITHUB_WORKSPACE/tfplan.txt"
+          fi
+          echo "✅ Plan output ready"
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: true
           
       - name: 💬 Comment PR with Plan Summary
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
+            const escapeHtml = (s) => s
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;');
+
+            let planContent = '';
+            try {
+              planContent = fs.readFileSync('tfplan.txt', 'utf8');
+            } catch (e) {
+              planContent = 'Terraform plan output not available.';
+            }
+
+            // Truncate very long plans to keep comment size reasonable (~60k chars)
+            const MAX_LEN = 60000;
+            if (planContent.length > MAX_LEN) {
+              planContent = planContent.slice(0, MAX_LEN) + "\n...\n[truncated]";
+            }
+
+            const planSection = `\n<details>\n<summary><strong>Terraform Plan</strong> (click to expand)</summary>\n\n<pre>\n${escapeHtml(planContent)}\n</pre>\n</details>\n`;
+
             const output = `## 🏗️ Azure Developer CLI Deployment Preview
             
             **Environment:** \`pr-preview\` (temporary)
@@ -224,9 +268,9 @@ jobs:
             - [Project Configuration](./azure.yaml)
             
             **Note:** This is a preview - no actual resources will be created until merged to main.
-            `;
-            
-            github.rest.issues.createComment({
+            ${planSection}`;
+
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,

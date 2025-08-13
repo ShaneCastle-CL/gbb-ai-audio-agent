@@ -138,6 +138,119 @@ create_storage() {
     fi
 }
 
+# Attempt to obtain the current public IP using multiple strategies
+get_public_ip() {
+    local ip=""
+    # Try DNS-based discovery (often works without HTTPS egress restrictions)
+    if command -v dig >/dev/null 2>&1; then
+        ip=$(dig +short myip.opendns.com @resolver1.opendns.com 2>/dev/null || echo "")
+    fi
+    # Fallbacks via HTTPS services
+    if [ -z "$ip" ] && command -v curl >/dev/null 2>&1; then
+        ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "")
+    fi
+    if [ -z "$ip" ] && command -v curl >/dev/null 2>&1; then
+        ip=$(curl -s --max-time 5 https://ifconfig.me 2>/dev/null || echo "")
+    fi
+    # Final sanity check: ensure it matches IPv4 format
+    if echo "$ip" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        echo "$ip"
+        return 0
+    else
+        echo ""
+        return 1
+    fi
+}
+
+# Check if we can list containers using Azure AD auth; returns 0 on success
+can_access_storage_containers() {
+    local account="$1"; local rg="$2"
+    az storage container list \
+        --account-name "$account" \
+        --resource-group "$rg" \
+        --auth-mode login \
+        -o none 2>/tmp/storage_list_err.txt && return 0
+    return 1
+}
+
+# Determine if current azd environment is a dev/sandbox context
+is_dev_sandbox() {
+    local env_name sandbox
+    env_name=$(get_azd_env "AZURE_ENV_NAME")
+    sandbox=$(get_azd_env "SANDBOX_MODE")
+    # Explicit override via SANDBOX_MODE=true/1/yes
+    if echo "${sandbox}" | grep -Eiq '^(1|true|yes)$'; then
+
+        log_info "Detected dev/sandbox environment: ${env_name}"
+        return 0
+    fi
+    # Heuristic based on environment name
+    if echo "${env_name}" | grep -Eiq '^(dev|local|sandbox)$'; then
+        return 0
+    fi
+    return 1
+}
+
+# Ensure current public IP is whitelisted if storage is not reachable via public network rules
+ensure_storage_ip_whitelisted() {
+    local account="$1"; local rg="$2"
+
+    # If reachable already, nothing to do
+    if can_access_storage_containers "$account" "$rg"; then
+        log_success "Storage account '$account' is reachable with current credentials."
+        return 0
+    fi
+
+    # Check if public network access is disabled (private endpoints scenario)
+    local pna
+    pna=$(az storage account show --name "$account" --resource-group "$rg" --query "publicNetworkAccess" -o tsv 2>/dev/null || echo "Enabled")
+    if [ "$pna" = "Disabled" ]; then
+        if is_dev_sandbox; then
+            log_warning "Public network access is Disabled on '$account'. Enabling PNA and setting default-action=Deny for dev/sandbox, then whitelisting current IP."
+            if ! az storage account update --name "$account" --resource-group "$rg" --public-network-access Enabled -o none 2>/tmp/storage_pna_enable_err.txt; then
+                log_warning "Failed to enable Public Network Access on '$account'. Reason: $(tr -d '\n' < /tmp/storage_pna_enable_err.txt)"
+                return 1
+            fi
+            # Lock down to selected networks by setting default action to Deny
+            if ! az storage account network-rule update --resource-group "$rg" --account-name "$account" --default-action Deny -o none 2>/tmp/storage_default_deny_err.txt; then
+                log_warning "Failed to set default-action=Deny on '$account'. Reason: $(tr -d '\n' < /tmp/storage_default_deny_err.txt)"
+                # Continue anyway; adding an IP rule may still help depending on current policy
+            fi
+        else
+            log_warning "Public network access is disabled for '$account'. Skipping IP whitelist (non-dev environment)."
+            return 1
+        fi
+    fi
+
+    # Get current public IP
+    local ip
+    ip=$(get_public_ip)
+    if [ -z "$ip" ]; then
+        log_warning "Could not determine current public IP. Skipping IP whitelist."
+        return 1
+    fi
+
+    log_info "Adding current IP to storage network rules: $ip"
+    if az storage account network-rule add \
+        --resource-group "$rg" \
+        --account-name "$account" \
+        --ip-address "$ip" \
+        -o none 2>/tmp/storage_rule_err.txt; then
+        # Re-check access
+        sleep 3
+        if can_access_storage_containers "$account" "$rg"; then
+            log_success "Whitelisted IP $ip for storage '$account' and verified access."
+            return 0
+        else
+            log_warning "IP added, but access still failing. This may be due to RBAC propagation or other policies."
+            return 1
+        fi
+    else
+        log_warning "Failed to add IP rule to storage '$account'. Reason: $(tr -d '\n' < /tmp/storage_rule_err.txt)"
+        return 1
+    fi
+}
+
 # Check if JSON file has meaningful content
 has_json_content() {
     local file="$1"
@@ -160,8 +273,8 @@ has_json_content() {
 # Update tfvars file only if empty or non-existent
 update_tfvars() {
     local tfvars_file="./infra/terraform/main.tfvars.json"
-    local env_name="${1:-tfdev}"
-    local location="${2:-eastus2}"
+    local env_name="${1}"
+    local location="${2}"
     
     # Ensure directory exists
     mkdir -p "$(dirname "$tfvars_file")"
@@ -197,10 +310,15 @@ main() {
     local location=$(get_azd_env "AZURE_LOCATION")
     local sub_id=$(az account show --query id -o tsv)
     
-    # Use defaults if not set
-    env_name="${env_name:-tfdev}"
-    location="${location:-eastus2}"
-    
+    if [[ -z "$env_name" ]]; then
+        log_error "AZURE_ENV_NAME is not set in the azd environment."
+        exit 1
+    fi
+    if [[ -z "$location" ]]; then
+        log_error "AZURE_LOCATION is not set in the azd environment."
+        exit 1
+    fi
+
     # Check existing configuration
     local storage_account=$(get_azd_env "RS_STORAGE_ACCOUNT")
     local container=$(get_azd_env "RS_CONTAINER_NAME")
@@ -216,10 +334,13 @@ main() {
         azd env set RS_STORAGE_ACCOUNT "$storage_account"
         azd env set RS_CONTAINER_NAME "$container"
         azd env set RS_RESOURCE_GROUP "$resource_group"
-        azd env set RS_STATE_KEY "terraform.tfstate"
+        azd env set RS_STATE_KEY "$env_name.tfstate"
     else
         log_success "Using existing remote state configuration"
     fi
+
+    # Ensure current IP is allowed if storage isn't reachable
+    ensure_storage_ip_whitelisted "$storage_account" "$resource_group" || true
     
     # Update tfvars file (only if empty or doesn't exist)
     update_tfvars "$env_name" "$location"
