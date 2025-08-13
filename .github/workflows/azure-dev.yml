@@ -107,16 +107,18 @@ jobs:
           # Base parameters from environment tfvars
           BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.${{ github.event.inputs.environment || 'dev' }}.json)
           echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
-          
-          # Add dynamic parameters
-          FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
+            
+            # Add dynamic parameters
+            FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
             --arg env "${{ env.AZURE_ENV_NAME }}" \
+            --arg principal_type "ServicePrincipal" \
             '. + {
-              environment_name: $env
+              environment_name: $env,
+              principal_type: $principal_type
             }')
-          
-          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
-          echo "✅ Parameters configured for environment: ${{ env.AZURE_ENV_NAME }}"
+            
+            echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
+            echo "✅ Parameters configured for environment: ${{ env.AZURE_ENV_NAME }}"
           
       - name: Provision Infrastructure
         run: |
