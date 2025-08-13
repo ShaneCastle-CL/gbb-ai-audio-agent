@@ -169,6 +169,10 @@ jobs:
             }
           }
           EOF
+
+          azd env set RS_RESOURCE_GROUP ${{ env.RS_RESOURCE_GROUP }}
+          azd env set RS_STORAGE_ACCOUNT ${{ env.RS_STORAGE_ACCOUNT }}
+          azd env set RS_CONTAINER_NAME ${{ env.RS_CONTAINER_NAME }}
           echo "✅ Backend configured"
         env:
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}

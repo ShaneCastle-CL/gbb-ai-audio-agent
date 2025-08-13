@@ -1,7 +1,7 @@
 {
   "name": "rtaudioagent",
-  "location": "centralus",
-  "openai_location": "northcentralus",
+  "location": "eastus",
+  "openai_location": null,
   "cosmosdb_location": null,
   "backend_api_public_url": null,
   "acs_source_phone_number": null,

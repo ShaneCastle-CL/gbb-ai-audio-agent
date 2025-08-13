@@ -318,6 +318,132 @@ update_backend_phone_number() {
 }
 
 # ========================================================================
+# 🌐 Frontend BACKEND_URL configuration
+# ========================================================================
+
+get_best_backend_url() {
+    # Preference order: BACKEND_API_URL (explicit) -> BACKEND_CONTAINER_APP_URL (derived) -> build from FQDN
+    local backend_api_url
+    local backend_container_url
+    local backend_fqdn
+
+    backend_api_url=$(get_azd_env_value "BACKEND_API_URL")
+    backend_container_url=$(get_azd_env_value "BACKEND_CONTAINER_APP_URL")
+    backend_fqdn=$(get_azd_env_value "BACKEND_CONTAINER_APP_FQDN")
+
+    if [ -n "$backend_api_url" ]; then
+        echo "$backend_api_url"
+        return 0
+    fi
+
+    if [ -n "$backend_container_url" ]; then
+        echo "$backend_container_url"
+        return 0
+    fi
+
+    if [ -n "$backend_fqdn" ]; then
+        echo "https://${backend_fqdn}"
+        return 0
+    fi
+
+    echo ""
+    return 1
+}
+
+update_frontend_backend_url() {
+    log_section "🌐 Configuring Frontend BACKEND_URL"
+
+    local resource_group
+    local frontend_name
+    local chosen_url
+
+    resource_group=$(get_azd_env_value "AZURE_RESOURCE_GROUP")
+    frontend_name=$(get_azd_env_value "FRONTEND_CONTAINER_APP_NAME")
+    chosen_url=$(get_best_backend_url)
+
+    if [ -z "$frontend_name" ] || [ -z "$resource_group" ]; then
+        log_warning "Frontend Container App name or resource group not found in azd environment. Skipping BACKEND_URL configuration."
+        return 1
+    fi
+
+    if [ -z "$chosen_url" ]; then
+        log_warning "Could not resolve backend URL from azd outputs. Skipping BACKEND_URL configuration."
+        return 1
+    fi
+
+    log_info "Setting BACKEND_URL on frontend: $chosen_url"
+    az containerapp update \
+        --name "$frontend_name" \
+        --resource-group "$resource_group" \
+        --set-env-vars "BACKEND_URL=$chosen_url" \
+        --output none || {
+            log_error "Failed to set BACKEND_URL on frontend container app"
+            return 1
+        }
+
+    log_success "Frontend BACKEND_URL updated"
+    return 0
+}
+
+update_backend_base_url() {
+    log_section "🧩 Configuring Backend BASE_URL"
+
+    local resource_group
+    local backend_name
+    local backend_type=""
+    local chosen_url
+
+    resource_group=$(get_azd_env_value "AZURE_RESOURCE_GROUP")
+    backend_name=$(get_azd_env_value "BACKEND_CONTAINER_APP_NAME")
+    if [ -n "$backend_name" ]; then
+        backend_type="containerapp"
+    else
+        backend_name=$(get_azd_env_value "BACKEND_APP_SERVICE_NAME")
+        if [ -n "$backend_name" ]; then
+            backend_type="appservice"
+        fi
+    fi
+
+    if [ -z "$backend_type" ] || [ -z "$backend_name" ] || [ -z "$resource_group" ]; then
+        log_warning "Backend service not found in azd environment. Skipping BASE_URL configuration."
+        return 1
+    fi
+
+    chosen_url=$(get_best_backend_url)
+    if [ -z "$chosen_url" ]; then
+        log_warning "Could not resolve backend URL from azd outputs. Skipping BASE_URL configuration."
+        return 1
+    fi
+
+    log_info "Setting BASE_URL on backend ($backend_type: $backend_name) to: $chosen_url"
+    case "$backend_type" in
+        "containerapp")
+            az containerapp update \
+                --name "$backend_name" \
+                --resource-group "$resource_group" \
+                --set-env-vars "BASE_URL=$chosen_url" \
+                --output none || {
+                    log_error "Failed to set BASE_URL on backend container app"
+                    return 1
+                }
+            ;;
+        "appservice")
+            az webapp config appsettings set \
+                --name "$backend_name" \
+                --resource-group "$resource_group" \
+                --settings "BASE_URL=$chosen_url" \
+                --output none || {
+                    log_error "Failed to set BASE_URL on backend app service"
+                    return 1
+                }
+            ;;
+    esac
+
+    log_success "Backend BASE_URL updated"
+    return 0
+}
+
+# ========================================================================
 # 🚀 Main Execution
 # ========================================================================
 
@@ -341,6 +467,16 @@ main() {
         fi
     fi
     
+    # Step 1b: Configure frontend BACKEND_URL for Vite runtime replacement
+    update_frontend_backend_url || {
+        log_warning "Frontend BACKEND_URL configuration did not complete; continue."
+    }
+
+    # Step 1c: Configure backend BASE_URL for FastAPI public URL
+    update_backend_base_url || {
+        log_warning "Backend BASE_URL configuration did not complete; continue."
+    }
+
     # Step 2: Generate environment files (always runs)
     log_section "📄 Generating Environment Configuration Files"
     
