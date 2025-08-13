@@ -209,7 +209,7 @@ resource "azapi_resource" "cosmos_principal_user" {
     properties = {
       identityProvider = {
         properties = {
-          principalType = "User"
+          principalType = var.principal_type
         }
         type = "MicrosoftEntraID"
         // For remaining properties, see IdentityProvider objects
@@ -230,6 +230,7 @@ resource "azapi_resource" "cosmos_principal_user" {
       output["id"],
       output["type"]
     ]
+    prevent_destroy = true
   }
 }
 
