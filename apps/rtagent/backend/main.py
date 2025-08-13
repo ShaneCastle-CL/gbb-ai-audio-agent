@@ -50,7 +50,7 @@ from apps.rtagent.backend.settings import (
     RECOGNIZED_LANGUAGE,
     SILENCE_DURATION_MS,
     VAD_SEMANTIC_SEGMENTATION,
-    VOICE_TTS,
+    GREETING_VOICE_TTS,
     ENTRA_EXEMPT_PATHS,
     ENABLE_AUTH_VALIDATION
 )
@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
         # Speech SDK
         span.set_attribute("startup.stage", "speech_sdk")
         # Speech SDK
-        app.state.tts_client = SpeechSynthesizer(voice=VOICE_TTS, playback="always")
+        app.state.tts_client = SpeechSynthesizer(voice=GREETING_VOICE_TTS, playback="always")
         app.state.stt_client = StreamingSpeechRecognizerFromBytes(
             use_semantic_segmentation=VAD_SEMANTIC_SEGMENTATION,
             vad_silence_timeout_ms=SILENCE_DURATION_MS,
@@ -250,6 +250,11 @@ def setup_app_middleware_and_routes(app: FastAPI):
     # Include new V1 API
     app.include_router(v1_router)
     
+    # Include health endpoints at root level for frontend compatibility
+    from apps.rtagent.backend.api.v1.endpoints import health
+    app.include_router(health.router, tags=["Health"])
+    
+    
 
 # Create the app
 app = None
@@ -272,8 +277,9 @@ if __name__ == "__main__":
     import uvicorn
     
     port = int(os.environ.get("PORT", 8010))
+    # For development with reload, use the import string instead of app object
     uvicorn.run(
-        app,
+        "main:app",  # Use import string for reload to work
         host="0.0.0.0",  # nosec: B104
         port=port,
         reload=True,

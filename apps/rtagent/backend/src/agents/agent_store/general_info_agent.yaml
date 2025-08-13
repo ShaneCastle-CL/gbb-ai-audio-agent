@@ -14,9 +14,14 @@ agent:
 
 model:
   deployment_id: gpt-4o-mini
-  temperature: 0.25
+  temperature: 0.50
   top_p: 0.9
   max_tokens: 1024
+
+voice:
+  name: en-US-Emma2:DragonHDLatestNeural # Voice for TTS output
+  style: chat # Voice style (chat, professional, friendly)
+  rate: "+15%" # Speech rate (moderate pace for general info)
 
 prompts:
   path: voice_agent_general_info.jinja   # see template below

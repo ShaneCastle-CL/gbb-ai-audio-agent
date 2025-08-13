@@ -17,6 +17,11 @@ model:
   top_p: 0.9
   max_tokens: 2024
 
+voice:
+  name: en-US-Andrew2:DragonHDLatestNeural # Voice for TTS output
+  style: chat # Voice style (chat, professional, friendly)
+  rate: "+10%" # Speech rate (slightly faster for claim intake)
+
 prompts:
   path: fnol_intake_agent.jinja
 

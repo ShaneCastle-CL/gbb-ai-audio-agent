@@ -41,9 +41,9 @@ async def _hangup_acs_call(
     *,
     acs_client: CallAutomationClient,
     call_connection_id: str,
-    attempts: int = 3,
+    attempts: int = 2,  # Reduced from 3
     base_backoff_s: float = 0.25,
-    timeout_s: float = 3.0,
+    timeout_s: float = 2.0,  # Reduced from 3.0
 ) -> bool:
     """
     Best-effort hang-up with retries + timeout.
@@ -57,6 +57,9 @@ async def _hangup_acs_call(
     """
     for i in range(1, attempts + 1):
         try:
+            logger.debug(f"Attempting ACS hangup for call {call_connection_id}, attempt {i}")
+            
+            # Try to hangup the call with timeout
             await asyncio.wait_for(
                 acs_client.get_call_connection(call_connection_id).hang_up(
                     is_for_everyone=True
@@ -68,7 +71,26 @@ async def _hangup_acs_call(
                 extra={"call_connection_id": call_connection_id, "attempt": i},
             )
             return True
+            
+        except asyncio.TimeoutError:
+            logger.warning(
+                "ACS hangup timed out",
+                extra={
+                    "call_connection_id": call_connection_id,
+                    "attempt": i,
+                    "timeout_s": timeout_s,
+                },
+            )
         except Exception as exc:
+            # Check if this is actually a successful hangup disguised as an error
+            error_msg = str(exc).lower()
+            if any(phrase in error_msg for phrase in ["not found", "404", "already disconnected", "call ended"]):
+                logger.info(
+                    "ACS hangup - call already disconnected",
+                    extra={"call_connection_id": call_connection_id, "attempt": i},
+                )
+                return True
+                
             logger.warning(
                 "ACS hangup failed",
                 extra={
@@ -77,8 +99,13 @@ async def _hangup_acs_call(
                     "error": repr(exc),
                 },
             )
-            if i < attempts:
-                await asyncio.sleep(base_backoff_s * (2 ** (i - 1)))
+            
+        # Wait before retry (unless it's the last attempt)
+        if i < attempts:
+            backoff_time = base_backoff_s * (2 ** (i - 1))
+            await asyncio.sleep(backoff_time)
+    
+    logger.error(f"ACS hangup failed after {attempts} attempts for call {call_connection_id}")
     return False
 
 
@@ -94,10 +121,29 @@ def _get_disconnect_event(ws: WebSocket, call_connection_id: Optional[str]) -> O
         if store is None:
             store = {}
             ws.app.state.acs_disconnect_events = store  # type: ignore[attr-defined]
-        return store.setdefault(call_connection_id, asyncio.Event())
+        
+        # Create or get existing event
+        if call_connection_id not in store:
+            store[call_connection_id] = asyncio.Event()
+            logger.debug(f"Created disconnect event for call {call_connection_id}")
+        
+        return store[call_connection_id]
     except Exception as exc:
         logger.debug("Failed to access acs_disconnect_events store", extra={"error": repr(exc)})
         return None
+
+
+def _cleanup_disconnect_event(ws: WebSocket, call_connection_id: Optional[str]) -> None:
+    """Clean up the disconnect event after use to prevent memory leaks."""
+    if not call_connection_id:
+        return
+    try:
+        store: Dict[str, asyncio.Event] = getattr(ws.app.state, "acs_disconnect_events", None)  # type: ignore[attr-defined]
+        if store and call_connection_id in store:
+            del store[call_connection_id]
+            logger.debug(f"Cleaned up disconnect event for call {call_connection_id}")
+    except Exception as exc:
+        logger.debug("Failed to cleanup disconnect event", extra={"error": repr(exc)})
 
 
 async def _wait_for_acs_disconnect(
@@ -105,7 +151,7 @@ async def _wait_for_acs_disconnect(
     ws: WebSocket,
     acs_client: Optional[CallAutomationClient],
     call_connection_id: Optional[str],
-    max_wait_s: float = 10.0,
+    max_wait_s: float = 5.0,  # Reduced from 10.0
     poll_interval_s: float = 0.5,
 ) -> bool:
     """
@@ -122,18 +168,20 @@ async def _wait_for_acs_disconnect(
     if not call_connection_id:
         return True  # Nothing to wait on.
 
+    disconnected = False
+    
     # 1) Event-driven (preferred)
     ev = _get_disconnect_event(ws, call_connection_id)
     if ev is not None:
         try:
             await asyncio.wait_for(ev.wait(), timeout=max_wait_s)
             logger.info("ACS disconnect event observed", extra={"call_connection_id": call_connection_id})
-            return True
+            disconnected = True
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for ACS disconnect event", extra={"call_connection_id": call_connection_id})
 
     # 2) Fallback: polling (best-effort; API names vary by SDK version)
-    if acs_client:
+    if not disconnected and acs_client:
         deadline = asyncio.get_event_loop().time() + max_wait_s
         while asyncio.get_event_loop().time() < deadline:
             try:
@@ -149,12 +197,18 @@ async def _wait_for_acs_disconnect(
                 msg = str(exc).lower()
                 if "not found" in msg or "404" in msg or "gone" in msg or "disconnected" in msg:
                     logger.info("ACS disconnect inferred by polling", extra={"call_connection_id": call_connection_id})
-                    return True
+                    disconnected = True
+                    break
                 # Other transient errors: keep waiting a bit
                 await asyncio.sleep(poll_interval_s)
-        logger.warning("Timeout waiting for ACS disconnect (polling)", extra={"call_connection_id": call_connection_id})
+        
+        if not disconnected:
+            logger.warning("Timeout waiting for ACS disconnect (polling)", extra={"call_connection_id": call_connection_id})
 
-    return False
+    # Clean up the disconnect event to prevent memory leaks
+    _cleanup_disconnect_event(ws, call_connection_id)
+    
+    return disconnected
 
 
 async def _send_session_end(ws: WebSocket, reason: TerminationReason) -> None:
@@ -172,6 +226,17 @@ async def _send_session_end(ws: WebSocket, reason: TerminationReason) -> None:
         logger.debug("Failed to send session_end", extra={"error": repr(exc)})
 
 
+def _get_goodbye_message(reason: TerminationReason) -> Optional[str]:
+    """Generate appropriate goodbye message based on termination reason."""
+    goodbye_messages = {
+        TerminationReason.HUMAN_HANDOFF: "Thank you for calling. I'm now transferring you to a live agent who will assist you further. Please hold while I connect you.",
+        TerminationReason.NORMAL: "Thank you for calling. Have a great day! Goodbye.",
+        TerminationReason.ERROR: "I apologize, but we're experiencing technical difficulties. Please call back in a few minutes. Goodbye.",
+        TerminationReason.IDLE_TIMEOUT: "Thank you for calling. Due to inactivity, I'm ending this call. Please call back if you need further assistance. Goodbye."
+    }
+    return goodbye_messages.get(reason)
+
+
 async def terminate_session(
     ws: WebSocket,
     *,
@@ -179,10 +244,10 @@ async def terminate_session(
     call_connection_id: Optional[str],
     reason: TerminationReason = TerminationReason.NORMAL,
     acs_client: Optional[CallAutomationClient] = None,
-    wait_for_disconnect_s: float = 10.0,
+    wait_for_disconnect_s: float = 5.0,  # Reduced from 10s
 ) -> TerminationResult:
     """
-    Best-effort shutdown of ACS call and WebSocket.
+    Best-effort shutdown of ACS call and WebSocket with proper resource cleanup.
 
     **Important**: The WebSocket will not be closed until the ACS call is disconnected
     (either via event or polling), or until `wait_for_disconnect_s` elapses.
@@ -219,14 +284,48 @@ async def terminate_session(
     acs_attempted = False
     acs_succeeded = False
 
-    # 1) Try to hang up ACS (best-effort)
+    # 0) Clean up active media handlers first (before hanging up)
+    if is_acs and call_connection_id:
+        try:
+            # Import here to avoid circular imports
+            from apps.rtagent.backend.api.v1.endpoints.media import _active_handlers
+            
+            if call_connection_id in _active_handlers:
+                handler = _active_handlers[call_connection_id]
+                logger.info(f"Stopping active media handler for call {call_connection_id}")
+                try:
+                    if hasattr(handler, 'stop') and callable(handler.stop):
+                        await handler.stop()
+                        logger.info(f"Media handler stopped successfully for call {call_connection_id}")
+                except Exception as handler_exc:
+                    logger.error(f"Failed to stop media handler cleanly: {handler_exc}")
+                
+                # Remove from active handlers registry
+                del _active_handlers[call_connection_id]
+                logger.info(f"Removed call {call_connection_id} from active handlers registry")
+        except Exception as cleanup_exc:
+            logger.warning(f"Failed to cleanup active handlers: {cleanup_exc}")
+
+    # 1) Try to hang up ACS (best-effort) - REMOVED the hardcoded 10s delay!
     if is_acs and call_connection_id and resolved_acs_client:
         acs_attempted = True
         try:
-            await asyncio.sleep(10) 
+            # Send goodbye message before hanging up (if media handler is still available)
+            try:
+                if hasattr(ws.app.state, 'handler') and ws.app.state.handler:
+                    goodbye_message = _get_goodbye_message(reason)
+                    if goodbye_message:
+                        ws.app.state.handler.play_greeting(greeting_text=goodbye_message)
+                        # Brief pause to let goodbye play
+                        await asyncio.sleep(2.0)
+            except Exception as goodbye_exc:
+                logger.debug(f"Could not play goodbye message: {goodbye_exc}")
+            
             acs_succeeded = await _hangup_acs_call(
                 acs_client=resolved_acs_client,
                 call_connection_id=call_connection_id,
+                attempts=2,  # Reduced attempts for faster termination
+                timeout_s=2.0,  # Reduced timeout
             )
         except Exception as exc:
             logger.exception(

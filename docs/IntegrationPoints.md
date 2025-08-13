@@ -287,7 +287,7 @@ The integration demonstrates a sophisticated call routing mechanism that seamles
 
 ## 4. LLM Integration Patterns
 
-**Scenario:** FastAPI backend needs to invoke LLMs for conversational intelligence, summarization, or agent decision-making.
+**Scenario:** FastAPI backend needs to invoke LLMs for chat intelligence, summarization, or agent decision-making.
 
 ### 4.1 Provider Integration Points
 
@@ -314,7 +314,7 @@ The integration demonstrates a sophisticated call routing mechanism that seamles
 **AWS vs Azure Evaluation Support:**
 - **Azure**: AI Foundry offers end-to-end evaluation pipelines with visual dashboards
 - **AWS**: Bedrock provides model evaluation but requires more manual setup for conversation metrics
-- Azure's evaluation tooling is more mature for conversational AI scenarios
+- Azure's evaluation tooling is more mature for chat AI scenarios
 
 **Iterative Improvement Workflow:**
 - Implement evaluation checkpoints in FastAPI endpoints
@@ -325,7 +325,7 @@ The integration demonstrates a sophisticated call routing mechanism that seamles
 
 - Abstract provider-specific logic behind common interface in `handlers/llm` module
 - Manage prompt templates and rate limits
-- Ensure conversational context (session_id) is passed for continuity
+- Ensure chat context (session_id) is passed for continuity
 - Implement retry and fallback strategies
 
 ---

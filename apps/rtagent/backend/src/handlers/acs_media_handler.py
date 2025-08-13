@@ -247,8 +247,17 @@ class ACSMediaHandler:
     def play_greeting(
         self,
         greeting_text: str = GREETING,
+        voice_name: Optional[str] = None,
+        voice_style: Optional[str] = None,
+        voice_rate: Optional[str] = None,
     ):
-        """Send a greeting message to ACS using TTS (CLIENT)."""
+        """Send a greeting message to ACS using TTS (CLIENT).
+        
+        Args:
+            greeting_text: Text to speak
+            voice_name: Optional agent-specific voice name
+            voice_style: Optional agent-specific voice style
+        """
         if self.enable_tracing:
             with tracer.start_as_current_span(
                 "acs_media_handler.play_greeting",
@@ -258,12 +267,21 @@ class ACSMediaHandler:
                 ),
             ):
                 trace.get_current_span().set_attribute("pipeline.stage", "media -> tts (greeting)")
-                self._play_greeting_internal(greeting_text)
+                self._play_greeting_internal(greeting_text, voice_name, voice_style, voice_rate)
         else:
-            self._play_greeting_internal(greeting_text)
+            self._play_greeting_internal(greeting_text, voice_name, voice_style, voice_rate)
 
-    def _play_greeting_internal(self, greeting_text: str):
+    def _play_greeting_internal(self, greeting_text: str, voice_name: Optional[str] = None, voice_style: Optional[str] = None, voice_rate: Optional[str] = None):
         try:
+            # Cancel any existing playback task before starting greeting
+            if self.playback_task and not self.playback_task.done():
+                logger.info("🛑 Cancelling existing playback task for greeting")
+                try:
+                    self.playback_task.cancel()
+                except Exception as cancel_error:
+                    logger.warning(f"⚠️ Failed to cancel existing playback task: {cancel_error}")
+            
+            # Create new greeting playback task
             self.playback_task = asyncio.create_task(
                 send_response_to_acs(
                     ws=self.incoming_websocket,
@@ -271,8 +289,12 @@ class ACSMediaHandler:
                     blocking=False,
                     latency_tool=self.latency_tool,
                     stream_mode=StreamMode.MEDIA,
+                    voice_name=voice_name,
+                    voice_style=voice_style,
+                    rate=voice_rate,
                 )
             )
+            logger.info(f"🎤 Started greeting playback task with voice: {voice_name or 'default'}, style: {voice_style or 'chat'}, rate: {voice_rate or '+3%'}")
         except Exception as e:
             log_with_context(
                 logger,
