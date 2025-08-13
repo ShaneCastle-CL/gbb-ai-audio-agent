@@ -334,6 +334,28 @@ async def process_gpt_response(  # noqa: D401
 # ===========================================================================
 
 
+def _get_agent_sender_name(cm: "MemoManager") -> str:
+    """Get the agent sender name for display purposes."""
+    try:
+        active_agent = (
+            cm.get_value_from_corememory("active_agent") if cm else None
+        )
+        authenticated = (
+            cm.get_value_from_corememory("authenticated") if cm else False
+        )
+
+        if active_agent == "Claims":
+            return "Claims Specialist"
+        elif active_agent == "General":
+            return "General Info"
+        elif not authenticated:  # Auth agent (before authentication)
+            return "Auth Agent"
+        else:
+            return "Assistant"
+    except Exception:
+        return "Assistant"
+
+
 async def _emit_streaming_text(
     text: str,
     ws: WebSocket,
@@ -383,8 +405,9 @@ async def _emit_streaming_text(
                     voice_style=agent_voice_style,
                     rate=agent_voice_rate,
                 )
+                agent_sender_name = _get_agent_sender_name(cm)
                 await ws.send_text(
-                    json.dumps({"type": "assistant_streaming", "content": text})
+                    json.dumps({"type": "assistant_streaming", "content": text, "speaker": agent_sender_name})
                 )
 
             span.add_event("text_emitted", {"text_length": len(text)})
@@ -411,8 +434,9 @@ async def _emit_streaming_text(
                 voice_style=agent_voice_style,
                 rate=agent_voice_rate,
             )
+            agent_sender_name = _get_agent_sender_name(cm)
             await ws.send_text(
-                json.dumps({"type": "assistant_streaming", "content": text})
+                json.dumps({"type": "assistant_streaming", "content": text, "speaker": agent_sender_name})
             )
 
 

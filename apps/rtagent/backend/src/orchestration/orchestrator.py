@@ -153,9 +153,11 @@ async def _send_agent_greeting(
     if not hasattr(ws.app.state, _APP_GREETS_ATTR):
         ws.app.state.__setattr__(_APP_GREETS_ATTR, app_counts)  # first run
 
+    # Use the actual agent name for greeting history consistency
+    actual_agent_name = agent.name if agent else agent_name
     session_counts = app_counts.get(cm.session_id, {})
-    counter = session_counts.get(agent_name, 0)
-    session_counts[agent_name] = counter + 1
+    counter = session_counts.get(actual_agent_name, 0)
+    session_counts[actual_agent_name] = counter + 1
     app_counts[cm.session_id] = session_counts
 
     # ------------------------------------------------------------------
@@ -175,7 +177,8 @@ async def _send_agent_greeting(
             f"Let's continue with {topic}."
         )
 
-    cm.append_to_history(agent_name, "assistant", greeting)
+    # Store greeting in history using the actual agent name
+    cm.append_to_history(actual_agent_name, "assistant", greeting)
     _cm_set(cm, **{_LAST_ANNOUNCED_KEY: agent_name})
 
     # ------------------------------------------------------------------
