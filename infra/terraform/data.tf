@@ -201,38 +201,38 @@ resource "azapi_resource" "cosmos_backend_db_user" {
 }
 
 # RBAC assignments for Cosmos DB vCore cluster
-# resource "azapi_resource" "cosmos_principal_user" {
-#   type      = "Microsoft.DocumentDB/mongoClusters/users@2025-04-01-preview"
-#   name      = data.azuread_client_config.current.object_id
-#   parent_id = azapi_resource.mongoCluster.id
-#   body = {
-#     properties = {
-#       identityProvider = {
-#         properties = {
-#           principalType = "User"
-#         }
-#         type = "MicrosoftEntraID"
-#         // For remaining properties, see IdentityProvider objects
-#       }
-#       roles = [
-#         {
-#           db   = "admin"
-#           role = "dbOwner"
-#         }
-#       ]
-#     }
-#   }
-#   lifecycle {
-#     ignore_changes = [
-#       body["properties"]["identityProvider"]["properties"]["principalType"],
-#       output["properties"]["provisioningState"],
-#       output["properties"]["roles"],
-#       output["id"],
-#       output["type"]
-#     ]
-#     prevent_destroy = true
-#   }
-# }
+resource "azapi_resource" "cosmos_principal_user" {
+  type      = "Microsoft.DocumentDB/mongoClusters/users@2025-04-01-preview"
+  name      = data.azuread_client_config.current.object_id
+  parent_id = azapi_resource.mongoCluster.id
+  body = {
+    properties = {
+      identityProvider = {
+        properties = {
+          principalType = var.principal_type
+        }
+        type = "MicrosoftEntraID"
+        // For remaining properties, see IdentityProvider objects
+      }
+      roles = [
+        {
+          db   = "admin"
+          role = "dbOwner"
+        }
+      ]
+    }
+  }
+  lifecycle {
+    ignore_changes = [
+      body["properties"]["identityProvider"]["properties"]["principalType"],
+      output["properties"]["provisioningState"],
+      output["properties"]["roles"],
+      output["id"],
+      output["type"]
+    ]
+    prevent_destroy = true
+  }
+}
 
 # Data sources to retrieve MongoDB cluster information
 data "azapi_resource" "mongo_cluster_info" {
