@@ -230,6 +230,7 @@ resource "azapi_resource" "cosmos_principal_user" {
       output["id"],
       output["type"]
     ]
+    prevent_destroy = true
   }
 }
 
