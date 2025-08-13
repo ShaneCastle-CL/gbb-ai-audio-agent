@@ -112,6 +112,7 @@ jobs:
   terraform-plan:
     name: 📋 Preview Changes (Terraform Plan)
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     if: github.event_name == 'pull_request'
     
     env:
