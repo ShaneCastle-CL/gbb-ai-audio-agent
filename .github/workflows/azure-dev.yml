@@ -1,6 +1,16 @@
 # Run when commits are pushed to cleanup/deployment
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
   push:
     # Run when commits are pushed to mainline branch (main or master)
     # Set this to the mainline branch you are using
@@ -17,11 +27,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_ENV_NAME: 'gha'
+      AZURE_ENV_NAME: ${{ github.event.inputs.environment || 'dev' }}
       RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
       RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
       RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
@@ -93,8 +104,8 @@ jobs:
         run: |
           echo "🔧 Setting up Terraform parameters..."
           
-          # Base parameters from tfvars
-          BASE_PARAMS=$(cat infra/terraform/main.tfvars.json)
+          # Base parameters from environment tfvars
+          BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.${{ github.event.inputs.environment || 'dev' }}.json)
           echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
           
           # Add dynamic parameters
@@ -104,7 +115,7 @@ jobs:
               environment_name: $env
             }')
           
-          echo "$FINAL_PARAMS" > infra/terraform/${{ env.AZURE_ENV_NAME }}.tfvars.json
+          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
           echo "✅ Parameters configured for environment: ${{ env.AZURE_ENV_NAME }}"
           
       - name: Provision Infrastructure
