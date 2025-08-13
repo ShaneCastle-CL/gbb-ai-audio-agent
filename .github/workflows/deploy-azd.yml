@@ -201,8 +201,9 @@ jobs:
           # Use azd to run terraform plan
           echo "🔍 Running infrastructure preview..."
           
-          # Run azd provision with --preview flag if available, otherwise show what would be deployed
-          azd provision --no-prompt --preview || azd provision --no-prompt --help | grep -i preview || echo "⚠️ Plan preview not available, would provision infrastructure"
+          azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" || \
+            azd provision --no-prompt --help | grep -i preview || \
+            echo "⚠️ Plan preview not available, would provision infrastructure"
           echo "plan-available=true" >> $GITHUB_OUTPUT
         env:
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
