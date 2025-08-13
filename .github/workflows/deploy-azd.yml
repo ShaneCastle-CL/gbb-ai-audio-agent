@@ -183,16 +183,22 @@ jobs:
           # Use azd to run terraform plan
           echo "🔍 Running infrastructure preview..."
           # Ensure the correct azd environment exists and is set
-          if ! azd env list --output json | jq -e ".[] | select(.name==\"${{ env.AZURE_ENV_NAME }}\")" > /dev/null; then
-            echo "🔧 Creating azd environment: ${{ env.AZURE_ENV_NAME }}"
-            azd env new "${{ env.AZURE_ENV_NAME }}" --no-prompt
+          ENV_NAME="${{ env.AZURE_ENV_NAME }}"
+          if [ -z "$ENV_NAME" ]; then
+            ENV_NAME="dev"
+            echo "⚠️ AZURE_ENV_NAME not set, defaulting to 'dev'"
           fi
-          azd env select "${{ env.AZURE_ENV_NAME }}"
-          azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" || \
+          if ! azd env list --output json | jq -e ".[] | select(.name==\"$ENV_NAME\")" > /dev/null; then
+            echo "🔧 Creating azd environment: $ENV_NAME"
+            azd env new "$ENV_NAME" --no-prompt
+          fi
+          azd env select "$ENV_NAME"
+          azd provision --no-prompt --preview --environment "$ENV_NAME" || \
             azd provision --no-prompt --help | grep -i preview || \
             echo "⚠️ Plan preview not available, would provision infrastructure"
           echo "plan-available=true" >> $GITHUB_OUTPUT
         env:
+          AZURE_ENV_NAME: ${{ env.AZURE_ENV_NAME }}
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
