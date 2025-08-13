@@ -77,8 +77,7 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
-      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_ENV_NAME: 'dev'
       RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
       RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
       RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
@@ -113,42 +112,41 @@ jobs:
 
       - name: ⚙️ Setup Terraform Parameters
         run: |
-          echo "Setting up dev environment parameters for Terraform..."
-          cp infra/terraform/params/main.tfvars.${{ inputs.environment }}.json infra/terraform/main.tfvars.json
+          echo "🔧 Setting up Terraform parameters..."
           
-          # Get the Object ID (Principal ID) from the Client ID
-          echo "🔍 Getting principal Object ID from Client ID..."
-          PRINCIPAL_OBJECT_ID=$(az ad sp show --id "${{ env.AZURE_CLIENT_ID }}" --query objectId --output tsv)
-          echo "✅ Principal Object ID: $PRINCIPAL_OBJECT_ID"
+          # Base parameters from environment tfvars (use dev for PR previews)
+          BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.dev.json)
+          echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
           
-          # Update the JSON file with principal configuration
-          echo "🔧 Adding principal configuration to main.tfvars.json..."
-          jq --arg principal_id "$PRINCIPAL_OBJECT_ID" \
-             --arg principal_type "ServicePrincipal" \
-             '. + {principal_id: $principal_id, principal_type: $principal_type}' \
-             infra/terraform/main.tfvars.json > infra/terraform/main.tfvars.json.tmp
+          # Add dynamic parameters
+          FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
+            --arg env "dev" \
+            --arg principal_type "ServicePrincipal" \
+            '. + {
+              environment_name: $env,
+              principal_type: $principal_type
+            }')
           
-          mv infra/terraform/main.tfvars.json.tmp infra/terraform/main.tfvars.json
-          
-          echo "✅ Parameters copied and principal configuration added successfully"
-          echo "📋 Current main.tfvars.json contents:"
-          cat infra/terraform/main.tfvars.json
+          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
+          echo "✅ Parameters configured for environment: dev"
 
       - name: 🔧 Configure Terraform Backend
         run: |
-          echo "🔧 Configuring Terraform backend for remote state..."
+          echo "🔧 Configuring Terraform backend..."
+          echo "Backend: ${{ env.RS_STORAGE_ACCOUNT }}/${{ env.RS_CONTAINER_NAME }}/dev.tfstate"
+          
           cat > infra/terraform/backend.tf << EOF
           terraform {
             backend "azurerm" {
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "prod/${{ env.AZURE_ENV_NAME }}.tfstate"
+              key                  = "dev.tfstate"
               use_azuread_auth     = true
             }
           }
           EOF
-          echo "✅ Backend configuration created successfully"
+          echo "✅ Backend configured"
         env:
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
@@ -221,8 +219,7 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
-      AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+      AZURE_ENV_NAME: ${{ matrix.environment }}
       RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
       RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
       RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
@@ -273,47 +270,41 @@ jobs:
 
       - name: ⚙️ Setup Terraform Parameters
         run: |
-          echo "Setting up ${{ matrix.environment }} environment parameters for Terraform..."
-          if [ -f "infra/terraform/params/main.tfvars.${{ matrix.environment }}.json" ]; then
-            cp infra/terraform/params/main.tfvars.${{ matrix.environment }}.json infra/terraform/main.tfvars.json
-            echo "Parameters for ${{ matrix.environment }} copied successfully"
-          else
-            echo "⚠️ No specific parameters found for ${{ matrix.environment }}, using existing main.tfvars.json"
-          fi
+          echo "🔧 Setting up Terraform parameters..."
           
-          # Get the Object ID (Principal ID) from the Client ID
-          echo "🔍 Getting principal Object ID from Client ID..."
-          PRINCIPAL_OBJECT_ID=$(az ad sp show --id "${{ env.AZURE_CLIENT_ID }}" --query objectId --output tsv)
-          echo "✅ Principal Object ID: $PRINCIPAL_OBJECT_ID"
+          # Base parameters from environment tfvars
+          BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.${{ matrix.environment }}.json)
+          echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
           
-          # Update the JSON file with principal configuration
-          echo "🔧 Adding principal configuration to main.tfvars.json..."
-          jq --arg principal_id "$PRINCIPAL_OBJECT_ID" \
-             --arg principal_type "ServicePrincipal" \
-             '. + {principal_id: $principal_id, principal_type: $principal_type}' \
-             infra/terraform/main.tfvars.json > infra/terraform/main.tfvars.json.tmp
+          # Add dynamic parameters
+          FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
+            --arg env "${{ matrix.environment }}" \
+            --arg principal_type "ServicePrincipal" \
+            '. + {
+              environment_name: $env,
+              principal_type: $principal_type
+            }')
           
-          mv infra/terraform/main.tfvars.json.tmp infra/terraform/main.tfvars.json
-          
-          echo "✅ Principal configuration added to main.tfvars.json"
-          echo "📋 Current main.tfvars.json contents:"
-          cat infra/terraform/main.tfvars.json
+          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
+          echo "✅ Parameters configured for environment: ${{ matrix.environment }}"
 
       - name: 🔧 Configure Terraform Backend
         run: |
-          echo "🔧 Configuring Terraform backend for remote state..."
+          echo "🔧 Configuring Terraform backend..."
+          echo "Backend: ${{ env.RS_STORAGE_ACCOUNT }}/${{ env.RS_CONTAINER_NAME }}/${{ matrix.environment }}.tfstate"
+          
           cat > infra/terraform/backend.tf << EOF
           terraform {
             backend "azurerm" {
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "${{ matrix.environment }}/${{ env.AZURE_ENV_NAME }}.tfstate"
+              key                  = "${{ matrix.environment }}.tfstate"
               use_azuread_auth     = true
             }
           }
           EOF
-          echo "✅ Backend configuration created successfully for ${{ matrix.environment }}"
+          echo "✅ Backend configured"
         env:
           ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
           ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
