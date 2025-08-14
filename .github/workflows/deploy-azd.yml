@@ -80,6 +80,9 @@ env:
   AZD_SKIP_INTERACTIVE: true
   CI: true
   GITHUB_ACTIONS: true
+  RS_RESOURCE_GROUP: ${{ inputs.rs_resource_group }}
+  RS_STORAGE_ACCOUNT: ${{ inputs.rs_storage_account }}
+  RS_CONTAINER_NAME: ${{ inputs.rs_container_name }}
 
 permissions:
   id-token: write   # Required for OIDC authentication

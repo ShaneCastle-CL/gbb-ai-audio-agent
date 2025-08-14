@@ -125,13 +125,6 @@ resource "azurerm_container_app" "backend" {
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
 
-  // Image is managed outside of terraform (i.e azd deploy)
-  lifecycle {
-    ignore_changes = [
-      template[0].container[0].image
-    ]
-  }
-
   identity {
     type         = "UserAssigned"
     identity_ids = [azurerm_user_assigned_identity.backend.id]
@@ -158,14 +151,14 @@ resource "azurerm_container_app" "backend" {
   }
 
   template {
-    min_replicas = 1
+    min_replicas = 3
     max_replicas = 10
 
     container {
       name   = "main"
       image  = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
-      cpu    = 1.0
-      memory = "2.0Gi"
+      cpu    = 2
+      memory = "4.0Gi"
 
       # Azure Communication Services Configuration
       env {
@@ -186,12 +179,9 @@ resource "azurerm_container_app" "backend" {
         }
       }
 
-      dynamic "env" {
-        for_each = var.disable_local_auth ? [] : [1]
-        content {
-          name        = "ACS_CONNECTION_STRING"
-          secret_name = "acs-connection-string"
-        }
+      env {
+        name        = "ACS_CONNECTION_STRING"
+        secret_name = "acs-connection-string"
       }
 
       env {
@@ -331,6 +321,13 @@ resource "azurerm_container_app" "backend" {
     "azd-service-name" = "rtaudio-server"
   })
 
+  // Image is managed outside of terraform (i.e azd deploy)
+  lifecycle {
+    ignore_changes = [
+      template[0].container[0].image,
+      template[0].container[0].env
+    ]
+  }
   depends_on = [
     azurerm_key_vault_secret.acs_connection_string,
     azurerm_role_assignment.keyvault_backend_secrets

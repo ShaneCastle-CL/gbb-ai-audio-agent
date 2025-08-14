@@ -8,5 +8,5 @@ dependencies:
   - pip
   - ipykernel
   - pip:
-    - -r requirements.txt
-    - -r requirements-codequality.txt
+    # Install the local project in editable mode with dev extras
+    - -e .[dev]

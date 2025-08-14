@@ -1,0 +1,216 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gbb-ai-audio-agent"
+version = "0.0.0"
+description = "Real-time voice app: FastAPI + Azure ACS/Speech/OpenAI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Contributors" }]
+dependencies = [
+  # Core FastAPI microservices stack
+  "fastapi>=0.104.0",
+  "uvicorn[standard]>=0.24.0",
+  "pydantic>=2.5.0",
+  "pydantic-settings>=2.1.0",
+  "starlette>=0.27.0",
+  "redis>=5.0.0",
+  "aiohttp>=3.9.0",
+  "python-multipart>=0.0.6",
+  "pyjwt",
+
+  # Azure services - Linux App Service compatible versions
+  "azure-cosmos>=4.5.0",
+  "azure-identity>=1.15.0",
+  "azure-storage-blob>=12.19.0",
+  "azure-cognitiveservices-speech>=1.45.0",
+  "azure-communication-callautomation>=1.4.0",
+  "azure-communication-identity>=1.5.0",
+  "azure-keyvault-secrets>=4.7.0",
+  "azure-eventgrid>=4.10.0",
+
+  # Azure monitoring and telemetry
+  "azure-monitor-opentelemetry>=1.6.11",
+  "opentelemetry-sdk",
+  "opentelemetry-instrumentation",
+  "opentelemetry-instrumentation-django",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-flask",
+  "opentelemetry-instrumentation-psycopg2",
+  "opentelemetry-instrumentation-requests",
+  "opentelemetry-instrumentation-urllib",
+  "opentelemetry-instrumentation-urllib3",
+  "opentelemetry-instrumentation-openai-v2",
+
+  # Azure + misc
+  "azure-core>=1.29.0",
+  "colorama>=0.4.6",
+
+  # AI and OpenAI integration
+  "openai>=1.50.0",
+
+  # HTTP clients - stable versions
+  "httpx>=0.27.0",
+  "aiofiles>=23.0.0",
+
+  # Async and networking tools
+  "tenacity>=8.5.0",
+  "websockets>=12.0",
+  "backoff>=2.0.0",
+
+  # Data processing
+  "numpy>=1.24.0",
+  "python-dotenv>=1.0.0",
+  "python-json-logger>=2.0.0",
+  "jinja2>=3.1.0",
+  "typing-extensions>=4.8.0",
+  "langdetect>=1.0.9",
+
+  # Database drivers
+  "pymongo>=4.6.0",
+  "rapidfuzz>=3.13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  # Code quality and tooling
+  "isort==5.9.3",
+  "black[jupyter]==25.1.0",
+  "flake8==3.9.2",
+  "interrogate==1.4.0",
+  "pre-commit==2.14.0",
+  "types-requests",
+  "ruff",
+  "bandit",
+  "pylint",
+  "pytest",
+  "pytest-cov",
+  "types-PyYAML",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\\.pyi?$'
+exclude = '''
+/(
+  \.git
+  | \.venv
+  | venv
+  | \.mypy_cache
+  | \.pytest_cache
+  | build
+  | dist
+  | __pycache__
+  | node_modules
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+py_version = 311
+multi_line_output = 3
+# Treat these as first-party to help import sorting
+known_first_party = ["src", "apps"]
+skip = ["venv", ".venv", "build", "dist", "__pycache__", "node_modules"]
+
+[tool.ruff]
+# Linter + import sorter (kept alongside isort to support both workflows)
+line-length = 100
+target-version = "py311"
+src = ["src", "apps"]
+exclude = [
+  ".git", ".venv", "venv", "build", "dist", "__pycache__", "node_modules"
+]
+
+[tool.ruff.lint]
+# Core rule sets; rely on Black for line length
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pylint.main]
+py-version = "3.11"
+jobs = 0
+load-plugins = []
+
+[tool.pylint.messages_control]
+# Trim noise and allow pragmatic iteration in services code
+disable = [
+  "C0114", # missing-module-docstring
+  "C0115", # missing-class-docstring
+  "C0116", # missing-function-docstring
+  "R0903", # too-few-public-methods
+  "R0801", # duplicate-code (allow initially)
+  "W0511"  # fixme
+]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = [
+  "E203", # whitespace before ':' per Black
+  "W503"  # line break before binary operator per Black
+]
+exclude = [
+  ".git", "__pycache__", "build", "dist", ".venv", "venv", "node_modules"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q -ra"
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::UserWarning"
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src", "apps"]
+omit = [
+  "tests/*",
+  "*/__init__.py",
+  "*/__main__.py"
+]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = true
+fail_under = 80
+exclude_lines = [
+  "pragma: no cover",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:"
+]
+
+[tool.bandit]
+# Security scanner settings
+skips = ["B101"]
+targets = ["src"]
+exclude = ["tests", "venv", ".venv", "build", "dist"]
+
+[tool.interrogate]
+# Docstring coverage for public interfaces
+ignore-init-method = true
+ignore-init-module = true
+ignore-module = true
+ignore-nested-functions = true
+ignore-private = true
+ignore-property-decorators = true
+fail-under = 70
+exclude = ["setup.py", "tests", "venv", ".venv", "build", "dist"]
+verbosity = 0
+color = true
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
