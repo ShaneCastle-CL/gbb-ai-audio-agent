@@ -230,7 +230,7 @@ jobs:
         if: github.event_name == 'pull_request'
         id: preview
         run: |
-          echo "🔍 Running infrastructure preview..."
+          echo "🔍 Running infrastructure preview via AZD..."
           
           # Validate azd environment contains required variables
           echo "🔍 Validating azd environment configuration..."
@@ -251,32 +251,23 @@ jobs:
             exit 1
           fi
 
-          # Run azd provision with preview
-          azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" || \
-            echo "⚠️ Preview not available via azd, will generate Terraform plan instead"
-
-      - name: 🧪 Generate Terraform Plan
-        if: github.event_name == 'pull_request'
-        id: tfplan
-        run: |
-          set -e
-          echo "🧪 Generating Terraform plan..."
-          cd infra/terraform
-          
-          # Initialize Terraform
-          terraform init -input=false -no-color
-          
-          # Create plan file
-          if ! terraform plan -input=false -no-color -var-file=main.tfvars.json -out=tfplan; then
-            echo "Terraform plan failed. See previous step logs for details." > "$GITHUB_WORKSPACE/tfplan.txt"
-            exit 0
+          # Capture azd provision preview output
+          echo "🔍 Running azd provision preview..."
+          if azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" > "$GITHUB_WORKSPACE/azd-preview.txt" 2>&1; then
+            echo "✅ AZD preview completed successfully"
+            echo "preview-success=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ AZD preview failed or not supported, output captured for review"
+            echo "preview-success=false" >> $GITHUB_OUTPUT
           fi
           
-          # Render plan to text
-          if ! terraform show -no-color tfplan > "$GITHUB_WORKSPACE/tfplan.txt"; then
-            echo "Could not render plan output with 'terraform show'." > "$GITHUB_WORKSPACE/tfplan.txt"
+          # Ensure we have some output for the PR comment
+          if [ ! -s "$GITHUB_WORKSPACE/azd-preview.txt" ]; then
+            echo "No preview output available from azd provision --preview" > "$GITHUB_WORKSPACE/azd-preview.txt"
           fi
-          echo "✅ Plan output ready"
+          
+          echo "✅ Preview output ready"
+        
           
       - name: 💬 Comment PR with Plan Summary
         if: github.event_name == 'pull_request'
@@ -289,34 +280,41 @@ jobs:
               .replace(/</g, '&lt;')
               .replace(/>/g, '&gt;');
 
-            let planContent = '';
+            let previewContent = '';
             try {
-              planContent = fs.readFileSync('tfplan.txt', 'utf8');
+              previewContent = fs.readFileSync('azd-preview.txt', 'utf8');
             } catch (e) {
-              planContent = 'Terraform plan output not available.';
+              previewContent = 'Azure Developer CLI preview output not available.';
             }
 
-            // Truncate very long plans
+            // Truncate very long previews
             const MAX_LEN = 60000;
-            if (planContent.length > MAX_LEN) {
-              planContent = planContent.slice(0, MAX_LEN) + "\n...\n[truncated]";
+            if (previewContent.length > MAX_LEN) {
+              previewContent = previewContent.slice(0, MAX_LEN) + "\n...\n[truncated]";
             }
 
-            const planSection = `\n<details>\n<summary><strong>Terraform Plan</strong> (click to expand)</summary>\n\n<pre>\n${escapeHtml(planContent)}\n</pre>\n</details>\n`;
+            const previewSection = `\n<details>\n<summary><strong>AZD Infrastructure Preview</strong> (click to expand)</summary>\n\n<pre>\n${escapeHtml(previewContent)}\n</pre>\n</details>\n`;
 
-            const output = `## 🏗️ Infrastructure Preview
+            const previewSuccess = '${{ steps.preview.outputs.preview-success }}' === 'true';
+            const statusIcon = previewSuccess ? '✅' : '⚠️';
+            const statusText = previewSuccess ? 'Preview completed successfully' : 'Preview completed with warnings (see details below)';
+
+            const output = `## 🏗️ Infrastructure Preview ${statusIcon}
             
             **Environment:** \`dev\` (PR preview)
-            **Action:** Infrastructure provision preview
-            **Provider:** Terraform via Azure Developer CLI
+            **Action:** Infrastructure provision preview via Azure Developer CLI
+            **Status:** ${statusText}
             
             ### 📋 Changes Summary
             - 🏗️ Infrastructure changes will be applied via \`azd provision\`
             - 🚀 Application changes will be deployed via \`azd deploy\`
             - 📦 Full deployment available via \`azd up\`
             
+            ### 🛠️ Preview Details
+            This preview was generated using \`azd provision --preview\` which shows what infrastructure changes would be made without actually creating or modifying resources.
+            
             **Note:** This is a preview - no actual resources will be created until merged to main.
-            ${planSection}`;
+            ${previewSection}`;
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
