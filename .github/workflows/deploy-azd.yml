@@ -58,15 +58,26 @@ on:
         description: 'Container name for Terraform state'
         required: false
         type: string
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/terraform/**'
+      - 'src/**'
+      - 'apps/**'
+      - 'azure.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infra/terraform/**'
+      - 'azure.yaml'
 
 env:
   # CI/CD mode configuration
   AZD_SKIP_INTERACTIVE: true
   CI: true
   GITHUB_ACTIONS: true
-  RS_RESOURCE_GROUP: ${{ inputs.rs_resource_group }}
-  RS_STORAGE_ACCOUNT: ${{ inputs.rs_storage_account }}
-  RS_CONTAINER_NAME: ${{ inputs.rs_container_name }}
 
 permissions:
   id-token: write   # Required for OIDC authentication
@@ -75,25 +86,48 @@ permissions:
 
 jobs:
   # ============================================================================
-  # TERRAFORM PLAN (for PRs only)
+  # SHARED DEPLOYMENT JOB (handles both preview and deployment)
   # ============================================================================
-  terraform-plan:
-    name: 📋 Preview Changes (Terraform Plan)
+  deploy:
+    name: ${{ github.event_name == 'pull_request' && '📋 Preview Changes' || '🚀 Deploy with AZD' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    if: github.event_name == 'pull_request'
+    
+    # Environment selection logic
+    environment: >-
+      ${{
+        github.event_name == 'pull_request' && 'dev' ||
+        github.event_name == 'workflow_dispatch' && inputs.environment ||
+        github.event_name == 'workflow_call' && inputs.environment ||
+        'dev'
+      }}
     
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_ENV_NAME: ${{ inputs.environment }}
+      # Environment name logic
+      AZURE_ENV_NAME: >-
+        ${{
+          github.event_name == 'pull_request' && 'dev' ||
+          github.event_name == 'workflow_dispatch' && inputs.environment ||
+          github.event_name == 'workflow_call' && inputs.environment ||
+          'dev'
+        }}
+      # Remote state fallback chain: inputs → repo vars → defaults
       RS_RESOURCE_GROUP: ${{ inputs.rs_resource_group }}
       RS_STORAGE_ACCOUNT: ${{ inputs.rs_storage_account }}
       RS_CONTAINER_NAME: ${{ inputs.rs_container_name }}
       ARM_USE_OIDC: "true"
-        
+    
+    outputs:
+      resource_group: ${{ steps.extract-outputs.outputs.resource_group }}
+      frontend_url: ${{ steps.extract-outputs.outputs.frontend_url }}
+      backend_url: ${{ steps.extract-outputs.outputs.backend_url }}
+      
     steps:
+      # ========================================================================
+      # SHARED SETUP STEPS
+      # ========================================================================
       - name: 🛒 Checkout Repository
         uses: actions/checkout@v4
         
@@ -120,30 +154,60 @@ jobs:
             --tenant-id "$Env:AZURE_TENANT_ID"
         shell: pwsh
 
+      # ========================================================================
+      # SHARED CONFIGURATION STEPS
+      # ========================================================================
+      - name: ⚙️ Setup AZD Environment
+        run: |
+          echo "🔧 Setting up azd environment: ${{ env.AZURE_ENV_NAME }}"
+          
+          # Create or select azd environment
+          if ! azd env list --output json | jq -e ".[] | select(.name==\"${{ env.AZURE_ENV_NAME }}\")" > /dev/null; then
+            echo "🔧 Creating azd environment: ${{ env.AZURE_ENV_NAME }}"
+            azd env new "${{ env.AZURE_ENV_NAME }}" --no-prompt
+          fi
+          azd env select "${{ env.AZURE_ENV_NAME }}"
+
+          # Set remote state configuration in azd environment
+          echo "🔧 Setting remote state configuration..."
+          azd env set RS_RESOURCE_GROUP "${{ env.RS_RESOURCE_GROUP }}"
+          azd env set RS_STORAGE_ACCOUNT "${{ env.RS_STORAGE_ACCOUNT }}"
+          azd env set RS_CONTAINER_NAME "${{ env.RS_CONTAINER_NAME }}"
+          
+          echo "✅ AZD environment configured"
+
       - name: ⚙️ Setup Terraform Parameters
         run: |
           echo "🔧 Setting up Terraform parameters..."
           
-          # Base parameters from environment tfvars (use dev for PR previews)
-          BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.dev.json)
+          # Determine environment for tfvars
+          TFVARS_ENV="${{ env.AZURE_ENV_NAME }}"
+          if [ "$TFVARS_ENV" = "dev" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Using dev tfvars for PR preview"
+          fi
+          
+          # Base parameters from environment tfvars
+          BASE_PARAMS=$(cat "infra/terraform/params/main.tfvars.${TFVARS_ENV}.json")
           echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
           
           # Add dynamic parameters
           FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
-            --arg env "dev" \
+            --arg env "${{ env.AZURE_ENV_NAME }}" \
             --arg principal_type "ServicePrincipal" \
+            --arg deployed_by "${GITHUB_ACTOR}" \
             '. + {
               environment_name: $env,
-              principal_type: $principal_type
+              principal_type: $principal_type,
+              deployed_by: $deployed_by
             }')
           
           echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
-          echo "✅ Parameters configured for environment: dev"
+          echo "✅ Parameters configured for environment: ${{ env.AZURE_ENV_NAME }}"
 
       - name: 🔧 Configure Terraform Backend
         run: |
           echo "🔧 Configuring Terraform backend..."
-          echo "Backend: ${{ env.RS_STORAGE_ACCOUNT }}/${{ env.RS_CONTAINER_NAME }}/dev.tfstate"
+          echo "Backend: ${{ env.RS_STORAGE_ACCOUNT }}/${{ env.RS_CONTAINER_NAME }}/${{ env.AZURE_ENV_NAME }}.tfstate"
           
           cat > infra/terraform/backend.tf << EOF
           terraform {
@@ -151,93 +215,71 @@ jobs:
               resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
               storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
               container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "dev.tfstate"
+              key                  = "${{ env.AZURE_ENV_NAME }}.tfstate"
               use_azuread_auth     = true
             }
           }
           EOF
           
           echo "✅ Backend configured"
-        env:
-          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
 
-      - name: 📋 Run Terraform Plan via AZD
-        id: plan
+      # ========================================================================
+      # PREVIEW MODE (for PRs)
+      # ========================================================================
+      - name: 📋 Run Infrastructure Preview
+        if: github.event_name == 'pull_request'
+        id: preview
         run: |
-          # Use azd to run terraform plan
           echo "🔍 Running infrastructure preview..."
-          # Ensure the correct azd environment exists and is set
-          ENV_NAME="${{ env.AZURE_ENV_NAME }}"
-          if [ -z "$ENV_NAME" ]; then
-            ENV_NAME="dev"
-            echo "⚠️ AZURE_ENV_NAME not set, defaulting to 'dev'"
-          fi
-          if ! azd env list --output json | jq -e ".[] | select(.name==\"$ENV_NAME\")" > /dev/null; then
-            echo "🔧 Creating azd environment: $ENV_NAME"
-            azd env new "$ENV_NAME" --no-prompt
-          fi
-          azd env select "$ENV_NAME"
-
-          # Persist resolved remote state values into the azd environment
-          echo "🔧 Setting azd environment remote state variables from resolved values..."
-          azd env set RS_RESOURCE_GROUP "${{ env.RS_RESOURCE_GROUP }}"
-          azd env set RS_STORAGE_ACCOUNT "${{ env.RS_STORAGE_ACCOUNT }}"
-          azd env set RS_CONTAINER_NAME "${{ env.RS_CONTAINER_NAME }}"
-          # Confirm azd env contains remote state values for RS_RESOURCE_GROUP, RS_STORAGE_ACCOUNT, RS_CONTAINER_NAME
-          echo "🔍 Checking azd environment values for remote state variables..."
+          
+          # Validate azd environment contains required variables
+          echo "🔍 Validating azd environment configuration..."
           azd env get-values > /tmp/azd-env-values.env
-          source /tmp/azd-env-values.env
-
+          
           missing=0
           for var in RS_RESOURCE_GROUP RS_STORAGE_ACCOUNT RS_CONTAINER_NAME; do
-            value=$(grep "^$var=" /tmp/azd-env-values.env | cut -d'=' -f2-)
-            if [ -z "$value" ]; then
+            if ! grep -q "^$var=" /tmp/azd-env-values.env; then
               echo "❌ Missing required remote state variable: $var"
               missing=1
             fi
           done
+          
           if [ $missing -eq 0 ]; then
-            echo "✅ All required remote state variables are present in azd environment."
+            echo "✅ All required remote state variables are present"
           else
-            echo "❌ Some required remote state variables are missing in azd environment."
+            echo "❌ Some required remote state variables are missing"
+            exit 1
           fi
-          azd provision --no-prompt --preview --environment "$ENV_NAME" || \
-            azd provision --no-prompt --help | grep -i preview || \
-            echo "⚠️ Plan preview not available, would provision infrastructure"
-          echo "plan-available=true" >> $GITHUB_OUTPUT
-        env:
-          AZURE_ENV_NAME: ${{ env.AZURE_ENV_NAME }}
-          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
-      - name: 🧪 Generate Terraform Plan Output
+
+          # Run azd provision with preview
+          azd provision --no-prompt --preview --environment "${{ env.AZURE_ENV_NAME }}" || \
+            echo "⚠️ Preview not available via azd, will generate Terraform plan instead"
+
+      - name: 🧪 Generate Terraform Plan
+        if: github.event_name == 'pull_request'
         id: tfplan
         run: |
           set -e
-          echo "🧪 Generating raw Terraform plan output..."
+          echo "🧪 Generating Terraform plan..."
           cd infra/terraform
+          
+          # Initialize Terraform
           terraform init -input=false -no-color
-          # Create plan file with provided variables
+          
+          # Create plan file
           if ! terraform plan -input=false -no-color -var-file=main.tfvars.json -out=tfplan; then
             echo "Terraform plan failed. See previous step logs for details." > "$GITHUB_WORKSPACE/tfplan.txt"
             exit 0
           fi
+          
           # Render plan to text
           if ! terraform show -no-color tfplan > "$GITHUB_WORKSPACE/tfplan.txt"; then
             echo "Could not render plan output with 'terraform show'." > "$GITHUB_WORKSPACE/tfplan.txt"
           fi
           echo "✅ Plan output ready"
-        env:
-          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
           
       - name: 💬 Comment PR with Plan Summary
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -254,7 +296,7 @@ jobs:
               planContent = 'Terraform plan output not available.';
             }
 
-            // Truncate very long plans to keep comment size reasonable (~60k chars)
+            // Truncate very long plans
             const MAX_LEN = 60000;
             if (planContent.length > MAX_LEN) {
               planContent = planContent.slice(0, MAX_LEN) + "\n...\n[truncated]";
@@ -262,9 +304,9 @@ jobs:
 
             const planSection = `\n<details>\n<summary><strong>Terraform Plan</strong> (click to expand)</summary>\n\n<pre>\n${escapeHtml(planContent)}\n</pre>\n</details>\n`;
 
-            const output = `## 🏗️ Azure Developer CLI Deployment Preview
+            const output = `## 🏗️ Infrastructure Preview
             
-            **Environment:** \`pr-preview\` (temporary)
+            **Environment:** \`dev\` (PR preview)
             **Action:** Infrastructure provision preview
             **Provider:** Terraform via Azure Developer CLI
             
@@ -272,10 +314,6 @@ jobs:
             - 🏗️ Infrastructure changes will be applied via \`azd provision\`
             - 🚀 Application changes will be deployed via \`azd deploy\`
             - 📦 Full deployment available via \`azd up\`
-            
-            ### 🔗 Resources
-            - [Azure Developer CLI Documentation](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/)
-            - [Project Configuration](./azure.yaml)
             
             **Note:** This is a preview - no actual resources will be created until merged to main.
             ${planSection}`;
@@ -287,112 +325,15 @@ jobs:
               body: output
             });
 
-
-  # ============================================================================
-  # AZURE DEVELOPER CLI DEPLOYMENT
-  # ============================================================================
-  azd-deployment:
-    name: 🚀 Deploy with AZD
-    runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'workflow_call'
-    
-    strategy:
-      matrix:
-        environment: ${{ github.event_name == 'workflow_dispatch' && fromJson(format('["{0}"]', inputs.environment)) || github.event_name == 'workflow_call' && fromJson(format('["{0}"]', inputs.environment)) || fromJson('["dev"]') }}
-    
-    environment: ${{ matrix.environment }}
-    
-    env:
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_ENV_NAME: ${{ matrix.environment }}
-      RS_RESOURCE_GROUP: ${{ inputs.rs_resource_group }}
-      RS_STORAGE_ACCOUNT: ${{ inputs.rs_storage_account }}
-      RS_CONTAINER_NAME: ${{ inputs.rs_container_name }}
-      ARM_USE_OIDC: "true"
-    
-    outputs:
-      resource_group: ${{ steps.outputs.outputs.resource_group }}
-      frontend_url: ${{ steps.outputs.outputs.frontend_url }}
-      backend_url: ${{ steps.outputs.outputs.backend_url }}
-      
-    steps:
-      - name: 🛒 Checkout Repository
-        uses: actions/checkout@v4
-        
-      - name: 🔐 Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          
-      - name: ⚙️ Setup Azure Developer CLI
-        uses: Azure/setup-azd@v2
-        
-      - name: 🔧 Install Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.0
-
-      - name: 🔐 Log in with Azure Developer CLI (OIDC)
-        run: |
-          azd auth login `
-            --client-id "$Env:AZURE_CLIENT_ID" `
-            --federated-credential-provider "github" `
-            --tenant-id "$Env:AZURE_TENANT_ID"
-        shell: pwsh
-
-      - name: ⚙️ Setup Terraform Parameters
-        run: |
-          echo "🔧 Setting up Terraform parameters..."
-          
-          # Base parameters from environment tfvars
-          BASE_PARAMS=$(cat infra/terraform/params/main.tfvars.${{ matrix.environment }}.json)
-          echo "Base: $(echo "$BASE_PARAMS" | jq -c .)"
-          
-          # Add dynamic parameters
-          FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
-            --arg env "${{ matrix.environment }}" \
-            --arg principal_type "ServicePrincipal" \
-            '. + {
-              environment_name: $env,
-              principal_type: $principal_type
-            }')
-          
-          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
-          echo "✅ Parameters configured for environment: ${{ matrix.environment }}"
-
-      - name: 🔧 Configure Terraform Backend
-        run: |
-          echo "🔧 Configuring Terraform backend..."
-          echo "Backend: ${{ env.RS_STORAGE_ACCOUNT }}/${{ env.RS_CONTAINER_NAME }}/${{ matrix.environment }}.tfstate"
-          
-          cat > infra/terraform/backend.tf << EOF
-          terraform {
-            backend "azurerm" {
-              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
-              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
-              container_name       = "${{ env.RS_CONTAINER_NAME }}"
-              key                  = "${{ matrix.environment }}.tfstate"
-              use_azuread_auth     = true
-            }
-          }
-          EOF
-          echo "✅ Backend configured"
-        env:
-          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
-          
+      # ========================================================================
+      # DEPLOYMENT MODE (for push/dispatch/call)
+      # ========================================================================
       - name: 🚀 Execute AZD Command
+        if: github.event_name != 'pull_request'
         run: |
           ACTION="${{ inputs.action || 'up' }}"
+          
+          echo "🚀 Executing azd action: $ACTION"
           
           case "$ACTION" in
             "provision")
@@ -416,20 +357,14 @@ jobs:
               exit 1
               ;;
           esac
-        env:
-          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
-          ARM_USE_OIDC: true
           
       - name: 📤 Extract Deployment Outputs
-        id: outputs
-        if: inputs.action != 'down'
+        id: extract-outputs
+        if: github.event_name != 'pull_request' && inputs.action != 'down'
         run: |
-          # Get azd environment values
           echo "🔍 Extracting deployment information..."
           
-          # Try to get outputs from azd
+          # Get azd environment values
           if azd env get-values > /tmp/azd-values.env 2>/dev/null; then
             source /tmp/azd-values.env
             
@@ -450,13 +385,17 @@ jobs:
           fi
           
       - name: 🔍 Show Deployment Status
-        if: inputs.action != 'down'
+        if: github.event_name != 'pull_request' && inputs.action != 'down'
         run: |
           echo "📊 Deployment Status:"
           azd show --output table || echo "⚠️ Could not show deployment status"
           
+      # ========================================================================
+      # CLEANUP STEPS
+      # ========================================================================
       - name: 🔓 Remove GitHub Runner IP from Whitelist
         if: always()
+        continue-on-error: true
         uses: azure/CLI@v1
         with:
           inlineScript: |
@@ -465,41 +404,52 @@ jobs:
             az storage account network-rule remove \
               --resource-group "${{ env.RS_RESOURCE_GROUP }}" \
               --account-name "${{ env.RS_STORAGE_ACCOUNT }}" \
-              --ip-address $agentIP
+              --ip-address $agentIP || echo "⚠️ Could not remove IP from whitelist"
 
       - name: 🚪 Logout
         if: always()
         run: |
           az logout
           
-      - name: 📋 Deployment Summary
+      - name: 📋 Generate Summary
+        if: always()
         run: |
-          ACTION="${{ inputs.action || 'up' }}"
-          
-          if [ "$ACTION" = "down" ]; then
-            echo "## 💥 Resources Destroyed" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Environment \`${{ matrix.environment }}\` has been destroyed using Azure Developer CLI." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "## 📋 Infrastructure Preview Complete" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Component | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Environment | \`${{ matrix.environment }}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Action | \`$ACTION\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Resource Group | \`${{ steps.outputs.outputs.resource_group }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Environment | \`dev\` (preview) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Action | Preview |" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            ACTION="${{ inputs.action || 'up' }}"
             
-            if [ -n "${{ steps.outputs.outputs.frontend_url }}" ]; then
-              echo "| Frontend URL | [${{ steps.outputs.outputs.frontend_url }}](${{ steps.outputs.outputs.frontend_url }}) |" >> $GITHUB_STEP_SUMMARY
+            if [ "$ACTION" = "down" ]; then
+              echo "## 💥 Resources Destroyed" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Environment \`${{ env.AZURE_ENV_NAME }}\` has been destroyed using Azure Developer CLI." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "| Component | Value |" >> $GITHUB_STEP_SUMMARY
+              echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+              echo "| Environment | \`${{ env.AZURE_ENV_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+              echo "| Action | \`$ACTION\` |" >> $GITHUB_STEP_SUMMARY
+              echo "| Resource Group | \`${{ steps.extract-outputs.outputs.resource_group }}\` |" >> $GITHUB_STEP_SUMMARY
+              
+              if [ -n "${{ steps.extract-outputs.outputs.frontend_url }}" ]; then
+                echo "| Frontend URL | [${{ steps.extract-outputs.outputs.frontend_url }}](${{ steps.extract-outputs.outputs.frontend_url }}) |" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              if [ -n "${{ steps.extract-outputs.outputs.backend_url }}" ]; then
+                echo "| Backend URL | [${{ steps.extract-outputs.outputs.backend_url }}](${{ steps.extract-outputs.outputs.backend_url }}) |" >> $GITHUB_STEP_SUMMARY
+              fi
+              
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### 🎯 Next Steps" >> $GITHUB_STEP_SUMMARY
+              echo "- Test your application using the URLs above" >> $GITHUB_STEP_SUMMARY
+              echo "- Monitor resources in the [Azure Portal](https://portal.azure.com)" >> $GITHUB_STEP_SUMMARY
+              echo "- Check logs with \`azd monitor\`" >> $GITHUB_STEP_SUMMARY
             fi
-            
-            if [ -n "${{ steps.outputs.outputs.backend_url }}" ]; then
-              echo "| Backend URL | [${{ steps.outputs.outputs.backend_url }}](${{ steps.outputs.outputs.backend_url }}) |" >> $GITHUB_STEP_SUMMARY
-            fi
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🎯 Next Steps" >> $GITHUB_STEP_SUMMARY
-            echo "- Test your application using the URLs above" >> $GITHUB_STEP_SUMMARY
-            echo "- Monitor resources in the [Azure Portal](https://portal.azure.com)" >> $GITHUB_STEP_SUMMARY
-            echo "- Check logs with \`azd monitor\`" >> $GITHUB_STEP_SUMMARY
           fi
