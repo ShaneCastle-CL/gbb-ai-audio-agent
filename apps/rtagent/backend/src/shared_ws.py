@@ -69,6 +69,7 @@ async def send_tts_audio(
 
     try:
         synth: SpeechSynthesizer = ws.app.state.tts_client
+        # Per-connection flag lives on ws.state (was already) – keep isolated
         ws.state.is_synthesizing = True  # type: ignore[attr-defined]
         logger.info(f"Synthesizing text: {ws.state.is_synthesizing}...")
 
@@ -182,7 +183,9 @@ async def send_response_to_acs(
     async def stop_latency(task):
         if latency_tool:
             latency_tool.stop("tts", ws.app.state.redis)
-        ws.app.state.tts_tasks.discard(task)
+        # tts_tasks is per-connection; keep on ws.state
+        if hasattr(ws.state, "tts_tasks"):
+            ws.state.tts_tasks.discard(task)
 
     if stream_mode == StreamMode.MEDIA:
         synth: SpeechSynthesizer = ws.app.state.tts_client
@@ -252,15 +255,17 @@ async def send_response_to_acs(
         if not acs_caller:
             raise RuntimeError("ACS caller is not initialized in WebSocket state.")
 
+        # Fetch participant from per-connection state (moved off app.state)
+        target_participant = getattr(ws.state, "target_participant", None)
         coro = play_response_with_queue(
-            ws=ws, response_text=text, participants=[ws.app.state.target_participant]
+            ws=ws, response_text=text, participants=[target_participant] if target_participant else None
         )
 
-        if not hasattr(ws.app.state, "tts_tasks"):
-            ws.app.state.tts_tasks = set()
+        if not hasattr(ws.state, "tts_tasks"):
+            ws.state.tts_tasks = set()
 
         task = asyncio.create_task(coro)
-        ws.app.state.tts_tasks.add(task)
+        ws.state.tts_tasks.add(task)
         task.add_done_callback(stop_latency)
 
         return task

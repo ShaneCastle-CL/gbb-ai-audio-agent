@@ -55,6 +55,7 @@ from apps.rtagent.backend.api.v1.schemas.media import (
 )
 
 from apps.rtagent.backend.settings import ACS_STREAMING_MODE, ENABLE_AUTH_VALIDATION
+from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from src.enums.stream_modes import StreamMode
 from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.utils.tracing import log_with_context
@@ -282,13 +283,7 @@ async def _validate_websocket_dependencies(websocket: WebSocket) -> None:
         await websocket.close(code=1011, reason="ACS not initialized")
         raise HTTPException(503, "ACS caller not initialized")
 
-    if (
-        not hasattr(websocket.app.state, "stt_client")
-        or not websocket.app.state.stt_client
-    ):
-        logger.error("STT client not initialized")
-        await websocket.close(code=1011, reason="STT not initialized")
-        raise HTTPException(503, "STT client not initialized")
+    # Per-connection STT recognizer now created later; no global validation here
 
 
 async def _validate_websocket_auth(websocket: WebSocket) -> None:
@@ -361,25 +356,23 @@ async def _create_media_handler(
     websocket.state.lt.start("greeting_ttfb")
     websocket.state._greeting_ttfb_stopped = False
 
-    # Set up call context in app state
+    # Set up call context in websocket state (per-connection)
     target_phone_number = memory_manager.get_context("target_number")
     if target_phone_number:
-        websocket.app.state.target_participant = PhoneNumberIdentifier(
-            target_phone_number
-        )
+        websocket.state.target_participant = PhoneNumberIdentifier(target_phone_number)
 
-    websocket.app.state.cm = memory_manager
-    websocket.app.state.call_conn = websocket.app.state.acs_caller.get_call_connection(
-        call_connection_id
-    )
+    websocket.state.cm = memory_manager
+    websocket.state.call_conn = websocket.app.state.acs_caller.get_call_connection(call_connection_id)
 
     if ACS_STREAMING_MODE == StreamMode.MEDIA:
         # Use the V1 ACS media handler
+        per_conn_recognizer = StreamingSpeechRecognizerFromBytes()
+        websocket.state.stt_client = per_conn_recognizer
         handler = ACSMediaHandler(
             websocket=websocket,
             orchestrator_func=orchestrator,
             call_connection_id=call_connection_id,
-            recognizer=websocket.app.state.stt_client,
+            recognizer=per_conn_recognizer,
             memory_manager=memory_manager,
             session_id=session_id,
         )

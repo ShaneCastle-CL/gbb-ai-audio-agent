@@ -23,6 +23,7 @@ from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message, send_tts_audio
 from src.postcall.push import build_and_flush
+from apps.rtagent.backend.src.factories.stt_factory import create_stt_recognizer
 from src.stateful.state_managment import MemoManager
 from utils.ml_logging import get_logger
 
@@ -96,21 +97,21 @@ async def realtime_ws(ws: WebSocket):
                     json.dumps({"type": "assistant_streaming", "content": txt})
                 )
             )
-
-        ws.app.state.stt_client.set_partial_result_callback(on_partial)
+        ws.state.stt_client = create_stt_recognizer()
+        ws.state.stt_client.set_partial_result_callback(on_partial)
 
         def on_final(txt: str, lang: str):
             logger.info(f"🧾 User (final) in {lang}: {txt}")
             ws.state.user_buffer += txt.strip() + "\n"
 
-        ws.app.state.stt_client.set_final_result_callback(on_final)
-        ws.app.state.stt_client.start()
+        ws.state.stt_client.set_final_result_callback(on_final)
+        ws.state.stt_client.start()
         logger.info("STT recognizer started for session %s", session_id)
 
         while True:
             msg = await ws.receive()  # can be text or bytes
             if msg.get("type") == "websocket.receive" and msg.get("bytes") is not None:
-                ws.app.state.stt_client.write_bytes(msg["bytes"])
+                ws.state.stt_client.write_bytes(msg["bytes"])
                 if ws.state.user_buffer.strip():
                     prompt = ws.state.user_buffer.strip()
                     ws.state.user_buffer = ""

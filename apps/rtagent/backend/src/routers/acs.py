@@ -39,6 +39,7 @@ from apps.rtagent.backend.src.handlers import (
     ACSMediaHandler,
     TranscriptionHandler,
 )
+from apps.rtagent.backend.src.factories.stt_factory import create_stt_recognizer
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.utils.auth import (
     AuthError,
@@ -350,10 +351,10 @@ async def acs_media_ws(ws: WebSocket):
             # Set up call context
             target_phone_number = cm.get_context("target_number")
             if target_phone_number:
-                ws.app.state.target_participant = PhoneNumberIdentifier(
-                    target_phone_number
-                )
-            ws.app.state.cm = cm
+                # Store per-connection participant on ws.state
+                ws.state.target_participant = PhoneNumberIdentifier(target_phone_number)
+            # Conversation memory is per-call
+            ws.state.cm = cm
 
             # Validate call connection
             call_conn = acs.get_call_connection(cid)
@@ -362,7 +363,7 @@ async def acs_media_ws(ws: WebSocket):
                 await ws.close(code=1000)
                 return
 
-            ws.app.state.call_conn = call_conn
+            ws.state.call_conn = call_conn
 
             span_attrs = create_service_handler_attrs(
                 service_name="acs_router",
@@ -409,9 +410,10 @@ async def acs_media_ws(ws: WebSocket):
                         kind=SpanKind.CLIENT,
                         attributes=handler_attrs,
                     ):
+                        ws.state.stt_client = create_stt_recognizer()
                         handler = ACSMediaHandler(
                             ws,
-                            recognizer=ws.app.state.stt_client,
+                            recognizer=ws.state.stt_client,
                             call_connection_id=cid,
                             cm=cm,
                         )
@@ -425,19 +427,12 @@ async def acs_media_ws(ws: WebSocket):
                         session_id=cm.session_id if hasattr(cm, "session_id") else None,
                         ws=True,
                     )
-
-                    with tracer.start_as_current_span(
-                        "acs_router.create_transcription_handler",
-                        kind=SpanKind.CLIENT,
-                        attributes=handler_attrs,
-                    ):
-                        handler = TranscriptionHandler(ws, cm=cm)
                 else:
                     logger.error(f"Unknown streaming mode: {ACS_STREAMING_MODE}")
                     await ws.close(code=1000)
                     return
 
-                ws.app.state.handler = handler
+                ws.state.handler = handler
 
                 log_with_context(
                     logger,

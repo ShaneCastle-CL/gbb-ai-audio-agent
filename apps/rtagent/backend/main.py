@@ -108,12 +108,7 @@ async def lifespan(app: FastAPI):
         app.state.tts_client = SpeechSynthesizer(
             voice=GREETING_VOICE_TTS, playback="always"
         )
-        app.state.stt_client = StreamingSpeechRecognizerFromBytes(
-            use_semantic_segmentation=VAD_SEMANTIC_SEGMENTATION,
-            vad_silence_timeout_ms=SILENCE_DURATION_MS,
-            candidate_languages=RECOGNIZED_LANGUAGE,
-            audio_format=AUDIO_FORMAT,
-        )
+    # STT recognizers now created per WebSocket via factory (no global shared callbacks)
 
         # Redis connection
         span.set_attribute("startup.stage", "redis")

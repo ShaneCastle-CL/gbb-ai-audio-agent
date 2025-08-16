@@ -56,6 +56,7 @@ from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_fi
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message, send_tts_audio
+from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from src.postcall.push import build_and_flush
 from src.stateful.state_managment import MemoManager
 from utils.ml_logging import get_logger
@@ -454,14 +455,7 @@ async def _validate_realtime_dependencies(websocket: WebSocket) -> None:
         await websocket.close(code=1011, reason="TTS not initialized")
         raise HTTPException(503, "TTS client not initialized")
 
-    # Check STT client for conversation endpoints
-    if (
-        not hasattr(websocket.app.state, "stt_client")
-        or not websocket.app.state.stt_client
-    ):
-        logger.error("STT client not initialized")
-        await websocket.close(code=1011, reason="STT not initialized")
-        raise HTTPException(503, "STT client not initialized")
+    # STT no longer validated globally here; each conversation WebSocket gets its own instance
 
     # Check Redis for session management
     if not hasattr(websocket.app.state, "redis") or not websocket.app.state.redis:
@@ -528,9 +522,11 @@ async def _initialize_conversation_session(
         logger.info(f"🧾 User (final) in {lang}: {txt}")
         websocket.state.user_buffer += txt.strip() + "\n"
 
-    websocket.app.state.stt_client.set_partial_result_callback(on_partial)
-    websocket.app.state.stt_client.set_final_result_callback(on_final)
-    websocket.app.state.stt_client.start()
+    # Create a per‑connection speech recognizer (eliminates cross‑session callback/state races)
+    websocket.state.stt_client = StreamingSpeechRecognizerFromBytes()
+    websocket.state.stt_client.set_partial_result_callback(on_partial)
+    websocket.state.stt_client.set_final_result_callback(on_final)
+    websocket.state.stt_client.start()
 
     logger.info(f"STT recognizer started for session {session_id}")
     return memory_manager
@@ -585,7 +581,7 @@ async def _process_conversation_messages(
                     msg.get("type") == "websocket.receive"
                     and msg.get("bytes") is not None
                 ):
-                    websocket.app.state.stt_client.write_bytes(msg["bytes"])
+                    websocket.state.stt_client.write_bytes(msg["bytes"])
 
                     # Process accumulated user buffer
                     if websocket.state.user_buffer.strip():
