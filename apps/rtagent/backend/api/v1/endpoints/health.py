@@ -280,7 +280,7 @@ async def readiness_check(
     speech_status = await fast_ping(
         _check_speech_services_fast,
         request.app.state.tts_client,
-        request.app.state.stt_client,
+        None,  # STT now created per-connection; report factory readiness only
         component="speech_services",
     )
     health_checks.append(speech_status)
@@ -382,20 +382,24 @@ async def _check_azure_openai_fast(openai_client) -> ServiceCheck:
 
 
 async def _check_speech_services_fast(tts_client, stt_client) -> ServiceCheck:
-    """Fast Speech Services check."""
+    """Fast Speech Services check.
+
+    STT recognizer instances are now per-connection; we only verify the TTS client
+    is initialised. (Optional: could attempt a dry construction via factory.)
+    """
     start = time.time()
-    if not tts_client or not stt_client:
+    if not tts_client:
         return ServiceCheck(
             component="speech_services",
             status="unhealthy",
-            error="not initialized",
+            error="tts not initialized",
             check_time_ms=round((time.time() - start) * 1000, 2),
         )
     return ServiceCheck(
         component="speech_services",
         status="healthy",
         check_time_ms=round((time.time() - start) * 1000, 2),
-        details="TTS and STT clients initialized",
+        details="TTS initialized; STT provided per-connection",
     )
 
 

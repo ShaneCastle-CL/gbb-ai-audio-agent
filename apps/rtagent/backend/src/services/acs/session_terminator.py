@@ -348,10 +348,10 @@ async def terminate_session(
         try:
             # Send goodbye message before hanging up (if media handler is still available)
             try:
-                if hasattr(ws.app.state, "handler") and ws.app.state.handler:
+                if hasattr(ws.state, "handler") and ws.state.handler:
                     goodbye_message = _get_goodbye_message(reason)
                     if goodbye_message:
-                        ws.app.state.handler.play_greeting(
+                        ws.state.handler.play_greeting(
                             greeting_text=goodbye_message
                         )
                         # Brief pause to let goodbye play
