@@ -56,8 +56,9 @@ async def receive_and_filter(ws: WebSocket) -> Optional[str]:
         msg: Dict[str, Any] = json.loads(raw)
         if msg.get("type") == "interrupt":
             logger.info("🛑 interrupt received – stopping TTS playback")
-            # The TTS synthesizer lives on FastAPI app state
-            ws.app.state.tts_client.stop_speaking()  # type: ignore[attr-defined]
+            # Stop per-connection TTS synthesizer if available
+            if hasattr(ws.state, "tts_client") and ws.state.tts_client:
+                ws.state.tts_client.stop_speaking()
             return None
         return msg.get("text", raw)
     except json.JSONDecodeError:

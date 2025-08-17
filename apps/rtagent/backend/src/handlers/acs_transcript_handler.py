@@ -17,27 +17,20 @@ class TranscriptionHandler:
     Handles intermediate (barge-in) and final transcription processing.
     """
 
-    def __init__(
-        self,
-        websocket: WebSocket,
-        cm: MemoManager,
-        # redis_mgr,
-        # call_conn,
-        # clients: List
-    ):
+    def __init__(self, websocket: WebSocket, cm: MemoManager):
         self.websocket = websocket
         self.cm = cm
-        self.redis_mgr = (
-            websocket.app.state.redis
-        )  # Assuming redis manager is stored in app state
-        self.call_conn = (
-            websocket.app.state.call_conn
-        )  # Assuming call connection is stored in app state
-        self.clients = (
-            websocket.app.state.clients
-        )  # Assuming clients are stored in app state
+        # Shared singletons (safe to reference globally)
+        self.redis_mgr = websocket.app.state.redis
+        self.clients = None  # Will be set during first usage
+        # Per-connection value (placed on websocket.state by router)
+        self.call_conn = getattr(websocket.state, "call_conn", None)
+        logger.info(f"📝 Transcription handler initialized | Session: {self.cm.session_id}")
 
-        logger.info(f"📝 Transcription handler initialized | Session: {cm.session_id}")
+    async def _ensure_clients(self):
+        """Lazy initialization of clients to avoid async call in __init__"""
+        if self.clients is None:
+            self.clients = await self.websocket.app.state.websocket_manager.get_clients_snapshot()
 
     async def handle_transcription_message(self, message: Dict[str, Any]) -> None:
         """

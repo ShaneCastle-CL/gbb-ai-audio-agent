@@ -40,7 +40,7 @@ The production deployment architecture illustrates the enterprise-ready Azure in
 - **Private VNet Integration**: Secured internal network connectivity
 
 #### 🧠 **Modular Agent Platform**
-- **RTAgent Orchestrator**: Supports multiple IVR engines and swappable LLM chains
+- **ARTAgent Orchestrator**: Supports multiple IVR engines and swappable LLM chains
 - **Dynamic Routing**: Redis-based session metadata for intelligent agent selection
 - **Multi-Agent Framework**: Industry-specific agents with standardized interfaces
 
@@ -200,7 +200,7 @@ This section maps the production Azure infrastructure to the logical application
 |-------------------------|----------------------|------------------------|----------------------|
 | **Azure App Gateway + WAF** | User Interface Layer | HTTP/HTTPS ingress, SSL termination | Horizontal scaling with health probes |
 | **Azure Communication Services** | Communication Bridge | WebRTC, PSTN integration | Auto-scaling based on concurrent calls |
-| **Container Apps (RTAgent)** | Agent Network | Microservices with REST APIs | KEDA-based auto-scaling |
+| **Container Apps (ARTAgent)** | Agent Network | Microservices with REST APIs | KEDA-based auto-scaling |
 | **Azure OpenAI Service** | AI Model Hub | HTTP API with managed identity | Request-based throttling and quotas |
 | **Azure Redis Cache** | Session Management | In-memory state with TTL | Cluster mode with read replicas |
 | **Azure Cosmos DB** | Persistent Storage | NoSQL with global distribution | Provisioned or serverless throughput |

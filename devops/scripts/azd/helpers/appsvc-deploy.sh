@@ -32,7 +32,7 @@ readonly SCRIPT_NAME="$(basename "$0")"
 readonly REQUIRED_COMMANDS=("az" "azd" "rsync" "zip" "curl")
 
 # Configuration
-readonly AGENT="${1:-RTAgent}"
+readonly AGENT="${1:-ARTAgent}"
 readonly AGENT_BACKEND="apps/$AGENT/backend"
 readonly BACKEND_DIRS=("src" "utils")
 readonly REQUIRED_FILES=("requirements.txt")

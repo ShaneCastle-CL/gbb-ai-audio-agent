@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """rtagent_orchestrator_refactor
 =================================
-Main orchestration loop for the XYMZ Insurance **RTAgent** real‑time voice bot.
+Main orchestration loop for the XYMZ Insurance **ARTAgent** real‑time voice bot.
 
 Behavior-preserving refactor with two key goals:
 - **No HumanEscalation agent**. Escalation sets `escalated=True` and the
@@ -259,8 +259,10 @@ async def _send_agent_greeting(
 ) -> None:
     """Emit a greeting when switching to *agent_name*.
 
-    A per‑session, per‑agent counter lives in ``ws.app.state.greet_counts`` so
-    that subsequent returns use "Hi again…".
+    A per‑connection, per‑agent counter now lives in ``ws.state.greet_counts``
+    (migrated from the previous ``app.state`` global) so that subsequent agent
+    returns on the same WebSocket use the "Hi again…" variant while fully
+    isolating concurrent sessions. Structure: ``{agent_name: count}``.
     """
     if cm is None:
         logger.error(
@@ -278,16 +280,15 @@ async def _send_agent_greeting(
     voice_style = getattr(agent, "voice_style", "chat") if agent else "chat"
     voice_rate = getattr(agent, "voice_rate", "+3%") if agent else "+3%"
 
-    # Counters stored in app‑state. Structure: {session_id: {agent_name: count}}
-    app_counts: Dict[str, Dict[str, int]] = getattr(ws.app.state, _APP_GREETS_ATTR, {})
-    if not hasattr(ws.app.state, _APP_GREETS_ATTR):
-        ws.app.state.__setattr__(_APP_GREETS_ATTR, app_counts)  # first run
+    # Per‑connection counters stored on ws.state (was app.state). Backwards‑safe
+    # isolation: no cross‑session race potential.
+    state_counts: Dict[str, int] = getattr(ws.state, _APP_GREETS_ATTR, {})
+    if not hasattr(ws.state, _APP_GREETS_ATTR):
+        ws.state.__setattr__(_APP_GREETS_ATTR, state_counts)  # initialize
 
     actual_agent_name = getattr(agent, "name", None) or agent_name
-    session_counts = app_counts.get(cm.session_id, {})
-    counter = session_counts.get(actual_agent_name, 0)
-    session_counts[actual_agent_name] = counter + 1
-    app_counts[cm.session_id] = session_counts
+    counter = state_counts.get(actual_agent_name, 0)
+    state_counts[actual_agent_name] = counter + 1
 
     caller_name = _cm_get(cm, "caller_name")
     topic = _cm_get(cm, "topic") or _cm_get(cm, "claim_intent") or "your policy"
@@ -320,7 +321,8 @@ async def _send_agent_greeting(
             agent_sender = "General Info"
         else:
             agent_sender = "Assistant"
-        await broadcast_message(ws.app.state.clients, greeting, agent_sender)
+        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+        await broadcast_message(clients, greeting, agent_sender)
         try:
             # Use send_response_to_acs for proper ACS audio playback
             await send_response_to_acs(
@@ -661,7 +663,8 @@ async def route_turn(
 
         # 0) Broadcast raw user transcript to dashboards.
         try:
-            await broadcast_message(ws.app.state.clients, transcript, "User")
+            clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+            await broadcast_message(clients, transcript, "User")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Broadcast failure: %s", exc)
 

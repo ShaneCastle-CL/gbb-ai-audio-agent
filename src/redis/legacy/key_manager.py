@@ -1,5 +1,5 @@
 """
-Redis Key Manager for RTAgent Voice AI Backend
+Redis Key Manager for ARTAgent Voice AI Backend
 
 Provides centralized, hierarchical key management with format:
 {app_prefix}:{environment}:{data_type}:{identifier}:{component}

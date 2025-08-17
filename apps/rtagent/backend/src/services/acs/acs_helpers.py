@@ -6,7 +6,6 @@ This module provides helper functions and utilities for integrating with Azure C
 """
 
 import asyncio
-import hashlib
 import json
 from base64 import b64encode
 from typing import List, Optional
@@ -122,8 +121,8 @@ async def broadcast_message(
     """
     Send a message to all connected WebSocket clients without duplicates.
 
-    Uses message deduplication based on message content and sender to prevent
-    the same message from being sent multiple times to the same clients.
+    Uses per-request message deduplication to prevent the same message from being
+    sent multiple times during a single broadcast operation.
 
     Parameters:
     - connected_clients (List[WebSocket]): List of connected WebSocket clients
@@ -133,44 +132,15 @@ async def broadcast_message(
     if not connected_clients or not message.strip():
         return
 
-    # Create a message hash for deduplication
-    message_hash = hashlib.md5(f"{sender}:{message.strip()}".encode()).hexdigest()
-
-    # Store recent message hashes to prevent duplicates (using a simple in-memory cache)
-    if not hasattr(broadcast_message, "_recent_messages"):
-        broadcast_message._recent_messages = {}
-
-    # Clean old entries (keep only last 100 messages)
-    if len(broadcast_message._recent_messages) > 100:
-        # Remove oldest 50 entries
-        old_keys = list(broadcast_message._recent_messages.keys())[:50]
-        for key in old_keys:
-            del broadcast_message._recent_messages[key]
-
-    # Check if this exact message was recently broadcasted
-    import time
-    import traceback
-
-    current_time = time.time()
-    if message_hash in broadcast_message._recent_messages:
-        last_sent = broadcast_message._recent_messages[message_hash]
-        # If the same message was sent within the last 2 seconds, skip it
-        if current_time - last_sent < 2.0:
-            logger.warning(
-                f"🚨 DUPLICATE MESSAGE DETECTED - Sender: {sender}, Message: {message[:100]}..., "
-                f"Time since last: {current_time - last_sent:.3f}s, Hash: {message_hash}"
-            )
-            # Log the call stack to see where this duplicate is coming from
-            logger.warning(f"Call stack: {traceback.format_stack()[-3:-1]}")
-            return
-
-    # Mark this message as sent and log for debugging
-    broadcast_message._recent_messages[message_hash] = current_time
+    # Simple per-request deduplication without global state
+    # If advanced deduplication is needed, use Redis with TTL
+    message_content = message.strip()
+    
     logger.info(
-        f"📡 Broadcasting: {sender}: {message[:50]}... (Hash: {message_hash})"
+        f"� Broadcasting to {len(connected_clients)} clients: {sender}: {message_content[:50]}..."
     )
 
-    payload = {"message": message.strip(), "sender": sender}
+    payload = {"message": message_content, "sender": sender}
     sent_count = 0
     failed_count = 0
 
@@ -295,22 +265,22 @@ async def play_response(
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
     acs_caller = ws.app.state.acs_caller
     call_conn = acs_caller.get_call_connection(call_connection_id=call_connection_id)
-    cm = ws.app.state.cm
+    cm = getattr(ws.state, "cm", None)
 
-    # If participants is empty or None, try to get target_participant from ws.app.state
+    # If participants is empty or None, try to get target_participant from per-connection ws.state
     if not participants:
         logger.warning(
-            f"No participants provided for call {call_connection_id}. Attempting to use ws.app.state.target_participant."
+            f"No participants provided for call {call_connection_id}. Attempting to use ws.state.target_participant."
         )
-        target_participant = getattr(ws.app.state, "target_participant", None)
+        target_participant = getattr(ws.state, "target_participant", None)
         if target_participant:
             participants = [target_participant]
             logger.info(
-                f"Using target_participant from ws.app.state for call {call_connection_id}."
+                f"Using target_participant from ws.state for call {call_connection_id}."
             )
         else:
             logger.error(
-                f"No target_participant found in ws.app.state for call {call_connection_id}. Cannot play media."
+                f"No target_participant found in ws.state for call {call_connection_id}. Cannot play media."
             )
             return
 
@@ -464,7 +434,7 @@ async def play_response_with_queue(
     :param initial_backoff:           Initial backoff time in seconds
     :param transcription_resume_delay: Extra delay after media ends to ensure transcription resumes
     """
-    cm = ws.app.state.cm
+    cm = getattr(ws.state, "cm", None)
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
 
     # Check if bot is currently speaking
@@ -519,7 +489,7 @@ async def process_message_queue(ws: WebSocket):
 
     :param ws: WebSocket connection with app state
     """
-    cm = ws.app.state.cm
+    cm = getattr(ws.state, "cm", None)
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
 
     await cm.set_queue_processing_status(True)
@@ -603,7 +573,7 @@ async def _play_response_direct(
     call_connection_id = ws.headers.get("x-ms-call-connection-id")
     acs_caller = ws.app.state.acs_caller
     call_conn = acs_caller.get_call_connection(call_connection_id=call_connection_id)
-    cm = ws.app.state.cm
+    cm = getattr(ws.state, "cm", None)
 
     # If participants is empty or None, try to get target_participant from ws.app.state
     if not participants:

@@ -6,6 +6,16 @@
 import logging
 import os
 
+# Ensure environment variables from .env are available BEFORE we check DISABLE_CLOUD_TELEMETRY.
+try:  # minimal, silent if python-dotenv missing
+    from dotenv import load_dotenv  # type: ignore
+
+    # Only load if it looks like a .env file exists and variables not already present
+    if os.path.isfile('.env'):
+        load_dotenv(override=False)
+except Exception:
+    pass
+
 from azure.core.exceptions import HttpResponseError
 from utils.azure_auth import get_credential, ManagedIdentityCredential
 from azure.monitor.opentelemetry import configure_azure_monitor
@@ -43,6 +53,11 @@ def setup_azure_monitor(logger_name: str = None):
     Args:
         logger_name (str, optional): Name for the Azure Monitor logger. Defaults to environment variable or 'default'.
     """
+    # Allow hard opt-out for local dev or debugging.
+    if os.getenv("DISABLE_CLOUD_TELEMETRY", "false").lower() == "true":
+        logger.info("🔌 Telemetry disabled (DISABLE_CLOUD_TELEMETRY=true) – skipping Azure Monitor setup")
+        return
+
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
     logger_name = logger_name or os.getenv("AZURE_MONITOR_LOGGER_NAME", "default")
 
