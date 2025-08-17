@@ -54,6 +54,14 @@ from apps.rtagent.backend.settings import (
     GREETING_VOICE_TTS,
     ENTRA_EXEMPT_PATHS,
     ENABLE_AUTH_VALIDATION,
+    # Documentation settings
+    ENABLE_DOCS,
+    DOCS_URL,
+    REDOC_URL,
+    OPENAPI_URL,
+    SECURE_DOCS_URL,
+    ENVIRONMENT,
+    DEBUG_MODE,
 )
 from apps.rtagent.backend.src.agents.base import RTAgent
 from apps.rtagent.backend.src.utils.auth import validate_entraid_token
@@ -185,13 +193,18 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    """Create FastAPI app with static documentation."""
+    """Create FastAPI app with configurable documentation."""
 
-    # Get documentation
-    from apps.rtagent.backend.api.swagger_docs import get_tags, get_description
-
-    tags = get_tags()
-    description = get_description()
+    # Conditionally get documentation based on settings
+    if ENABLE_DOCS:
+        from apps.rtagent.backend.api.swagger_docs import get_tags, get_description
+        tags = get_tags()
+        description = get_description()
+        logger.info(f"📚 API documentation enabled for environment: {ENVIRONMENT}")
+    else:
+        tags = None
+        description = "Real-Time Voice Agent API"
+        logger.info(f"📚 API documentation disabled for environment: {ENVIRONMENT}")
 
     app = FastAPI(
         title="Real-Time Voice Agent API",
@@ -207,10 +220,25 @@ def create_app() -> FastAPI:
         },
         openapi_tags=tags,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url=DOCS_URL,
+        redoc_url=REDOC_URL,
+        openapi_url=OPENAPI_URL,
     )
+
+    # Add secure docs endpoint if configured and docs are enabled
+    if SECURE_DOCS_URL and ENABLE_DOCS:
+        from fastapi.openapi.docs import get_swagger_ui_html
+        from fastapi.responses import HTMLResponse
+        
+        @app.get(SECURE_DOCS_URL, include_in_schema=False)
+        async def secure_docs():
+            """Secure documentation endpoint."""
+            return get_swagger_ui_html(
+                openapi_url=OPENAPI_URL or "/openapi.json",
+                title=f"{app.title} - Secure Docs"
+            )
+        
+        logger.info(f"🔒 Secure docs endpoint available at: {SECURE_DOCS_URL}")
 
     return app
 
@@ -262,16 +290,40 @@ def setup_app_middleware_and_routes(app: FastAPI):
 
     app.include_router(health.router, tags=["Health"])
 
+    # Add environment and docs status info endpoint
+    @app.get("/api/info", tags=["System"], include_in_schema=ENABLE_DOCS)
+    async def get_system_info():
+        """Get system environment and documentation status."""
+        return {
+            "environment": ENVIRONMENT,
+            "debug_mode": DEBUG_MODE,
+            "docs_enabled": ENABLE_DOCS,
+            "docs_url": DOCS_URL,
+            "redoc_url": REDOC_URL,
+            "openapi_url": OPENAPI_URL,
+            "secure_docs_url": SECURE_DOCS_URL,
+        }
+
 
 # Create the app
 app = None
 
 
 def initialize_app():
-    """Initialize app with static documentation."""
+    """Initialize app with configurable documentation."""
     global app
     app = create_app()
     setup_app_middleware_and_routes(app)
+    
+    # Log documentation status
+    if ENABLE_DOCS:
+        logger.info(f"📚 Swagger docs available at: {DOCS_URL}")
+        logger.info(f"📚 ReDoc available at: {REDOC_URL}")
+        if SECURE_DOCS_URL:
+            logger.info(f"🔒 Secure docs available at: {SECURE_DOCS_URL}")
+    else:
+        logger.info("📚 API documentation is disabled for this environment")
+    
     return app
 
 
