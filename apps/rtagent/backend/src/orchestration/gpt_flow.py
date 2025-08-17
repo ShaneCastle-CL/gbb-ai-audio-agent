@@ -232,7 +232,8 @@ async def _broadcast_dashboard(
     try:
         sender = _get_agent_sender_name(cm, include_autoauth=include_autoauth)
         logger.info(f"🎯 _broadcast_dashboard called: sender='{sender}', include_autoauth={include_autoauth}, message='{message[:50]}...'")
-        await broadcast_message(ws.app.state.clients, message, sender)
+        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+        await broadcast_message(clients, message, sender)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to broadcast dashboard message: %s", exc)
 

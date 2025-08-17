@@ -860,7 +860,7 @@ class SpeechSynthesizer:
         Args:
             text: Text to synthesize
             voice: Voice name (defaults to self.voice)
-            sample_rate: Sample rate (16000 or 24000)
+            sample_rate: Sample rate (16000, 24000, or 48000)
             style: Voice style
             rate: Speech rate
         """
@@ -874,6 +874,7 @@ class SpeechSynthesizer:
             {
                 16000: speechsdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm,
                 24000: speechsdk.SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm,
+                48000: speechsdk.SpeechSynthesisOutputFormat.Raw48Khz16BitMonoPcm,
             }[sample_rate]
         )
 

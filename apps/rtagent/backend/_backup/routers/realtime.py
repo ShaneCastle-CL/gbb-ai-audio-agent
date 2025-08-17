@@ -23,7 +23,6 @@ from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message, send_tts_audio
 from src.postcall.push import build_and_flush
-from apps.rtagent.backend.src.factories.stt_factory import create_stt_recognizer
 from src.stateful.state_managment import MemoManager
 from utils.ml_logging import get_logger
 
@@ -38,10 +37,14 @@ router = APIRouter()
 @router.websocket("/ws/relay")
 async def relay_ws(ws: WebSocket):
     """Dashboards connect here to receive broadcasted text."""
-    clients: set[WebSocket] = ws.app.state.clients
+    clients: set[WebSocket] = await ws.app.state.websocket_manager.get_clients_snapshot()
     if ws not in clients:
         await ws.accept()
         clients.add(ws)
+        
+        # Track WebSocket connection for session metrics
+        if hasattr(ws.app.state, "session_metrics"):
+            await ws.app.state.session_metrics.increment_connected()
 
     try:
         while True:
@@ -49,6 +52,10 @@ async def relay_ws(ws: WebSocket):
     except WebSocketDisconnect:
         clients.remove(ws)
     finally:
+        # Track WebSocket disconnection for session metrics
+        if hasattr(ws.app.state, "session_metrics"):
+            await ws.app.state.session_metrics.increment_disconnected()
+            
         if ws.application_state.name == "CONNECTED" and ws.client_state.name not in (
             "DISCONNECTED",
             "CLOSED",
@@ -71,6 +78,11 @@ async def realtime_ws(ws: WebSocket):
 
         redis_mgr = ws.app.state.redis
         cm = MemoManager.from_redis(session_id, redis_mgr)
+        
+        # Acquire per-connection TTS synthesizer from pool
+        ws.state.tts_client = await ws.app.state.tts_pool.acquire()
+        logger.info(f"Acquired TTS synthesizer from pool for session {session_id}")
+        
         ws.state.cm = cm
         ws.state.session_id = session_id
         ws.state.lt = LatencyTool(cm)
@@ -80,14 +92,22 @@ async def realtime_ws(ws: WebSocket):
         auth_agent = ws.app.state.auth_agent
         cm.append_to_history(auth_agent.name, "assistant", GREETING)
         await send_tts_audio(GREETING, ws, latency_tool=ws.state.lt)
-        await broadcast_message(ws.app.state.clients, GREETING, "Auth Agent")
+        
+        # Track WebSocket connection for session metrics
+        if hasattr(ws.app.state, "session_metrics"):
+            await ws.app.state.session_metrics.increment_connected()
+            
+        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+        await broadcast_message(clients, GREETING, "Auth Agent")
         await cm.persist_to_redis_async(redis_mgr)
 
         def on_partial(txt: str, lang: str):
             logger.info(f"🗣️ User (partial) in {lang}: {txt}")
             if ws.state.is_synthesizing:
                 try:
-                    ws.app.state.tts_client.stop_speaking()
+                    # Stop per-connection TTS synthesizer if available
+                    if hasattr(ws.state, "tts_client") and ws.state.tts_client:
+                        ws.state.tts_client.stop_speaking()
                     ws.state.is_synthesizing = False
                     logger.info("🛑 TTS interrupted due to user speech (server VAD)")
                 except Exception as e:
@@ -97,7 +117,9 @@ async def realtime_ws(ws: WebSocket):
                     json.dumps({"type": "assistant_streaming", "content": txt})
                 )
             )
-        ws.state.stt_client = create_stt_recognizer()
+        # Acquire per-connection STT recognizer from pool
+        ws.state.stt_client = await ws.app.state.stt_pool.acquire()
+        logger.info(f"Acquired STT recognizer from pool for session {session_id}")
         ws.state.stt_client.set_partial_result_callback(on_partial)
 
         def on_final(txt: str, lang: str):
@@ -139,7 +161,28 @@ async def realtime_ws(ws: WebSocket):
                 break
 
     finally:
-        ws.app.state.tts_client.stop_speaking()
+        # Stop and release per-connection TTS synthesizer back to pool
+        if hasattr(ws.state, "tts_client") and ws.state.tts_client:
+            try:
+                ws.state.tts_client.stop_speaking()
+                await ws.app.state.tts_pool.release(ws.state.tts_client)
+                logger.info("Released TTS synthesizer back to pool")
+            except Exception as e:
+                logger.error(f"Error releasing TTS synthesizer: {e}", exc_info=True)
+
+        # Stop and release per-connection STT recognizer back to pool
+        if hasattr(ws.state, "stt_client") and ws.state.stt_client:
+            try:
+                ws.state.stt_client.stop()
+                await ws.app.state.stt_pool.release(ws.state.stt_client)
+                logger.info("Released STT recognizer back to pool")
+            except Exception as e:
+                logger.error(f"Error releasing STT recognizer: {e}", exc_info=True)
+
+        # Track WebSocket disconnection for session metrics
+        if hasattr(ws.app.state, "session_metrics"):
+            await ws.app.state.session_metrics.increment_disconnected()
+
         try:
             if (
                 ws.application_state.name == "CONNECTED"

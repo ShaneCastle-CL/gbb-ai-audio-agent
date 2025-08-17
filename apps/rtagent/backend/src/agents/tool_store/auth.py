@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Caller‑authentication helper for XYMZ Insurance’s RTAgent.
+Caller‑authentication helper for XYMZ Insurance’s ARTAgent.
 
 Validates the caller using *(full_name, ZIP, last‑4 of SSN / policy / claim / phone)*.
 

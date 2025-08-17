@@ -441,7 +441,7 @@ class ACSHandler:
         acs_caller = request.app.state.acs_caller
         stt_client = request.app.state.stt_client
         redis_mgr = request.app.state.redis
-        clients = request.app.state.clients
+        clients = await request.app.state.websocket_manager.get_clients_snapshot()
 
         # Event handler mapping for cleaner code organization
         event_handlers = {
@@ -676,7 +676,7 @@ class ACSHandler:
         stream_mode: StreamMode = ACS_STREAMING_MODE,
     ) -> None:
         """Handle call connected event and prepare for media streaming or transcription."""
-        await broadcast_message(clients, f"Call Connected: {cid}", "System")
+        await broadcast_message(list(clients), f"Call Connected: {cid}", "System")
 
         # 1) Resolve the AWS Connect/PSTN leg and start DTMF recognition immediately
         call_conn = acs_caller.get_call_connection(cid)

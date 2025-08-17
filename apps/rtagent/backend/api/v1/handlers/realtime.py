@@ -70,7 +70,7 @@ class V1RealtimeHandler:
             logger,
             "dashboard_relay",
         ) as op:
-            clients: set[WebSocket] = websocket.app.state.clients
+            clients: set[WebSocket] = await websocket.app.state.websocket_manager.get_clients_snapshot()
             client_id = str(uuid.uuid4())[:8]
 
             op.log_info(f"Dashboard client connecting: {client_id}")
@@ -199,8 +199,9 @@ class V1RealtimeHandler:
                 cm.append_to_history(auth_agent.name, "assistant", GREETING)
 
                 # Broadcast greeting to dashboard with Auth Agent label
+                clients = await websocket.app.state.websocket_manager.get_clients_snapshot()
                 await broadcast_message(
-                    websocket.app.state.clients, GREETING, "Auth Agent"
+                    clients, GREETING, "Auth Agent"
                 )
 
                 # Send greeting audio
@@ -226,7 +227,9 @@ class V1RealtimeHandler:
                     # Interruption handling
                     if websocket.state.is_synthesizing:
                         try:
-                            websocket.app.state.tts_client.stop_speaking()
+                            # Stop per-connection TTS synthesizer if available
+                            if hasattr(websocket.state, "tts_client") and websocket.state.tts_client:
+                                websocket.state.tts_client.stop_speaking()
                             websocket.state.is_synthesizing = False
                             logger.info(
                                 f"🛑 TTS interrupted due to user speech [session: {session_id}]"
@@ -361,7 +364,9 @@ class V1RealtimeHandler:
                 ) as cleanup_op:
                     # Stop TTS
                     try:
-                        websocket.app.state.tts_client.stop_speaking()
+                        # Stop per-connection TTS synthesizer if available
+                        if hasattr(websocket.state, "tts_client") and websocket.state.tts_client:
+                            websocket.state.tts_client.stop_speaking()
                     except Exception as e:
                         logger.warning(f"Error stopping TTS during cleanup: {e}")
 

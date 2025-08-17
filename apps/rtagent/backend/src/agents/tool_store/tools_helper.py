@@ -47,7 +47,8 @@ async def _emit(ws: WebSocket, payload: dict, *, is_acs: bool) -> None:
 
     if is_acs:
         # never block STT/TTS – fire-and-forget
-        for cli in set(ws.app.state.clients):
+        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+        for cli in clients:
             asyncio.create_task(cli.send_text(frame))
     else:
         await ws.send_text(frame)

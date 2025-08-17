@@ -20,7 +20,7 @@ from utils.ml_logging import get_logger
 logger = get_logger("rt_agent")
 
 
-class RTAgent:
+class ARTAgent:
     CONFIG_PATH: str | Path = "agent.yaml"
 
     def __init__(

@@ -91,8 +91,8 @@ async def readiness(request: Request):
 
     speech_status = await fast_ping(
         _check_speech_services_fast,
-        request.app.state.tts_client,
-        request.app.state.stt_client,
+        request.app.state.tts_pool,
+        request.app.state.stt_pool,
         component="speech_services",
     )
     health_checks.append(speech_status)
@@ -178,18 +178,38 @@ async def _check_azure_openai_fast(openai_client) -> Dict:
     }
 
 
-async def _check_speech_services_fast(tts_client, stt_client) -> Dict:
+async def _check_speech_services_fast(tts_pool, stt_pool) -> Dict:
     start = time.time()
-    if not tts_client or not stt_client:
+    if not tts_pool or not stt_pool:
         return {
             "component": "speech_services",
             "status": "unhealthy",
-            "error": "not initialized",
+            "error": "pools not initialized",
             "check_time_ms": round((time.time() - start) * 1000, 2),
         }
+    
+    # Check if pools are properly configured
+    try:
+        pool_info = {
+            "tts_pool_size": tts_pool._size,
+            "tts_pool_queue_size": tts_pool._q.qsize(),
+            "tts_pool_ready": tts_pool._ready.is_set(),
+            "stt_pool_size": stt_pool._size,
+            "stt_pool_queue_size": stt_pool._q.qsize(),
+            "stt_pool_ready": stt_pool._ready.is_set(),
+        }
+    except Exception as e:
+        return {
+            "component": "speech_services",
+            "status": "unhealthy", 
+            "error": f"pool introspection failed: {e}",
+            "check_time_ms": round((time.time() - start) * 1000, 2),
+        }
+
     return {
         "component": "speech_services",
         "status": "healthy",
+        "pool_info": pool_info,
         "check_time_ms": round((time.time() - start) * 1000, 2),
     }
 

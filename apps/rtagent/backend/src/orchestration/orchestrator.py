@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """rtagent_orchestrator_refactor
 =================================
-Main orchestration loop for the XYMZ Insurance **RTAgent** real‑time voice bot.
+Main orchestration loop for the XYMZ Insurance **ARTAgent** real‑time voice bot.
 
 Behavior-preserving refactor with two key goals:
 - **No HumanEscalation agent**. Escalation sets `escalated=True` and the
@@ -321,7 +321,8 @@ async def _send_agent_greeting(
             agent_sender = "General Info"
         else:
             agent_sender = "Assistant"
-        await broadcast_message(ws.app.state.clients, greeting, agent_sender)
+        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+        await broadcast_message(clients, greeting, agent_sender)
         try:
             # Use send_response_to_acs for proper ACS audio playback
             await send_response_to_acs(
@@ -662,7 +663,8 @@ async def route_turn(
 
         # 0) Broadcast raw user transcript to dashboards.
         try:
-            await broadcast_message(ws.app.state.clients, transcript, "User")
+            clients = await ws.app.state.websocket_manager.get_clients_snapshot()
+            await broadcast_message(clients, transcript, "User")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Broadcast failure: %s", exc)
 
