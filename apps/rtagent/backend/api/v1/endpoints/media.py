@@ -235,6 +235,10 @@ async def acs_media_stream(
                 f"✅ Media handler initialized and started for call: {call_connection_id}"
             )
 
+            # Track WebSocket connection for session metrics
+            if hasattr(websocket.app.state, "session_metrics"):
+                await websocket.app.state.session_metrics.increment_connected()
+
             # Send acknowledgment message to ACS to confirm connection is ready
             try:
                 await websocket.send_text(
@@ -365,9 +369,10 @@ async def _create_media_handler(
     websocket.state.call_conn = websocket.app.state.acs_caller.get_call_connection(call_connection_id)
 
     if ACS_STREAMING_MODE == StreamMode.MEDIA:
-        # Use the V1 ACS media handler
-        per_conn_recognizer = StreamingSpeechRecognizerFromBytes()
+        # Use the V1 ACS media handler - acquire recognizer from pool
+        per_conn_recognizer = await websocket.app.state.stt_pool.acquire()
         websocket.state.stt_client = per_conn_recognizer
+        logger.info(f"Acquired STT recognizer from pool for ACS call {call_connection_id}")
         handler = ACSMediaHandler(
             websocket=websocket,
             orchestrator_func=orchestrator,
@@ -546,6 +551,19 @@ async def _cleanup_websocket_resources(
             ):
                 await websocket.close()
                 logger.info("WebSocket connection closed")
+
+            # Track WebSocket disconnection for session metrics
+            if hasattr(websocket.app.state, "session_metrics"):
+                await websocket.app.state.session_metrics.increment_disconnected()
+
+            # Release STT recognizer back to pool
+            if hasattr(websocket.state, "stt_client") and websocket.state.stt_client:
+                try:
+                    websocket.state.stt_client.stop()
+                    await websocket.app.state.stt_pool.release(websocket.state.stt_client)
+                    logger.info(f"Released STT recognizer back to pool for call {call_connection_id}")
+                except Exception as e:
+                    logger.error(f"Error releasing STT recognizer: {e}", exc_info=True)
 
             # Stop and cleanup handler
             if handler:

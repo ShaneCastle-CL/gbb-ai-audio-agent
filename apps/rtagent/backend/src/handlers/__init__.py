@@ -1,7 +1,7 @@
 """
 handlers package
 ================
-Business logic handlers for the RTAgent backend.
+Business logic handlers for the ARTAgent backend.
 
 This package contains handlers that encapsulate business logic, separating
 it from the routing and HTTP/WebSocket handling concerns.

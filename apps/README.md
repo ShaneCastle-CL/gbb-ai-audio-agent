@@ -1,6 +1,6 @@
-# **🚀 Deploying Voice-to-Voice Application Powered by RTAgent**
+# **🚀 Deploying Voice-to-Voice Application Powered by ARTAgent**
 
-This README provides technical instructions for deploying, customizing, and running a real-time voice-to-voice demo application built with the RTAgent framework. Refer to the [RTAgent README](../README.md) for full framework details.
+This README provides technical instructions for deploying, customizing, and running a real-time voice-to-voice demo application built with the ARTAgent framework. Refer to the [ARTAgent README](../README.md) for full framework details.
 
 ### **Application Structure**
 
@@ -12,9 +12,9 @@ apps/
   └── scripts/   # Setup and utility scripts
 ```
 
-### **Extending RTAgent: Framework-Agnostic Agent Customization**
+### **Extending ARTAgent: Framework-Agnostic Agent Customization**
 
-RTAgent is designed to be modular and extensible, allowing teams to tailor the system for domain-specific deployments and intelligent orchestration.
+ARTAgent is designed to be modular and extensible, allowing teams to tailor the system for domain-specific deployments and intelligent orchestration.
 
 To begin customizing, refer to the following key backend components:
 
@@ -34,10 +34,10 @@ To begin customizing, refer to the following key backend components:
 
  **🧬 Memory Enhancements** -> Implement advanced memory mechanisms for long-term user context, dialogue history, and personalized responses. You can plug in vector memory backends (e.g., Redis, ChromaDB) or use custom embeddings to persist semantic interactions across sessions.
 
- **🧭 Dynamic Routing (LLM and Agent Orchestration)** -> RTAgent supports dynamic routing strategies that can be modified at multiple abstraction layers:
+ **🧭 Dynamic Routing (LLM and Agent Orchestration)** -> ARTAgent supports dynamic routing strategies that can be modified at multiple abstraction layers:
 
   + **API Dispatching (Low Latency Pathways)** -> Within the router/ module, adjust the FastAPI-based routing logic to handle cost-aware, latency-sensitive decision trees across model backends or endpoint variants.
-  - **Agentic Orchestration (Cognitive Planning Layer)** -> Within the orchestrator/ module, you can define custom orchestration flows—using heuristics, scoring functions, or embedding similarity—to route queries between agents. You may also substitute this with your own orchestration stack such as Semantic Kernel, Autogen, or OpenAgents-style architectures for more advanced agent-based collaboration. RTAgent doesn’t lock you into a rigid architecture—it provides a principled starting point for building low-latency, stateful, and tool-augmented chat agents that can evolve to fit your infrastructure, orchestration strategy, and domain-specific requirements.
+  - **Agentic Orchestration (Cognitive Planning Layer)** -> Within the orchestrator/ module, you can define custom orchestration flows—using heuristics, scoring functions, or embedding similarity—to route queries between agents. You may also substitute this with your own orchestration stack such as Semantic Kernel, Autogen, or OpenAgents-style architectures for more advanced agent-based collaboration. ARTAgent doesn’t lock you into a rigid architecture—it provides a principled starting point for building low-latency, stateful, and tool-augmented chat agents that can evolve to fit your infrastructure, orchestration strategy, and domain-specific requirements.
 
 ## **Before to Start..**
 
@@ -116,4 +116,4 @@ Enabling ACS Call-In and “Call Me” Locally feature:
 | scripts/start_frontend.sh       | Launch React frontend dev server         |
 | scripts/start_devtunnel_host.sh | Open Dev Tunnel & display public URL     |
 
-For advanced customization, see the [RTAgent documentation](../README.md).
+For advanced customization, see the [ARTAgent documentation](../README.md).

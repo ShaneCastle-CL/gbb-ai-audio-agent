@@ -513,27 +513,28 @@ const styles = {
   componentGrid: {
     display: "grid",
     gridTemplateColumns: "1fr",
-    gap: "8px",
-    marginTop: "8px",
-    paddingTop: "8px",
+    gap: "6px", // Reduced from 12px to half
+    marginTop: "6px", // Reduced from 12px to half
+    paddingTop: "6px", // Reduced from 12px to half
     borderTop: "1px solid #f1f5f9",
   },
 
   componentItem: {
     display: "flex",
     alignItems: "center",
-    gap: "6px",
-    padding: "6px 10px",
+    gap: "4px", // Reduced from 8px to half
+    padding: "5px 7px", // Reduced from 10px 14px to half
     backgroundColor: "#f8fafc",
-    borderRadius: "8px",
-    fontSize: "10px",
-    border: "1px solid #f1f5f9",
+    borderRadius: "5px", // Reduced from 10px to half
+    fontSize: "9px", // Reduced from 11px
+    border: "1px solid #e2e8f0",
     transition: "all 0.2s ease",
+    minHeight: "22px", // Reduced from 45px to half
   },
 
   componentDot: (status) => ({
-    width: "6px",
-    height: "6px",
+    width: "4px", // Reduced from 8px to half
+    height: "4px", // Reduced from 8px to half
     borderRadius: "50%",
     backgroundColor: status === "healthy" ? "#10b981" : 
                      status === "degraded" ? "#f59e0b" : 
@@ -548,10 +549,12 @@ const styles = {
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+    fontSize: "9px", // Reduced from 11px
+    letterSpacing: "0.01em", // Reduced letter spacing
   },
 
   responseTime: {
-    fontSize: "9px",
+    fontSize: "8px", // Reduced from 10px
     color: "#94a3b8",
     marginLeft: "auto",
   },
@@ -745,7 +748,7 @@ const BackendHelpButton = () => {
           🔧 Backend Status Monitor
         </div>
         <div style={{ marginBottom: '8px' }}>
-          Real-time health monitoring for all RTAgent backend services including Redis cache, Azure OpenAI, Speech Services, and Communication Services.
+          Real-time health monitoring for all ARTAgent backend services including Redis cache, Azure OpenAI, Speech Services, and Communication Services.
         </div>
         <div style={{ marginBottom: '8px' }}>
           <strong>Status Colors:</strong><br/>
@@ -768,6 +771,46 @@ const BackendHelpButton = () => {
           </div>
         )}
       </div>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ *
+ *  BACKEND STATISTICS BUTTON COMPONENT
+ * ------------------------------------------------------------------ */
+const BackendStatisticsButton = ({ onToggle, isActive }) => {
+  const [isHovered, setIsHovered] = useState(false);
+
+  const handleClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onToggle();
+  };
+
+  return (
+    <div 
+      style={{
+        width: '14px',
+        height: '14px',
+        borderRadius: '50%',
+        backgroundColor: isActive ? '#3b82f6' : (isHovered ? '#3b82f6' : '#64748b'),
+        color: 'white',
+        fontSize: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+        transition: 'all 0.2s ease',
+        fontWeight: '600',
+        position: 'relative',
+        flexShrink: 0
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={handleClick}
+      title="Toggle session statistics"
+    >
+      📊
     </div>
   );
 };
@@ -827,10 +870,10 @@ const HelpButton = () => {
           This is a demo available for Microsoft employees only.
         </div>
         <div style={styles.helpTooltipTitle}>
-          🤖 RTAgent Demo
+          🤖 ARTAgent Demo
         </div>
         <div style={styles.helpTooltipText}>
-          RTAgent is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click "Call Me" in a web app. Built entirely on Azure services, it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
+          ARTAgent is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click "Call Me" in a web app. Built entirely on Azure services, it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
         </div>
         <div style={styles.helpTooltipText}>
           Design a single agent or orchestrate multiple specialist agents. The framework allows you to build your voice agent from scratch, incorporate memory, configure actions, and fine-tune your TTS and STT layers.
@@ -854,7 +897,7 @@ const HelpButton = () => {
         </div>
         <div style={styles.helpTooltipText}>
           📧 Questions or feedback? <a 
-            href="mailto:rtvoiceagent@microsoft.com?subject=RTAgent Feedback"
+            href="mailto:rtvoiceagent@microsoft.com?subject=ARTAgent Feedback"
             style={{
               color: '#3b82f6',
               textDecoration: 'underline'
@@ -890,11 +933,14 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
   const [agentsData, setAgentsData] = useState(null);
   const [error, setError] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isClickedOpen, setIsClickedOpen] = useState(false);
+  const [showComponentDetails, setShowComponentDetails] = useState(false);
   const [screenWidth, setScreenWidth] = useState(window.innerWidth);
   const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [configChanges, setConfigChanges] = useState({});
   const [updateStatus, setUpdateStatus] = useState({});
+  const [showStatistics, setShowStatistics] = useState(false);
 
   // Track screen width for responsive positioning
   useEffect(() => {
@@ -907,7 +953,7 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
   const checkReadiness = async () => {
     try {
       // Simple GET request without extra headers
-      const response = await fetch(`${url}/readiness`);
+      const response = await fetch(`${url}/api/v1/readiness`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -934,7 +980,7 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
   // Check agents endpoint
   const checkAgents = async () => {
     try {
-      const response = await fetch(`${url}/agents`);
+      const response = await fetch(`${url}/api/v1/agents`);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -953,12 +999,35 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
     }
   };
 
+  // Check health endpoint for session statistics
+  const [healthData, setHealthData] = useState(null);
+  const checkHealth = async () => {
+    try {
+      const response = await fetch(`${url}/api/v1/health`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.status) {
+        setHealthData(data);
+      } else {
+        throw new Error("Invalid health response structure");
+      }
+    } catch (err) {
+      console.error("Health check failed:", err);
+      setHealthData(null);
+    }
+  };
+
   // Update agent configuration
   const updateAgentConfig = async (agentName, config) => {
     try {
       setUpdateStatus({...updateStatus, [agentName]: 'updating'});
       
-      const response = await fetch(`${url}/agents/${agentName}`, {
+      const response = await fetch(`${url}/api/v1/agents/${agentName}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -1027,11 +1096,13 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
     // Initial check
     checkReadiness();
     checkAgents();
+    checkHealth();
 
     // Set up periodic checks every 30 seconds
     const interval = setInterval(() => {
       checkReadiness();
       checkAgents();
+      checkHealth();
     }, 30000);
 
     return () => clearInterval(interval);
@@ -1063,7 +1134,7 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
       transition: "all 0.3s ease",
     };
 
-    // Calculate available space for the status box to avoid RTAgent overlap
+    // Calculate available space for the status box to avoid ARTAgent overlap
     const containerWidth = 768;
     const containerLeftEdge = (screenWidth / 2) - (containerWidth / 2);
     const availableWidth = containerLeftEdge - 40 - 20; // 40px margin from container, 20px from screen edge
@@ -1075,7 +1146,7 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
         ...baseStyle,
         minWidth: "150px",
         maxWidth: "180px",
-        padding: !isExpanded && overallStatus === "healthy" ? "8px 12px" : "10px 14px",
+        padding: !shouldBeExpanded && overallStatus === "healthy" ? "8px 12px" : "10px 14px",
         fontSize: "10px",
       };
     } else if (availableWidth < 280) {
@@ -1084,15 +1155,15 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
         ...baseStyle,
         minWidth: "180px",
         maxWidth: "250px",
-        padding: !isExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
+        padding: !shouldBeExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
       };
     } else {
       // Plenty of space - full size
       return {
         ...baseStyle,
-        minWidth: !isExpanded && overallStatus === "healthy" ? "200px" : "280px",
+        minWidth: !shouldBeExpanded && overallStatus === "healthy" ? "200px" : "280px",
         maxWidth: "320px",
-        padding: !isExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
+        padding: !shouldBeExpanded && overallStatus === "healthy" ? "10px 14px" : "12px 16px",
       };
     }
   };
@@ -1115,13 +1186,41 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
     rt_agents: "RT Agents - Real-time Voice Agents"
   };
 
+  const handleBackendClick = (e) => {
+    // Don't trigger if clicking on buttons
+    if (e.target.closest('div')?.style?.cursor === 'pointer' && e.target !== e.currentTarget) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    setIsClickedOpen(!isClickedOpen);
+    if (!isClickedOpen) {
+      setIsExpanded(true);
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (!isClickedOpen) {
+      setIsExpanded(true);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (!isClickedOpen) {
+      setIsExpanded(false);
+    }
+  };
+
+  // Determine if should be expanded (either clicked open or hovered)
+  const shouldBeExpanded = isClickedOpen || isExpanded;
+
   return (
     <div 
       style={getResponsiveStyle()} 
-      title={`Click to expand backend status`}
-      onClick={() => setIsExpanded(!isExpanded)}
-      onMouseEnter={() => !isExpanded && setIsExpanded(true)}
-      onMouseLeave={() => setIsExpanded(false)}
+      title={isClickedOpen ? `Click to close backend status` : `Click to pin open backend status`}
+      onClick={handleBackendClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <div style={styles.backendHeader}>
         <div style={{
@@ -1132,12 +1231,14 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
         <BackendHelpButton />
         <span style={{
           ...styles.expandIcon,
-          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+          transform: shouldBeExpanded ? "rotate(180deg)" : "rotate(0deg)",
+          color: isClickedOpen ? "#3b82f6" : styles.expandIcon.color,
+          fontWeight: isClickedOpen ? "600" : "normal",
         }}>▼</span>
       </div>
       
       {/* Compact URL display when collapsed */}
-      {!isExpanded && (
+      {!shouldBeExpanded && (
         <div style={{
           ...styles.backendUrl,
           fontSize: "9px",
@@ -1149,10 +1250,10 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
       )}
 
       {/* Only show component health when expanded or when there's an issue */}
-      {(isExpanded || overallStatus !== "healthy") && (
+      {(shouldBeExpanded || overallStatus !== "healthy") && (
         <>
           {/* Expanded information display */}
-          {isExpanded && (
+          {shouldBeExpanded && (
             <>
               
               {/* API Entry Point Info */}
@@ -1197,30 +1298,55 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
 
               {/* System status summary */}
               {readinessData && (
-                <div style={{
-                  padding: "6px 8px",
-                  backgroundColor: overallStatus === "healthy" ? "#f0fdf4" : 
-                                 overallStatus === "degraded" ? "#fffbeb" : "#fef2f2",
-                  borderRadius: "6px",
-                  marginBottom: "8px",
-                  fontSize: "10px",
-                  border: `1px solid ${overallStatus === "healthy" ? "#bbf7d0" : 
-                                      overallStatus === "degraded" ? "#fed7aa" : "#fecaca"}`,
-                }}>
+                <div 
+                  style={{
+                    padding: "6px 8px",
+                    backgroundColor: overallStatus === "healthy" ? "#f0fdf4" : 
+                                   overallStatus === "degraded" ? "#fffbeb" : "#fef2f2",
+                    borderRadius: "6px",
+                    marginBottom: "8px",
+                    fontSize: "10px",
+                    border: `1px solid ${overallStatus === "healthy" ? "#bbf7d0" : 
+                                        overallStatus === "degraded" ? "#fed7aa" : "#fecaca"}`,
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowComponentDetails(!showComponentDetails);
+                  }}
+                  title="Click to show/hide component details"
+                >
                   <div style={{
-                    fontWeight: "600",
-                    color: overallStatus === "healthy" ? "#166534" : 
-                          overallStatus === "degraded" ? "#92400e" : "#dc2626",
-                    marginBottom: "2px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                   }}>
-                    System Status: {overallStatus.charAt(0).toUpperCase() + overallStatus.slice(1)}
-                  </div>
-                  <div style={{
-                    color: "#64748b",
-                    fontSize: "9px",
-                  }}>
-                    {readinessData.checks.length} components monitored • 
-                    Last check: {new Date().toLocaleTimeString()}
+                    <div>
+                      <div style={{
+                        fontWeight: "600",
+                        color: overallStatus === "healthy" ? "#166534" : 
+                              overallStatus === "degraded" ? "#92400e" : "#dc2626",
+                        marginBottom: "2px",
+                      }}>
+                        System Status: {overallStatus.charAt(0).toUpperCase() + overallStatus.slice(1)}
+                      </div>
+                      <div style={{
+                        color: "#64748b",
+                        fontSize: "9px",
+                      }}>
+                        {readinessData.checks.length} components monitored • 
+                        Last check: {new Date().toLocaleTimeString()}
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: "12px",
+                      color: "#64748b",
+                      transform: showComponentDetails ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s ease",
+                    }}>
+                      ▼
+                    </div>
                   </div>
                 </div>
               )}
@@ -1231,7 +1357,7 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
             <div style={styles.errorMessage}>
               ⚠️ Connection failed: {error}
             </div>
-          ) : readinessData?.checks ? (
+          ) : readinessData?.checks && showComponentDetails ? (
             <>
               <div style={styles.componentGrid}>
                 {readinessData.checks.map((check, idx) => (
@@ -1241,14 +1367,14 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
                       ...styles.componentItem,
                       flexDirection: "column",
                       alignItems: "flex-start",
-                      padding: "8px 10px",
+                      padding: "6px 8px", // Reduced from 12px 16px to half
                     }}
                     title={check.details || `${check.component} status: ${check.status}`}
                   >
                     <div style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: "6px",
+                      gap: "5px", // Reduced from 10px to half
                       width: "100%",
                     }}>
                       <span>{componentIcons[check.component] || "•"}</span>
@@ -1264,60 +1390,29 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
                     </div>
                     
                     {/* Component description when expanded */}
-                    {isExpanded && (
+                    {shouldBeExpanded && (
                       <div style={{
-                        fontSize: "9px",
+                        fontSize: "8px", // Reduced from 10px
                         color: "#64748b",
-                        marginTop: "4px",
-                        lineHeight: "1.3",
+                        marginTop: "3px", // Reduced from 6px to half
+                        lineHeight: "1.3", // Reduced line height
                         fontStyle: "italic",
+                        paddingLeft: "9px", // Reduced from 18px to half
                       }}>
                         {componentDescriptions[check.component] || "Backend service component"}
                       </div>
                     )}
                     
-                    {/* Status details when expanded */}
-                    {isExpanded && check.details && (
-                      <div style={{
-                        fontSize: "9px",
-                        color: check.status === "healthy" ? "#10b981" : 
-                              check.status === "degraded" ? "#f59e0b" : "#ef4444",
-                        marginTop: "2px",
-                        fontWeight: "500",
-                      }}>
-                        {check.details}
-                      </div>
-                    )}
+                    {/* Status details removed per user request */}
                   </div>
                 ))}
               </div>
               
-              {/* Show component details if expanded */}
-              {isExpanded && readinessData.checks.some(c => c.details) && (
-                <div style={{
-                  marginTop: "8px",
-                  paddingTop: "8px",
-                  borderTop: "1px solid #f1f5f9",
-                  fontSize: "9px",
-                  color: "#64748b",
-                }}>
-                  {readinessData.checks
-                    .filter(c => c.details)
-                    .map((check, idx) => (
-                      <div key={idx} style={{ marginBottom: "4px" }}>
-                        <strong>{check.component.replace(/_/g, ' ')}:</strong> {check.details}
-                      </div>
-                    ))}
-                </div>
-              )}
+              {/* Component details section removed per user request */}
             </>
-          ) : (
-            <div style={styles.errorMessage}>
-              Checking components...
-            </div>
-          )}
+          ) : null}
           
-          {readinessData?.response_time_ms && isExpanded && (
+          {readinessData?.response_time_ms && shouldBeExpanded && (
             <div style={{
               fontSize: "9px",
               color: "#94a3b8",
@@ -1334,8 +1429,121 @@ const BackendIndicator = ({ url, onConfigureClick }) => {
             </div>
           )}
 
+          {/* Session Statistics Section */}
+          {shouldBeExpanded && healthData && (
+            <div style={{
+              marginTop: "8px",
+              paddingTop: "8px",
+              borderTop: "1px solid #f1f5f9",
+            }}>
+              <div style={{
+                fontSize: "10px",
+                fontWeight: "600",
+                color: "#374151",
+                marginBottom: "6px",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              }}>
+                📊 Session Statistics
+              </div>
+              
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "8px",
+                fontSize: "9px",
+              }}>
+                {/* Active Sessions */}
+                <div style={{
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "6px",
+                  padding: "6px 8px",
+                  textAlign: "center",
+                }}>
+                  <div style={{
+                    fontWeight: "600",
+                    color: "#10b981",
+                    fontSize: "12px",
+                  }}>
+                    {healthData.active_sessions || 0}
+                  </div>
+                  <div style={{
+                    color: "#64748b",
+                    fontSize: "8px",
+                  }}>
+                    Active Sessions
+                  </div>
+                </div>
+
+                {/* Session Metrics */}
+                {healthData.session_metrics && (
+                  <div style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "6px 8px",
+                    textAlign: "center",
+                  }}>
+                    <div style={{
+                      fontWeight: "600",
+                      color: "#3b82f6",
+                      fontSize: "12px",
+                    }}>
+                      {healthData.session_metrics.connected || 0}
+                    </div>
+                    <div style={{
+                      color: "#64748b",
+                      fontSize: "8px",
+                    }}>
+                      Total Connected
+                    </div>
+                  </div>
+                )}
+                
+                {/* Disconnected Sessions */}
+                {healthData.session_metrics?.disconnected !== undefined && (
+                  <div style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "6px 8px",
+                    textAlign: "center",
+                    gridColumn: healthData.session_metrics ? "1 / -1" : "auto",
+                  }}>
+                    <div style={{
+                      fontWeight: "600",
+                      color: "#6b7280",
+                      fontSize: "12px",
+                    }}>
+                      {healthData.session_metrics.disconnected}
+                    </div>
+                    <div style={{
+                      color: "#64748b",
+                      fontSize: "8px",
+                    }}>
+                      Disconnected
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Last updated */}
+              <div style={{
+                fontSize: "8px",
+                color: "#94a3b8",
+                marginTop: "6px",
+                textAlign: "center",
+                fontStyle: "italic",
+              }}>
+                Updated: {new Date(healthData.timestamp * 1000).toLocaleTimeString()}
+              </div>
+            </div>
+          )}
+
           {/* Agents Configuration Section */}
-          {isExpanded && agentsData?.agents && (
+          {shouldBeExpanded && agentsData?.agents && (
             <div style={{
               marginTop: "10px",
               paddingTop: "10px",
@@ -1724,12 +1932,94 @@ function RealTimeVoiceApp() {
   const analyserRef = useRef(null);
   const micStreamRef = useRef(null);
   
+  // Audio playback refs for AudioWorklet
+  const playbackAudioContextRef = useRef(null);
+  const pcmSinkRef = useRef(null);
+  
   // Audio level tracking for reactive waveforms
   const [audioLevel, setAudioLevel] = useState(0);
   // const [outputAudioLevel, setOutputAudioLevel] = useState(0);
   const audioLevelRef = useRef(0);
   // const outputAudioLevelRef = useRef(0);
 
+  // AudioWorklet source code for PCM streaming playback
+  const workletSource = `
+    class PcmSink extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.queue = [];
+        this.readIndex = 0;
+        this.samplesProcessed = 0;
+        this.port.onmessage = (e) => {
+          if (e.data?.type === 'push') {
+            // payload is Float32Array
+            this.queue.push(e.data.payload);
+            console.log('AudioWorklet: Received audio chunk, queue length:', this.queue.length);
+          }
+        };
+      }
+      process(inputs, outputs) {
+        const out = outputs[0][0]; // mono
+        let i = 0;
+        while (i < out.length) {
+          if (this.queue.length === 0) {
+            // no data: output silence
+            for (; i < out.length; i++) out[i] = 0;
+            break;
+          }
+          const chunk = this.queue[0];
+          const remain = chunk.length - this.readIndex;
+          const toCopy = Math.min(remain, out.length - i);
+          out.set(chunk.subarray(this.readIndex, this.readIndex + toCopy), i);
+          i += toCopy;
+          this.readIndex += toCopy;
+          if (this.readIndex >= chunk.length) {
+            this.queue.shift();
+            this.readIndex = 0;
+          }
+        }
+        this.samplesProcessed += out.length;
+        return true;
+      }
+    }
+    registerProcessor('pcm-sink', PcmSink);
+  `;
+
+  // Initialize playback audio context and worklet (call on user gesture)
+  const initializeAudioPlayback = async () => {
+    if (playbackAudioContextRef.current) return; // Already initialized
+    
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+        // Let browser use its native rate (usually 48kHz), worklet will handle resampling
+      });
+      
+      // Add the worklet module
+      await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob(
+        [workletSource], { type: 'text/javascript' }
+      )));
+      
+      // Create the worklet node
+      const sink = new AudioWorkletNode(audioCtx, 'pcm-sink', {
+        numberOfInputs: 0, 
+        numberOfOutputs: 1, 
+        outputChannelCount: [1]
+      });
+      sink.connect(audioCtx.destination);
+      
+      // Resume on user gesture
+      await audioCtx.resume();
+      
+      playbackAudioContextRef.current = audioCtx;
+      pcmSinkRef.current = sink;
+      
+      appendLog("🔊 Audio playback initialized");
+      console.log("AudioWorklet playback system initialized, context sample rate:", audioCtx.sampleRate);
+    } catch (error) {
+      console.error("Failed to initialize audio playback:", error);
+      appendLog("❌ Audio playback init failed");
+    }
+  };
 
 
   const appendLog = m => setLog(p => `${p}\n${new Date().toLocaleTimeString()} - ${m}`);
@@ -1767,6 +2057,13 @@ function RealTimeVoiceApp() {
           console.warn("Cleanup error:", e);
         }
       }
+      if (playbackAudioContextRef.current) {
+        try { 
+          playbackAudioContextRef.current.close(); 
+        } catch (e) {
+          console.warn("Cleanup error:", e);
+        }
+      }
       if (socketRef.current) {
         try { 
           socketRef.current.close(); 
@@ -1790,19 +2087,24 @@ function RealTimeVoiceApp() {
       setMessages([]);
       appendLog("🎤 PCM streaming started");
 
+      // Initialize audio playback system on user gesture
+      await initializeAudioPlayback();
+
       // 1) open WS
       const socket = new WebSocket(`${WS_URL}/api/v1/realtime/conversation`);
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
-        appendLog("🔌 WS open");
-        console.log("WebSocket connection OPENED to backend!");
+        appendLog("🔌 WS open - Connected to backend!");
+        console.log("WebSocket connection OPENED to backend at:", `${WS_URL}/api/v1/realtime/conversation`);
       };
-      socket.onclose = () => {
-        console.log("WebSocket connection CLOSED.");
+      socket.onclose = (event) => {
+        appendLog(`🔌 WS closed - Code: ${event.code}, Reason: ${event.reason}`);
+        console.log("WebSocket connection CLOSED. Code:", event.code, "Reason:", event.reason);
       };
       socket.onerror = (err) => {
-        console.error("WebSocket error:", err);
+        appendLog("❌ WS error - Check if backend is running");
+        console.error("WebSocket error - backend might not be running:", err);
       };
       socket.onmessage = handleSocketMessage;
       socketRef.current = socket;
@@ -1890,6 +2192,16 @@ function RealTimeVoiceApp() {
         }
         audioContextRef.current = null;
       }
+      // Note: Keep playback context alive for TTS even when stopping recording
+      // if (playbackAudioContextRef.current) {
+      //   try { 
+      //     playbackAudioContextRef.current.close(); 
+      //   } catch (e) {
+      //     console.warn("Error closing playback audio context:", e);
+      //   }
+      //   playbackAudioContextRef.current = null;
+      //   pcmSinkRef.current = null;
+      // }
       if (socketRef.current) {
         try { 
           socketRef.current.close(); 
@@ -1922,6 +2234,18 @@ function RealTimeVoiceApp() {
     };
 
     const handleSocketMessage = async (event) => {
+      // Log all incoming messages for debugging
+      if (typeof event.data === "string") {
+        try {
+          const msg = JSON.parse(event.data);
+          console.log("📨 WebSocket message received:", msg.type || "unknown", msg);
+        } catch (e) {
+          console.log("📨 Non-JSON WebSocket message:", event.data);
+        }
+      } else {
+        console.log("📨 Binary WebSocket message received, length:", event.data.byteLength);
+      }
+
       if (typeof event.data !== "string") {
         const ctx = new AudioContext();
         const buf = await event.data.arrayBuffer();
@@ -1941,6 +2265,54 @@ function RealTimeVoiceApp() {
         appendLog("Ignored non‑JSON frame");
         return;
       }
+      
+      // Handle audio_data messages from backend TTS
+      if (payload.type === "audio_data" && payload.data) {
+        try {
+          console.log("🔊 Received audio_data message:", {
+            frame_index: payload.frame_index,
+            total_frames: payload.total_frames,
+            sample_rate: payload.sample_rate,
+            data_length: payload.data.length,
+            is_final: payload.is_final
+          });
+
+          // Decode base64 -> Int16 -> Float32 [-1, 1]
+          const bstr = atob(payload.data);
+          const buf = new ArrayBuffer(bstr.length);
+          const view = new Uint8Array(buf);
+          for (let i = 0; i < bstr.length; i++) view[i] = bstr.charCodeAt(i);
+          const int16 = new Int16Array(buf);
+          const float32 = new Float32Array(int16.length);
+          for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 0x8000;
+
+          console.log(`🔊 Processing TTS audio chunk: ${float32.length} samples, sample_rate: ${payload.sample_rate || 16000}`);
+          console.log("🔊 Audio data preview:", float32.slice(0, 10));
+
+          // Push to the worklet queue
+          if (pcmSinkRef.current) {
+            pcmSinkRef.current.port.postMessage({ type: 'push', payload: float32 });
+            appendLog(`🔊 TTS audio frame ${payload.frame_index + 1}/${payload.total_frames}`);
+          } else {
+            console.warn("Audio playback not initialized, attempting init...");
+            appendLog("⚠️ Audio playback not ready, initializing...");
+            // Try to initialize if not done yet
+            await initializeAudioPlayback();
+            if (pcmSinkRef.current) {
+              pcmSinkRef.current.port.postMessage({ type: 'push', payload: float32 });
+              appendLog("🔊 TTS audio playing (after init)");
+            } else {
+              console.error("Failed to initialize audio playback");
+              appendLog("❌ Audio init failed");
+            }
+          }
+          return; // handled
+        } catch (error) {
+          console.error("Error processing audio_data:", error);
+          appendLog("❌ Audio processing failed: " + error.message);
+        }
+      }
+      
       // --- Handle relay/broadcast messages with {sender, message} ---
       if (payload.sender && payload.message) {
         // Route all relay messages through the same logic
@@ -2112,7 +2484,7 @@ function RealTimeVoiceApp() {
           <div style={styles.appTitleContainer}>
             <div style={styles.appTitleWrapper}>
               <span style={styles.appTitleIcon}>🎙️</span>
-              <h1 style={styles.appTitle}>RTAgent</h1>
+              <h1 style={styles.appTitle}>ARTAgent</h1>
             </div>
             <p style={styles.appSubtitle}>Transforming customer interactions with real-time, intelligent voice interactions</p>
           </div>

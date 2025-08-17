@@ -39,7 +39,6 @@ from apps.rtagent.backend.src.handlers import (
     ACSMediaHandler,
     TranscriptionHandler,
 )
-from apps.rtagent.backend.src.factories.stt_factory import create_stt_recognizer
 from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
 from apps.rtagent.backend.src.utils.auth import (
     AuthError,
@@ -410,7 +409,9 @@ async def acs_media_ws(ws: WebSocket):
                         kind=SpanKind.CLIENT,
                         attributes=handler_attrs,
                     ):
-                        ws.state.stt_client = create_stt_recognizer()
+                        # Acquire STT recognizer from pool
+                        ws.state.stt_client = await ws.app.state.stt_pool.acquire()
+                        logger.info(f"Acquired STT recognizer from pool for ACS call {cid}")
                         handler = ACSMediaHandler(
                             ws,
                             recognizer=ws.state.stt_client,
@@ -511,9 +512,11 @@ async def acs_media_ws(ws: WebSocket):
         if handler and ACS_STREAMING_MODE == StreamMode.MEDIA:
             try:
                 handler.recognizer.stop()
-                logger.info("Speech recognizer stopped")
+                # Release STT recognizer back to pool
+                await ws.app.state.stt_pool.release(handler.recognizer)
+                logger.info(f"Speech recognizer stopped and released back to pool for call {cid}")
             except Exception as e:
-                logger.error(f"Error stopping recognizer: {e}")
+                logger.error(f"Error stopping/releasing recognizer: {e}")
 
         log_with_context(
             logger,

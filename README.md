@@ -3,22 +3,22 @@
 # 🎙️ **RTVoice Accelerator**  
 *Omni-channel, real-time voice-intelligence accelerator framework on Azure*
 
-**RTAgent** is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click “Call Me” in a web app. Built entirely on generally available Azure services—Azure Communication Services, Azure AI, and Azure App Service—it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
+**ARTAgent** is an accelerator that delivers a friction-free, AI-driven voice experience—whether callers dial a phone number, speak to an IVR, or click “Call Me” in a web app. Built entirely on generally available Azure services—Azure Communication Services, Azure AI, and Azure App Service—it provides a low-latency stack that scales on demand while keeping the AI layer fully under your control.
 
 Design a single agent or orchestrate multiple specialist agents (claims intake, authorization triage, appointment scheduling—anything). The framework allows you to build your voice agent from scratch, incorporate long- and short-term memory, configure actions, and fine-tune your TTS and STT layers to give any workflow an intelligent voice.
 
 ## **Overview** 
 
-<img src="utils/images/RTAGENT.png" align="right" height="180" alt="RTAgent Logo" />
+<img src="utils/images/RTAGENT.png" align="right" height="180" alt="ARTAgent Logo" />
 
 > **88 %** of customers still make a **phone call** when they need real support  
-> — yet most IVRs feel like 1999. **RTAgent** fixes that.
+> — yet most IVRs feel like 1999. **ARTAgent** fixes that.
 
-**RTAgent in a nutshell**
+**ARTAgent in a nutshell**
 
 RT Agent is a plug-and-play accelerator, voice-to-voice AI pipeline that slots into any phone line, web client, or CCaaS flow. Caller audio arrives through Azure Communication Services (ACS), is transcribed by a dedicated STT component, routed through your agent chain of LLMs, tool calls, and business logic, then re-synthesised by a TTS component—all in a sub-second round-trip. Because each stage runs as an independent microservice, you can swap models, fine-tune latency budgets, or inject custom logic without touching the rest of the stack. The result is natural, real-time conversation with precision control over every hop of the call.
 
-<img src="utils/images/RTAgentArch.png" alt="RTAgent Logo" />
+<img src="utils/images/RTAgentArch.png" alt="ARTAgent Logo" />
 
 <br>
 
@@ -29,7 +29,7 @@ RT Agent is a plug-and-play accelerator, voice-to-voice AI pipeline that slots i
 | **Drop-in YAML agents** | Spin up FNOL claims bots, triage nurses, or legal intake in minutes. |
 | **Micro-service architecture** | Swap models, tune latency, or add new business logic without redeploying the whole stack. |
 
-## Deploy and Customize the Demo App Using the RTAgent Framework
+## Deploy and Customize the Demo App Using the ARTAgent Framework
 
 ### **🚀 One-Command Azure Deployment**
 
@@ -108,7 +108,7 @@ make help                           # Show all available targets
 **Backend (FastAPI + Uvicorn):**
 ```bash
 git clone https://github.com/your-org/gbb-ai-audio-agent.git
-cd gbb-ai-audio-agent/rtagents/RTAgent/backend
+cd gbb-ai-audio-agent/rtagents/ARTAgent/backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
@@ -130,7 +130,7 @@ make start_frontend
 
 ### 🚀 **Quick Start (Recommended)**
 
-The fastest way to deploy RTAgent is using Azure Developer CLI:
+The fastest way to deploy ARTAgent is using Azure Developer CLI:
 
 ```bash
 azd auth login

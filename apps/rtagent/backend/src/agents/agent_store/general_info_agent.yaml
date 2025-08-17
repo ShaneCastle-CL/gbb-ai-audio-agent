@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# RTAgent – General-Information Task Agent
+# ARTAgent – General-Information Task Agent
 # ---------------------------------------------------------------------
 agent:
   name: GeneralInfoAgent
