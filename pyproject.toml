@@ -1,0 +1,375 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gbb-ai-audio-agent"
+version = "1.0.0"
+description = "Real-Time Voice Agent API powered by Azure Communication Services"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Real-Time Voice Agent Team", email = "support@example.com" },
+]
+keywords = [
+    "azure",
+    "communication-services", 
+    "voice-agent",
+    "real-time",
+    "fastapi",
+    "speech",
+    "ai",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Framework :: FastAPI",
+    "Topic :: Communications :: Telephony",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # Core FastAPI microservices stack
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "starlette>=0.27.0",
+    "redis>=5.0.0",
+    "aiohttp>=3.9.0",
+    "python-multipart>=0.0.6",
+    "pyjwt",
+    
+    # Azure services - Linux App Service compatible versions
+    "azure-cosmos>=4.5.0",
+    "azure-identity>=1.15.0",
+    "azure-storage-blob>=12.19.0",
+    "azure-cognitiveservices-speech>=1.45.0",
+    "azure-communication-callautomation>=1.4.0",
+    "azure-communication-identity>=1.5.0",
+    "azure-keyvault-secrets>=4.7.0",
+    "azure-eventgrid>=4.10.0",
+    "azure-core>=1.29.0",
+    
+    # Azure monitoring and telemetry
+    "azure-monitor-opentelemetry>=1.6.11",
+    "opentelemetry-sdk",
+    "opentelemetry-instrumentation",
+    "opentelemetry-instrumentation-fastapi", 
+    "opentelemetry-instrumentation-requests",
+    "opentelemetry-instrumentation-urllib3",
+    "opentelemetry-instrumentation-openai-v2",
+    
+    # AI and OpenAI integration
+    "openai>=1.50.0",
+    
+    # HTTP clients - stable versions
+    "httpx>=0.27.0",
+    "aiofiles>=23.0.0",
+    
+    # Async and networking tools
+    "tenacity>=8.5.0",
+    "websockets>=12.0",
+    "backoff>=2.0.0",
+    
+    # Data processing and utilities
+    "numpy>=1.24.0",
+    "python-dotenv>=1.0.0",
+    "python-json-logger>=2.0.0",
+    "jinja2>=3.1.0",
+    "typing-extensions>=4.8.0",
+    "langdetect>=1.0.9",
+    "colorama>=0.4.6",
+    
+    # Database drivers
+    "pymongo>=4.6.0",
+    "rapidfuzz>=3.13.0",
+]
+
+[project.optional-dependencies]
+# Development and code quality tools
+dev = [
+    "isort==5.9.3",
+    "black[jupyter]==25.1.0",
+    "flake8==3.9.2",
+    "interrogate==1.4.0",
+    "pre-commit==2.14.0",
+    "ruff",
+    "bandit",
+    "pylint",
+    "types-requests",
+    "types-PyYAML",
+]
+
+# Testing dependencies
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+]
+
+# Documentation dependencies
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocs-mermaid2-plugin",
+]
+
+# All development dependencies
+all = [
+    "gbb-ai-audio-agent[dev,test,docs]",
+]
+
+[project.urls]
+Homepage = "https://github.com/pablosalvador10/gbb-ai-audio-agent"
+Repository = "https://github.com/pablosalvador10/gbb-ai-audio-agent"
+Documentation = "https://github.com/pablosalvador10/gbb-ai-audio-agent/tree/main/docs"
+Issues = "https://github.com/pablosalvador10/gbb-ai-audio-agent/issues"
+
+[project.scripts]
+rtagent = "apps.rtagent.backend.main:app"
+
+# ============================================================================
+# Tool Configurations
+# ============================================================================
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | __pycache__
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 88
+src_paths = ["src", "apps", "utils", "tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+]
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+[tool.ruff.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+exclude = [
+    "venv/",
+    ".venv/",
+    "build/",
+    "dist/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "azure.*",
+    "opentelemetry.*",
+    "redis.*",
+    "pymongo.*",
+    "rapidfuzz.*",
+    "colorama.*",
+    "langdetect.*",
+    "backoff.*",
+    "tenacity.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src", "apps", "utils"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv"]
+skips = ["B101", "B601"]
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-property-decorators = false
+ignore-module = false
+fail-under = 80
+exclude = ["setup.py", "docs", "build", "tests"]
+ignore-regex = ["^get$", "^mock_.*", ".*BaseClass.*"]
+verbose = 0
+quiet = false
+whitelist-regex = []
+color = true
+
+# ============================================================================
+# Hatch Build Configuration
+# ============================================================================
+
+[tool.hatch.version]
+path = "src/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/apps",
+    "/utils",
+    "/docs",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "apps", "utils"]
+
+[tool.hatch.envs.default]
+dependencies = [
+    "gbb-ai-audio-agent[dev,test]",
+]
+
+[tool.hatch.envs.default.scripts]
+test = "pytest {args:tests}"
+test-cov = "coverage run -m pytest {args:tests}"
+cov-report = [
+    "- coverage combine",
+    "coverage report",
+]
+cov-html = [
+    "- coverage combine", 
+    "coverage html",
+]
+lint = [
+    "ruff check .",
+    "black --check .",
+    "isort --check-only .",
+]
+format = [
+    "black .",
+    "isort .",
+    "ruff check --fix .",
+]
+type-check = "mypy ."
+security = "bandit -r src apps utils"
+docs-check = "interrogate ."
+quality = [
+    "lint",
+    "type-check", 
+    "security",
+    "docs-check",
+]
+
+[tool.hatch.envs.test]
+dependencies = [
+    "gbb-ai-audio-agent[test]",
+]
+
+[[tool.hatch.envs.test.matrix]]
+python = ["3.11"]
+
+[tool.hatch.envs.docs]
+dependencies = [
+    "gbb-ai-audio-agent[docs]",
+]
+
+[tool.hatch.envs.docs.scripts]
+build = "mkdocs build --clean --strict"
+serve = "mkdocs serve --dev-addr localhost:8000"

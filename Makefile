@@ -17,8 +17,6 @@ SCRIPTS_DIR = apps/rtagent/scripts
 set_up_precommit_and_prepush:
 	pre-commit install -t pre-commit
 	pre-commit install -t pre-push
-
-
 # Run all code quality checks (formatting, linting, typing, security, etc.)
 check_code_quality:
 	# Ruff: auto-fix common Python code issues
@@ -571,6 +569,156 @@ purchase_acs_phone_number_ps:
 
 
 ############################################################
+# Azure Redis Management
+# Purpose: Connect to Azure Redis using Azure AD authentication
+############################################################
+
+# Connect to Azure Redis using Azure AD authentication
+# Usage: make connect_redis [ENV_FILE=custom.env]
+connect_redis:
+	@echo "🔌 Azure Redis - Connecting with Azure AD Authentication"
+	@echo "========================================================"
+	@echo ""
+	
+	# Set default environment file
+	$(eval ENV_FILE ?= .env)
+	
+	# Extract Redis configuration from environment file
+	@echo "🔍 Extracting Redis configuration from $(ENV_FILE)"
+	$(eval REDIS_HOST := $(shell grep '^REDIS_HOST=' $(ENV_FILE) | cut -d'=' -f2))
+	$(eval REDIS_PORT := $(shell grep '^REDIS_PORT=' $(ENV_FILE) | cut -d'=' -f2))
+	
+	@if [ -z "$(REDIS_HOST)" ]; then \
+		echo "❌ REDIS_HOST not found in $(ENV_FILE)"; \
+		exit 1; \
+	fi
+	
+	@if [ -z "$(REDIS_PORT)" ]; then \
+		echo "❌ REDIS_PORT not found in $(ENV_FILE)"; \
+		exit 1; \
+	fi
+	
+	@echo "📋 Redis Configuration:"
+	@echo "   🌐 Host: $(REDIS_HOST)"
+	@echo "   🔌 Port: $(REDIS_PORT)"
+	@echo ""
+	
+	# Get current Azure user's object ID
+	@echo "🔍 Getting current Azure user's object ID..."
+	$(eval USER_OBJECT_ID := $(shell az ad signed-in-user show --query id -o tsv 2>/dev/null))
+	
+	@if [ -z "$(USER_OBJECT_ID)" ]; then \
+		echo "❌ Unable to get current user's object ID. Please ensure you are signed in to Azure CLI."; \
+		echo "   Run: az login"; \
+		exit 1; \
+	fi
+	
+	@echo "👤 Current User Object ID: $(USER_OBJECT_ID)"
+	@echo ""
+	
+	# Get access token for Redis scope
+	@echo "🔐 Getting Azure access token for Redis scope..."
+	$(eval ACCESS_TOKEN := $(shell az account get-access-token --scope https://redis.azure.com/.default --query accessToken -o tsv 2>/dev/null))
+	
+	@if [ -z "$(ACCESS_TOKEN)" ]; then \
+		echo "❌ Unable to get access token for Redis scope."; \
+		echo "   Please ensure you have proper permissions for Azure Cache for Redis."; \
+		exit 1; \
+	fi
+	
+	@echo "✅ Access token obtained successfully"
+	@echo ""
+	
+	# Connect to Redis using Azure AD authentication
+	@echo "🚀 Connecting to Redis with Azure AD authentication..."
+	@echo "   Username: $(USER_OBJECT_ID)"
+	@echo "   Password: [Azure Access Token]"
+	@echo ""
+	@echo "� Debug: Using command:"
+	@echo "   redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls -u $(USER_OBJECT_ID) -a [ACCESS_TOKEN]"
+	@echo ""
+	@echo "�📝 Note: You are now connected to Redis. Use Redis commands as needed."
+	@echo "   Example commands: PING, INFO, KEYS *, GET <key>, SET <key> <value>"
+	@echo "   Type 'quit' or 'exit' to disconnect."
+	@echo ""
+	
+	@redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls -u $(USER_OBJECT_ID) -a $(ACCESS_TOKEN) || { \
+		echo ""; \
+		echo "❌ Redis connection failed!"; \
+		echo ""; \
+		echo "🔧 Debug: Command that failed:"; \
+		echo "   redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls -u $(USER_OBJECT_ID) -a $(ACCESS_TOKEN)"; \
+		echo ""; \
+		echo "💡 Troubleshooting steps:"; \
+		echo "   1. Test basic connectivity: telnet $(REDIS_HOST) $(REDIS_PORT)"; \
+		echo "   2. Verify Azure permissions: az role assignment list --assignee $(USER_OBJECT_ID) --scope /subscriptions/$(shell az account show --query id -o tsv)/resourceGroups/$(shell grep '^AZURE_RESOURCE_GROUP=' $(ENV_FILE) | cut -d'=' -f2)/providers/Microsoft.Cache/redis/$(shell echo $(REDIS_HOST) | cut -d'.' -f1)"; \
+		echo "   3. Check Redis configuration in Azure Portal"; \
+		echo "   4. Verify TLS settings and Azure AD authentication is enabled"; \
+		exit 1; \
+	}
+
+# Test Redis connection without interactive session
+# Usage: make test_redis_connection [ENV_FILE=custom.env]
+test_redis_connection:
+	@echo "🧪 Azure Redis - Testing Connection"
+	@echo "===================================="
+	@echo ""
+	
+	# Set default environment file
+	$(eval ENV_FILE ?= .env)
+	
+	# Extract Redis configuration from environment file
+	$(eval REDIS_HOST := $(shell grep '^REDIS_HOST=' $(ENV_FILE) | cut -d'=' -f2))
+	$(eval REDIS_PORT := $(shell grep '^REDIS_PORT=' $(ENV_FILE) | cut -d'=' -f2))
+	
+	@if [ -z "$(REDIS_HOST)" ] || [ -z "$(REDIS_PORT)" ]; then \
+		echo "❌ Redis configuration not found in $(ENV_FILE)"; \
+		exit 1; \
+	fi
+	
+	# Get current Azure user's object ID and access token
+	$(eval USER_OBJECT_ID := $(shell az ad signed-in-user show --query id -o tsv 2>/dev/null))
+	$(eval ACCESS_TOKEN := $(shell az account get-access-token --scope https://redis.azure.com/.default --query accessToken -o tsv 2>/dev/null))
+	
+	@if [ -z "$(USER_OBJECT_ID)" ] || [ -z "$(ACCESS_TOKEN)" ]; then \
+		echo "❌ Unable to authenticate with Azure. Please run: az login"; \
+		exit 1; \
+	fi
+	
+	@echo "🔍 Testing Redis connection..."
+	@echo "   Host: $(REDIS_HOST):$(REDIS_PORT)"
+	@echo "   User: $(USER_OBJECT_ID)"
+	@echo ""
+	
+	# Test connection with PING command
+	@echo "🔧 Debug: Attempting Redis connection with command:"
+	@echo "   redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls --user $(USER_OBJECT_ID) --pass [ACCESS_TOKEN]"
+	@echo ""
+	@if redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls --user $(USER_OBJECT_ID) --pass $(ACCESS_TOKEN) PING > /dev/null 2>&1; then \
+		echo "✅ Redis connection successful!"; \
+		echo "📊 Redis Info:"; \
+		redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls --user $(USER_OBJECT_ID) --pass $(ACCESS_TOKEN) INFO server | head -5; \
+	else \
+		echo "❌ Redis connection failed!"; \
+		echo ""; \
+		echo "🔧 Debug: Full command that failed:"; \
+		echo "   redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls --user $(USER_OBJECT_ID) --pass $(ACCESS_TOKEN) PING"; \
+		echo ""; \
+		echo "🔧 Debug: Testing connection with verbose output:"; \
+		redis-cli -h $(REDIS_HOST) -p $(REDIS_PORT) --tls --user $(USER_OBJECT_ID) --pass $(ACCESS_TOKEN) PING 2>&1 || true; \
+		echo ""; \
+		echo "   Please check:"; \
+		echo "   • Redis host and port are correct"; \
+		echo "   • Your Azure account has Redis Data Contributor role"; \
+		echo "   • Azure Cache for Redis allows Azure AD authentication"; \
+		echo "   • TLS is properly configured on the Redis instance"; \
+		echo "   • Network connectivity to $(REDIS_HOST):$(REDIS_PORT)"; \
+		exit 1; \
+	fi
+
+.PHONY: connect_redis test_redis_connection
+
+############################################################
 # Help and Documentation
 ############################################################
 
@@ -627,6 +775,10 @@ help:
 	@echo "📞 Azure Communication Services:"
 	@echo "  purchase_acs_phone_number        Purchase ACS phone number and store in env file"
 	@echo "  purchase_acs_phone_number_ps     Purchase ACS phone number (PowerShell version)"
+	@echo ""
+	@echo "🔴 Azure Redis Management:"
+	@echo "  connect_redis                    Connect to Azure Redis using Azure AD authentication"
+	@echo "  test_redis_connection            Test Redis connection without interactive session"
 	@echo ""
 	@echo "📖 Required Environment Variables (for Terraform):"
 	@echo "  AZURE_SUBSCRIPTION_ID            Your Azure subscription ID"
