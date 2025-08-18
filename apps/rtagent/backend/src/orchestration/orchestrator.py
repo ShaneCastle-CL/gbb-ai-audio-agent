@@ -64,11 +64,10 @@ _SPECIALISTS: list[str] = ["General", "Claims"]
 def configure_entry_and_specialists(*, entry_agent: str = "AutoAuth", specialists: Optional[Iterable[str]] = None) -> None:
     """Configure the entry agent and ordered list of specialists.
 
-    The entry agent is **forced to 'AutoAuth'** to keep a consistent flow as requested.
-    Specialists are stored (case-sensitive names) and used for generic handoffs.
-
-    Example:
-        configure_entry_and_specialists(entry_agent="AutoAuth", specialists=["General", "Claims", "Billing"]) 
+    :param entry_agent: Name of the entry agent (forced to 'AutoAuth' for consistency)
+    :param specialists: Optional iterable of specialist agent names for handoffs
+    :return: None
+    :raises: None
     """
     global _ENTRY_AGENT, _SPECIALISTS  # noqa: PLW0603
     if entry_agent != "AutoAuth":
@@ -119,24 +118,41 @@ _REGISTRY: Dict[str, AgentHandler] = {}
 def register_specialist(name: str, handler: AgentHandler) -> None:
     """Register a specialist/entry agent handler.
 
-    The name should match ``active_agent`` values stored in CoreMemory.
+    :param name: Agent name that matches active_agent values in CoreMemory
+    :param handler: Agent handler function implementing AgentHandler protocol
+    :return: None
+    :raises: None
     """
     _REGISTRY[name] = handler
 
 
 def register_specialists(handlers: Dict[str, AgentHandler]) -> None:
-    """Bulk-register multiple agents in one call."""
+    """Bulk-register multiple agents in one call.
+
+    :param handlers: Dictionary mapping agent names to handler functions
+    :return: None
+    :raises: None
+    """
     for k, v in (handlers or {}).items():
         register_specialist(k, v)
 
 
 def get_specialist(name: str) -> Optional[AgentHandler]:
-    """Return a handler for the given agent name, if registered."""
+    """Return a handler for the given agent name, if registered.
+
+    :param name: Name of the agent to retrieve handler for
+    :return: Agent handler function if found, None otherwise
+    :raises: None
+    """
     return _REGISTRY.get(name)
 
 
 def list_specialists() -> Iterable[str]:
-    """List the registered agent names."""
+    """List the registered agent names.
+
+    :return: Iterable of registered agent names
+    :raises: None
+    """
     return _REGISTRY.keys()
 
 
@@ -146,9 +162,12 @@ def list_specialists() -> Iterable[str]:
 
 
 def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> Tuple[str, str]:
-    """Extract correlation context from *WebSocket* and *MemoManager*.
+    """Extract correlation context from WebSocket and MemoManager.
 
-    :returns: ``(call_connection_id, session_id)``
+    :param ws: WebSocket connection instance
+    :param cm: MemoManager instance for conversation state
+    :return: Tuple of (call_connection_id, session_id)
+    :raises: None (handles None cm gracefully with fallbacks)
     """
     if cm is None:
         logger.warning(
@@ -180,7 +199,14 @@ def _get_correlation_context(ws: WebSocket, cm: "MemoManager") -> Tuple[str, str
 
 
 def _cm_get(cm: "MemoManager", key: str, default: Any = None) -> Any:
-    """Shorthand for ``cm.get_value_from_corememory`` with a default."""
+    """Shorthand for cm.get_value_from_corememory with a default.
+
+    :param cm: MemoManager instance for conversation state
+    :param key: Key to retrieve from core memory
+    :param default: Default value to return if key not found or cm is None
+    :return: Value from core memory or default
+    :raises: None (handles None cm gracefully)
+    """
     if cm is None:
         logger.warning(
             "⚠️ MemoManager is None when trying to get key '%s', returning default: %s",
@@ -192,7 +218,13 @@ def _cm_get(cm: "MemoManager", key: str, default: Any = None) -> Any:
 
 
 def _cm_set(cm: "MemoManager", **kwargs: Dict[str, Any]) -> None:
-    """Bulk update core‑memory with ``key=value`` pairs."""
+    """Bulk update core-memory with key=value pairs.
+
+    :param cm: MemoManager instance for conversation state
+    :param kwargs: Key-value pairs to update in core memory
+    :return: None
+    :raises: None (handles None cm gracefully)
+    """
     if cm is None:
         logger.warning("⚠️ MemoManager is None when trying to set values: %s", kwargs)
         return
@@ -201,10 +233,12 @@ def _cm_set(cm: "MemoManager", **kwargs: Dict[str, Any]) -> None:
 
 
 def _get_agent_instance(ws: WebSocket, agent_name: str) -> Any:
-    """Return the agent instance for ``agent_name``.
+    """Return the agent instance for the specified agent name.
 
-    First uses known bindings (auth/claims/general). If not found, tries
-    ``ws.app.state.agent_instances[agent_name]`` when present.
+    :param ws: WebSocket connection instance
+    :param agent_name: Name of the agent to retrieve instance for
+    :return: Agent instance if found, None otherwise
+    :raises: None
     """
     binding = _AGENT_BINDINGS.get(agent_name)
     if binding and binding.ws_attr:
@@ -233,9 +267,13 @@ def _sync_voice_from_agent(cm: "MemoManager", ws: WebSocket, agent_name: str) ->
 async def _maybe_terminate_if_escalated(
     cm: "MemoManager", ws: WebSocket, *, is_acs: bool
 ) -> bool:
-    """If memory shows escalation, notify UI and terminate the session.
+    """Check if memory shows escalation and terminate session if needed.
 
-    Returns True if termination was triggered.
+    :param cm: MemoManager instance for conversation state
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: True if termination was triggered, False otherwise
+    :raises: None (handles exceptions gracefully)
     """
     if _cm_get(cm, "escalated", False):
         # Preserve previous UI signal
@@ -257,12 +295,14 @@ async def _maybe_terminate_if_escalated(
 async def _send_agent_greeting(
     cm: "MemoManager", ws: WebSocket, agent_name: str, is_acs: bool
 ) -> None:
-    """Emit a greeting when switching to *agent_name*.
+    """Emit a greeting when switching to the specified agent.
 
-    A per‑connection, per‑agent counter now lives in ``ws.state.greet_counts``
-    (migrated from the previous ``app.state`` global) so that subsequent agent
-    returns on the same WebSocket use the "Hi again…" variant while fully
-    isolating concurrent sessions. Structure: ``{agent_name: count}``.
+    :param cm: MemoManager instance for conversation state
+    :param ws: WebSocket connection instance
+    :param agent_name: Name of the agent to greet for
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: None
+    :raises: None (logs errors internally)
     """
     if cm is None:
         logger.error(
@@ -357,7 +397,14 @@ async def _send_agent_greeting(
 
 @asynccontextmanager
 async def track_latency(timer, label: str, redis_mgr):
-    """Context‑manager that starts/stops a latency timer and stores the metric."""
+    """Context manager for tracking and storing conversation latency metrics.
+
+    :param timer: Latency timer instance for measurement collection
+    :param label: Descriptive label for the timing operation being measured
+    :param redis_mgr: Redis manager for metric storage and analytics persistence
+    :return: Async context manager yielding timing capabilities
+    :raises: None (ensures timer cleanup even if exceptions occur during measurement)
+    """
     timer.start(label)
     try:
         yield
@@ -375,11 +422,14 @@ async def run_auth_agent(
     *,
     is_acs: bool,
 ) -> None:
-    """
-    Run *AuthAgent* once per session.
+    """Run AuthAgent once per session for authentication.
 
-    • On **emergency escalation**, set `escalated=True`, store reason, and return.
-    • On **successful auth**, cache caller info & chosen specialist.
+    :param cm: MemoManager instance for conversation state
+    :param utterance: User's spoken input text
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: None
+    :raises ValueError: If MemoManager (cm) parameter is None
     """
     if cm is None:
         logger.error("❌ MemoManager is None in run_auth_agent")
@@ -457,7 +507,16 @@ async def _run_specialist_base(
 ) -> None:
     """Shared runner for specialist agents (behavior-preserving).
 
-    Thin wrapper used by concrete functions to avoid duplication.
+    :param agent_key: Key identifier for the agent to run
+    :param cm: MemoManager instance for conversation state
+    :param utterance: User's spoken input text
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :param context_message: Context message to inject for agent awareness
+    :param respond_kwargs: Additional keyword arguments for agent response
+    :param latency_label: Label for latency tracking and measurement
+    :return: None
+    :raises: May raise exceptions from agent response or tool processing
     """
     agent = _get_agent_instance(ws, agent_key)
 
@@ -483,7 +542,15 @@ async def run_general_agent(
     *,
     is_acs: bool,
 ) -> None:
-    """Handle a turn with the *GeneralInfoAgent*."""
+    """Handle a turn with the GeneralInfoAgent.
+
+    :param cm: MemoManager instance for conversation state
+    :param utterance: User's spoken input text
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: None
+    :raises ValueError: If MemoManager (cm) parameter is None
+    """
     if cm is None:
         logger.error("❌ MemoManager is None in run_general_agent")
         raise ValueError("MemoManager (cm) parameter cannot be None in run_general_agent")
@@ -512,7 +579,15 @@ async def run_claims_agent(
     *,
     is_acs: bool,
 ) -> None:
-    """Handle a turn with the *ClaimIntakeAgent*."""
+    """Handle a turn with the ClaimIntakeAgent.
+
+    :param cm: MemoManager instance for conversation state
+    :param utterance: User's spoken input text
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: None
+    :raises ValueError: If MemoManager (cm) parameter is None
+    """
     if cm is None:
         logger.error("❌ MemoManager is None in run_claims_agent")
         raise ValueError("MemoManager (cm) parameter cannot be None in run_claims_agent")
@@ -539,8 +614,14 @@ async def run_claims_agent(
 # -------------------------------------------------------------
 
 
-def _get_field(resp: Dict[str, Any], key: str) -> Any:  # noqa: D401 – simple util
-    """Return ``resp[key]`` or ``resp['data'][key]`` if nested."""
+def _get_field(resp: Dict[str, Any], key: str) -> Any:
+    """Return resp[key] or resp['data'][key] if nested.
+
+    :param resp: Response dictionary to extract field from
+    :param key: Key name to retrieve from response
+    :return: Value from response or nested data, None if not found
+    :raises: None
+    """
     if key in resp:
         return resp[key]
     return resp.get("data", {}).get(key) if isinstance(resp.get("data"), dict) else None
@@ -549,7 +630,15 @@ def _get_field(resp: Dict[str, Any], key: str) -> Any:  # noqa: D401 – simple 
 async def _process_tool_response(  # pylint: disable=too-complex
     cm: "MemoManager", resp: Any, ws: WebSocket, is_acs: bool
 ) -> None:
-    """Inspect structured tool outputs and update core‑memory accordingly."""
+    """Inspect structured tool outputs and update core-memory accordingly.
+
+    :param cm: MemoManager instance for conversation state
+    :param resp: Response from agent tool execution
+    :param ws: WebSocket connection instance
+    :param is_acs: Flag indicating if this is an ACS connection
+    :return: None
+    :raises: None (handles exceptions gracefully with logging)
+    """
     if cm is None:
         logger.error("❌ MemoManager is None in _process_tool_response")
         return
@@ -715,7 +804,11 @@ async def route_turn(
 # Default registrations (keeps current behavior)
 # ---------------------------------------------------------------------------
 def _bind_default_handlers() -> None:
-    """Register default agent handlers."""
+    """Register default agent handlers.
+
+    :return: None
+    :raises: None
+    """
     register_specialist("AutoAuth", run_auth_agent)
     register_specialist("General", run_general_agent)
     register_specialist("Claims", run_claims_agent)

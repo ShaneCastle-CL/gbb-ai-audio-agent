@@ -82,7 +82,18 @@ from apps.rtagent.backend.api.v1.events.registration import register_default_han
 #  Lifecycle Management
 # --------------------------------------------------------------------------- #
 async def lifespan(app: FastAPI):
-    """Manage application lifecycle: startup and shutdown events."""
+    """
+    Manage complete application lifecycle including startup and shutdown events.
+
+    This function handles the initialization and cleanup of all application components
+    including speech pools, Redis connections, Cosmos DB, Azure OpenAI clients, and
+    ACS agents. It provides comprehensive resource management with proper tracing and
+    error handling for production deployment.
+
+    :param app: The FastAPI application instance requiring lifecycle management.
+    :return: AsyncGenerator yielding control to the application runtime.
+    :raises RuntimeError: If critical startup components fail to initialize.
+    """
     tracer = trace.get_tracer(__name__)
 
     # ---- Startup ----
@@ -116,10 +127,32 @@ async def lifespan(app: FastAPI):
         POOL_SIZE_STT = int(os.getenv("POOL_SIZE_STT", "8"))
 
         async def make_tts() -> SpeechSynthesizer:
+            """
+            Create and configure a new Text-to-Speech synthesizer instance.
+
+            This factory function creates a properly configured SpeechSynthesizer
+            with the appropriate voice settings and playback configuration for
+            real-time audio generation in the voice agent system.
+
+            :param: None (uses configuration from environment variables).
+            :return: Configured SpeechSynthesizer instance ready for audio generation.
+            :raises SpeechServiceError: If TTS service initialization fails.
+            """
             # If SDK benefits from a warm-up, you can synth a short phrase here.
             return SpeechSynthesizer(voice=GREETING_VOICE_TTS, playback="always")
 
         async def make_stt() -> StreamingSpeechRecognizerFromBytes:
+            """
+            Create and configure a new Speech-to-Text recognizer instance.
+
+            This factory function creates a properly configured streaming speech
+            recognizer with semantic segmentation, VAD settings, and language
+            configuration for real-time audio processing and transcription.
+
+            :param: None (uses configuration from environment variables).
+            :return: Configured StreamingSpeechRecognizerFromBytes instance ready for transcription.
+            :raises SpeechServiceError: If STT service initialization fails.
+            """
             return StreamingSpeechRecognizerFromBytes(
                 use_semantic_segmentation=VAD_SEMANTIC_SEGMENTATION,
                 vad_silence_timeout_ms=SILENCE_DURATION_MS,
@@ -188,7 +221,18 @@ async def lifespan(app: FastAPI):
 #  App factory with Dynamic Documentation
 # --------------------------------------------------------------------------- #
 def create_app() -> FastAPI:
-    """Create FastAPI app with static documentation."""
+    """
+    Create and configure the main FastAPI application instance with comprehensive settings.
+
+    This function initializes the FastAPI application with complete documentation,
+    contact information, license details, OpenAPI tags, and lifecycle management.
+    It provides the foundation for the real-time voice agent API with proper
+    documentation generation capabilities.
+
+    :param: None (uses configuration from imported modules and environment).
+    :return: Fully configured FastAPI application instance ready for deployment.
+    :raises ImportError: If required documentation modules cannot be imported.
+    """
     from apps.rtagent.backend.api.swagger_docs import get_tags, get_description
     tags = get_tags()
     description = get_description()
@@ -212,7 +256,17 @@ def create_app() -> FastAPI:
 #  App Initialization with Dynamic Documentation
 # --------------------------------------------------------------------------- #
 def setup_app_middleware_and_routes(app: FastAPI):
-    """Set up middleware and routes for the app."""
+    """
+    Configure comprehensive middleware stack and route registration for the application.
+
+    This function sets up CORS middleware for cross-origin requests, implements
+    authentication middleware for Entra ID validation, and registers all API
+    routers including v1 endpoints for health, calls, media, and real-time features.
+
+    :param app: The FastAPI application instance to configure with middleware and routes.
+    :return: None (modifies the application instance in place).
+    :raises HTTPException: If authentication validation fails during middleware setup.
+    """
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
@@ -225,6 +279,18 @@ def setup_app_middleware_and_routes(app: FastAPI):
     if ENABLE_AUTH_VALIDATION:
         @app.middleware("http")
         async def entraid_auth_middleware(request: Request, call_next):
+            """
+            Validate Entra ID authentication tokens for protected API endpoints.
+
+            This middleware function checks incoming requests for valid authentication
+            tokens, exempts specified paths from validation, and ensures proper
+            security enforcement across the API surface area.
+
+            :param request: The incoming HTTP request requiring authentication validation.
+            :param call_next: The next middleware or endpoint handler in the chain.
+            :return: HTTP response from the next handler or authentication error response.
+            :raises HTTPException: If authentication token validation fails.
+            """
             path = request.url.path
             if any(path.startswith(p) for p in ENTRA_EXEMPT_PATHS):
                 return await call_next(request)
@@ -244,7 +310,17 @@ def setup_app_middleware_and_routes(app: FastAPI):
 app = None
 
 def initialize_app():
-    """Initialize app with static documentation."""
+    """
+    Initialize the complete application with comprehensive configuration and setup.
+
+    This function creates the FastAPI application instance and applies all necessary
+    middleware, routes, and configuration settings. It serves as the main entry
+    point for application initialization in production and development environments.
+
+    :param: None (uses global configuration and imported settings).
+    :return: Fully initialized FastAPI application instance ready for deployment.
+    :raises RuntimeError: If application initialization fails at any stage.
+    """
     global app
     app = create_app()
     setup_app_middleware_and_routes(app)

@@ -36,7 +36,18 @@ router = APIRouter()
 # --------------------------------------------------------------------------- #
 @router.websocket("/ws/relay")
 async def relay_ws(ws: WebSocket):
-    """Dashboards connect here to receive broadcasted text."""
+    """
+    Establish WebSocket connection for dashboard clients to receive broadcasted messages.
+
+    This endpoint provides a relay mechanism for dashboard applications to receive
+    real-time updates and events from the voice agent system. It manages client
+    connections, tracks session metrics, and ensures proper message distribution
+    with comprehensive connection lifecycle management.
+
+    :param ws: The WebSocket connection from dashboard client requesting real-time updates.
+    :return: None (maintains persistent connection for real-time message relay).
+    :raises WebSocketDisconnect: If the dashboard client connection is terminated.
+    """
     clients: set[WebSocket] = await ws.app.state.websocket_manager.get_clients_snapshot()
     if ws not in clients:
         await ws.accept()
@@ -69,8 +80,16 @@ async def relay_ws(ws: WebSocket):
 @router.websocket("/realtime")
 async def realtime_ws(ws: WebSocket):
     """
-    Browser/WebRTC client sends STT text; we stream GPT + TTS back.
-    The shared `route_turn` handles auth vs. main dialog.
+    Handle real-time browser WebRTC client communication with voice agent orchestration.
+
+    This WebSocket endpoint manages bidirectional communication between browser clients
+    and the voice agent system. It processes speech-to-text input, orchestrates
+    conversation flow through authentication and main dialog agents, and streams
+    generated responses back with text-to-speech synthesis.
+
+    :param ws: The WebSocket connection from browser/WebRTC client for real-time conversation.
+    :return: None (maintains persistent connection for conversational interaction).
+    :raises WebSocketDisconnect: If the browser client connection terminates unexpectedly.
     """
     try:
         await ws.accept()
@@ -102,6 +121,17 @@ async def realtime_ws(ws: WebSocket):
         await cm.persist_to_redis_async(redis_mgr)
 
         def on_partial(txt: str, lang: str):
+            """
+            Handle partial speech-to-text transcript callbacks during real-time processing.
+
+            This callback function processes intermediate STT results as they become available,
+            allowing for real-time display of transcription progress to the browser client
+            before final text completion. Also manages TTS interruption when user starts speaking.
+
+            :param txt: The partial transcript text from speech recognition service.
+            :param lang: The detected language code of the spoken content.
+            :return: None (sends partial results through WebSocket for immediate display).
+            """
             logger.info(f"🗣️ User (partial) in {lang}: {txt}")
             if ws.state.is_synthesizing:
                 try:
@@ -123,6 +153,17 @@ async def realtime_ws(ws: WebSocket):
         ws.state.stt_client.set_partial_result_callback(on_partial)
 
         def on_final(txt: str, lang: str):
+            """
+            Handle final speech-to-text transcript completion and buffer management.
+
+            This callback function processes completed STT results, accumulating finalized
+            text into the user buffer for conversation orchestration and agent processing.
+            Triggered when speech recognition determines the user has finished speaking.
+
+            :param txt: The final complete transcript text from speech recognition service.
+            :param lang: The detected language code of the spoken content.
+            :return: None (accumulates text in user buffer for agent processing).
+            """
             logger.info(f"🧾 User (final) in {lang}: {txt}")
             ws.state.user_buffer += txt.strip() + "\n"
 

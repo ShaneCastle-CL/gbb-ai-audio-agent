@@ -51,9 +51,10 @@ class CallEventProcessor:
         """
         Register a handler for a specific event type.
 
-        Args:
-            event_type: ACS event type (e.g., "Microsoft.Communication.CallConnected")
-            handler: Async function to handle the event
+        :param event_type: ACS event type (e.g., "Microsoft.Communication.CallConnected")
+        :type event_type: str
+        :param handler: Async function to handle the event
+        :type handler: CallEventHandler
         """
         self._handlers[event_type].append(handler)
         self._stats["handlers_registered"] += 1
@@ -65,12 +66,12 @@ class CallEventProcessor:
         """
         Unregister a specific handler.
 
-        Args:
-            event_type: ACS event type
-            handler: Handler function to remove
-
-        Returns:
-            True if handler was found and removed
+        :param event_type: ACS event type
+        :type event_type: str
+        :param handler: Handler function to remove
+        :type handler: CallEventHandler
+        :return: True if handler was found and removed
+        :rtype: bool
         """
         if event_type in self._handlers:
             try:
@@ -87,12 +88,12 @@ class CallEventProcessor:
         """
         Process a list of CloudEvents from ACS webhook.
 
-        Args:
-            events: List of CloudEvent objects from webhook
-            request_state: FastAPI request app state for dependencies
-
-        Returns:
-            Processing result summary
+        :param events: List of CloudEvent objects from webhook
+        :type events: List[CloudEvent]
+        :param request_state: FastAPI request app state for dependencies
+        :type request_state: Any
+        :return: Processing result summary
+        :rtype: Dict[str, Any]
         """
         with tracer.start_as_current_span(
             "call_event_processor.process_events",
@@ -127,7 +128,14 @@ class CallEventProcessor:
     async def _process_single_event(
         self, event: CloudEvent, request_state: Any
     ) -> None:
-        """Process a single CloudEvent."""
+        """
+        Process a single CloudEvent.
+
+        :param event: CloudEvent to process
+        :type event: CloudEvent
+        :param request_state: FastAPI request app state for dependencies
+        :type request_state: Any
+        """
         # Extract call connection ID
         call_connection_id = self._extract_call_connection_id(event)
         if not call_connection_id:
@@ -153,7 +161,14 @@ class CallEventProcessor:
         await self._execute_handlers(handlers, context)
 
     def _extract_call_connection_id(self, event: CloudEvent) -> Optional[str]:
-        """Extract call connection ID from CloudEvent."""
+        """
+        Extract call connection ID from CloudEvent.
+
+        :param event: CloudEvent to extract connection ID from
+        :type event: CloudEvent
+        :return: Call connection ID or None if not found
+        :rtype: Optional[str]
+        """
         try:
             data = event.data
             if isinstance(data, dict):
@@ -169,7 +184,18 @@ class CallEventProcessor:
     def _create_event_context(
         self, event: CloudEvent, call_connection_id: str, request_state: Any
     ) -> CallEventContext:
-        """Create event context from CloudEvent and request state."""
+        """
+        Create event context from CloudEvent and request state.
+
+        :param event: CloudEvent to create context from
+        :type event: CloudEvent
+        :param call_connection_id: Call connection identifier
+        :type call_connection_id: str
+        :param request_state: FastAPI request app state for dependencies
+        :type request_state: Any
+        :return: Event context for handlers
+        :rtype: CallEventContext
+        """
         # Extract dependencies from request state
         memo_manager = None
         if hasattr(request_state, "redis") and request_state.redis:
@@ -196,7 +222,14 @@ class CallEventProcessor:
     async def _execute_handlers(
         self, handlers: List[CallEventHandler], context: CallEventContext
     ) -> None:
-        """Execute all handlers for an event with error isolation."""
+        """
+        Execute all handlers for an event with error isolation.
+
+        :param handlers: List of event handlers to execute
+        :type handlers: List[CallEventHandler]
+        :param context: Event context containing call details
+        :type context: CallEventContext
+        """
         successful = 0
         failed = 0
 
@@ -222,7 +255,12 @@ class CallEventProcessor:
         logger.debug(f"Handler execution: {successful} successful, {failed} failed")
 
     def get_stats(self) -> Dict[str, Any]:
-        """Get processor statistics."""
+        """
+        Get processor statistics.
+
+        :return: Dictionary containing processor metrics and statistics
+        :rtype: Dict[str, Any]
+        """
         return {
             **self._stats,
             "active_calls": len(self._active_calls),
@@ -233,7 +271,12 @@ class CallEventProcessor:
         }
 
     def get_active_calls(self) -> Set[str]:
-        """Get set of currently active call connection IDs."""
+        """
+        Get set of currently active call connection IDs.
+
+        :return: Set of active call connection IDs
+        :rtype: Set[str]
+        """
         return self._active_calls.copy()
 
 
@@ -242,7 +285,12 @@ _global_processor: Optional[CallEventProcessor] = None
 
 
 def get_call_event_processor() -> CallEventProcessor:
-    """Get the global call event processor instance."""
+    """
+    Get the global call event processor instance.
+
+    :return: Global call event processor instance
+    :rtype: CallEventProcessor
+    """
     global _global_processor
     if _global_processor is None:
         _global_processor = CallEventProcessor()
@@ -250,6 +298,8 @@ def get_call_event_processor() -> CallEventProcessor:
 
 
 def reset_call_event_processor() -> None:
-    """Reset the global processor (primarily for testing)."""
+    """
+    Reset the global processor (primarily for testing).
+    """
     global _global_processor
     _global_processor = None

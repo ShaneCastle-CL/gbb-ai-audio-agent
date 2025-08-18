@@ -66,8 +66,9 @@ JSONDict = Dict[str, Any]
 def _get_agent_voice_config(cm: "MemoManager") -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Extract agent voice configuration from memory manager.
 
-    :param cm: The active MemoManager instance.
-    :return: Tuple of (voice_name, voice_style, voice_rate) or (None, None, None).
+    :param cm: The active MemoManager instance for conversation state
+    :return: Tuple of (voice_name, voice_style, voice_rate) or (None, None, None)
+    :raises: None (handles exceptions gracefully with fallback values)
     """
     if cm is None:
         logger.warning("MemoManager is None, using default voice configuration")
@@ -86,15 +87,10 @@ def _get_agent_voice_config(cm: "MemoManager") -> Tuple[Optional[str], Optional[
 def _get_agent_sender_name(cm: "MemoManager", *, include_autoauth: bool = True) -> str:
     """Resolve the visible sender name for dashboard / UI.
 
-    This is centralized to keep mapping consistent across streaming, final
-    messages, and tool broadcasts. To preserve existing behavior, callers can
-    control whether the "AutoAuth" label maps to the Auth Agent explicitly.
-
-    :param cm: MemoManager instance for reading context.
-    :param include_autoauth: When True, map active_agent=="AutoAuth" to
-        "Auth Agent" (matches existing streaming path behavior). When False,
-        keep legacy behavior for final/tool broadcast sites.
-    :return: Human-friendly speaker label.
+    :param cm: MemoManager instance for reading conversation context
+    :param include_autoauth: When True, map active_agent=="AutoAuth" to "Auth Agent"
+    :return: Human-friendly speaker label for display
+    :raises: None (handles exceptions gracefully with fallback to "Assistant")
     """
     try:
         active_agent = cm.get_value_from_corememory("active_agent") if cm else None
@@ -127,13 +123,14 @@ async def _emit_streaming_text(
 ) -> None:
     """Emit one assistant text chunk via either ACS or WebSocket + TTS.
 
-    :param text: The text chunk to emit.
-    :param ws: Active WebSocket.
-    :param is_acs: Whether to route via ACS.
-    :param cm: MemoManager for voice config and labels.
-    :param call_connection_id: For tracing correlation.
-    :param session_id: For tracing correlation.
+    :param text: The text chunk to emit to client
+    :param ws: Active WebSocket connection instance
+    :param is_acs: Whether to route via Azure Communication Services
+    :param cm: MemoManager for voice config and speaker labels
+    :param call_connection_id: Optional correlation ID for tracing
+    :param session_id: Optional session ID for tracing correlation
     :return: None
+    :raises Exception: Re-raises any exceptions from TTS or ACS emission
     """
     voice_name, voice_style, voice_rate = _get_agent_voice_config(cm)
 
@@ -223,11 +220,12 @@ async def _broadcast_dashboard(
 ) -> None:
     """Broadcast a message to the relay dashboard with correct speaker label.
 
-    :param ws: WebSocket carrying application state.
-    :param cm: MemoManager for resolving labels.
-    :param message: Text to broadcast.
-    :param include_autoauth: Match legacy behavior at call-sites.
+    :param ws: WebSocket connection carrying application state
+    :param cm: MemoManager instance for resolving speaker labels
+    :param message: Text message to broadcast to dashboard
+    :param include_autoauth: Flag to match legacy behavior at call-sites
     :return: None
+    :raises: None (handles exceptions gracefully with logging)
     """
     try:
         sender = _get_agent_sender_name(cm, include_autoauth=include_autoauth)
@@ -253,7 +251,14 @@ def _build_chat_kwargs(
 ) -> JSONDict:
     """Build Azure OpenAI chat-completions kwargs.
 
-    :return: Dict suitable for az_openai_client.chat.completions.create(**kwargs)
+    :param history: List of conversation messages for chat context
+    :param model_id: Azure OpenAI model deployment identifier
+    :param temperature: Sampling temperature for response generation
+    :param top_p: Nucleus sampling parameter for response diversity
+    :param max_tokens: Maximum number of tokens to generate
+    :param tools: Optional list of tool definitions for function calling
+    :return: Dictionary suitable for az_openai_client.chat.completions.create
+    :raises: None
     """
     return {
         "stream": True,
@@ -285,10 +290,14 @@ async def _consume_openai_stream(
 ) -> Tuple[str, _ToolCallState]:
     """Consume the AOAI stream, emitting TTS chunks as punctuation arrives.
 
-    Preserves exact flushing behavior (flush on token \in TTS_END), while
-    collecting the final assistant text and any tool call metadata.
-
-    :return: (full_text, tool_state)
+    :param response_stream: Azure OpenAI streaming response object
+    :param ws: WebSocket connection for client communication
+    :param is_acs: Flag indicating Azure Communication Services pathway
+    :param cm: MemoManager instance for conversation state
+    :param call_connection_id: Optional correlation ID for tracing
+    :param session_id: Optional session ID for tracing correlation
+    :return: Tuple of (full_assistant_text, tool_call_state)
+    :raises: May raise exceptions from streaming or emission operations
     """
     collected: List[str] = []  # temporary sentence buffer
     final_chunks: List[str] = []  # full assistant text
@@ -331,7 +340,7 @@ async def _consume_openai_stream(
     return "".join(final_chunks).strip(), tool
 
 
-async def process_gpt_response(  # noqa: D401
+async def process_gpt_response(  
     cm: "MemoManager",
     user_prompt: str,
     ws: WebSocket,
@@ -348,23 +357,20 @@ async def process_gpt_response(  # noqa: D401
 ) -> Optional[Dict[str, Any]]:
     """Stream a chat completion, emitting TTS and handling tool calls.
 
-    Args:
-        cm: Active :class:`MemoManager`.
-        user_prompt: The raw user prompt string.
-        ws: WebSocket connection to the client.
-        agent_name: Identifier used to fetch the agent‑specific chat history.
-        is_acs: Flag indicating Azure Communication Services pathway.
-        model_id: Azure OpenAI deployment ID.
-        temperature: Sampling temperature.
-        top_p: Nucleus sampling value.
-        max_tokens: Max tokens for the completion.
-        available_tools: Tool definitions to expose; *None* defaults to the
-            global *DEFAULT_TOOLS* list.
-        call_connection_id: ACS call connection ID for tracing correlation.
-        session_id: Session ID for tracing correlation.
-
-    Returns:
-        Optional tool result dictionary if a tool was executed; otherwise *None*.
+    :param cm: Active MemoManager instance for conversation state
+    :param user_prompt: The raw user prompt string input
+    :param ws: WebSocket connection to the client
+    :param agent_name: Identifier used to fetch agent-specific chat history
+    :param is_acs: Flag indicating Azure Communication Services pathway
+    :param model_id: Azure OpenAI deployment ID for model selection
+    :param temperature: Sampling temperature for response generation
+    :param top_p: Nucleus sampling value for response diversity
+    :param max_tokens: Maximum tokens for the completion response
+    :param available_tools: Tool definitions to expose, defaults to DEFAULT_TOOLS
+    :param call_connection_id: ACS call connection ID for tracing correlation
+    :param session_id: Session ID for tracing correlation
+    :return: Optional tool result dictionary if a tool was executed, None otherwise
+    :raises: May raise exceptions from Azure OpenAI streaming or tool execution
     """
     # Create handler span for GPT flow service
     span_attrs = create_service_handler_attrs(
@@ -532,10 +538,24 @@ async def _handle_tool_call(  # noqa: PLR0913
     call_connection_id: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Execute a tool, emit telemetry events, and trigger GPT follow‑up.
+    """Execute a tool, emit telemetry events, and trigger GPT follow-up.
 
-    :raises ValueError: If tool_name does not exist in function_mapping.
-    :return: Parsed result from the tool execution.
+    :param tool_name: Name of the tool function to execute
+    :param tool_id: Unique identifier for this tool call instance
+    :param args: JSON string containing tool function arguments
+    :param cm: MemoManager instance for conversation state
+    :param ws: WebSocket connection for client communication
+    :param agent_name: Identifier for the calling agent context
+    :param is_acs: Flag indicating Azure Communication Services pathway
+    :param model_id: Azure OpenAI model deployment identifier
+    :param temperature: Sampling temperature for follow-up responses
+    :param top_p: Nucleus sampling value for follow-up responses
+    :param max_tokens: Maximum tokens for follow-up completions
+    :param available_tools: List of available tool definitions
+    :param call_connection_id: Optional correlation ID for tracing
+    :param session_id: Optional session ID for tracing correlation
+    :return: Parsed result dictionary from the tool execution
+    :raises ValueError: If tool_name does not exist in function_mapping
     """
     with create_trace_context(
         name="gpt_flow.handle_tool_call",
@@ -631,7 +651,22 @@ async def _process_tool_followup(  # noqa: PLR0913
     call_connection_id: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> None:
-    """Invoke GPT once more after tool execution (no new user input)."""
+    """Invoke GPT once more after tool execution (no new user input).
+
+    :param cm: MemoManager instance for conversation state
+    :param ws: WebSocket connection for client communication
+    :param agent_name: Identifier for the calling agent context
+    :param is_acs: Flag indicating Azure Communication Services pathway
+    :param model_id: Azure OpenAI model deployment identifier
+    :param temperature: Sampling temperature for follow-up responses
+    :param top_p: Nucleus sampling value for follow-up responses
+    :param max_tokens: Maximum tokens for follow-up completions
+    :param available_tools: List of available tool definitions
+    :param call_connection_id: Optional correlation ID for tracing
+    :param session_id: Optional session ID for tracing correlation
+    :return: None
+    :raises: May raise exceptions from process_gpt_response call
+    """
     with create_trace_context(
         name="gpt_flow.tool_followup",
         call_connection_id=call_connection_id,

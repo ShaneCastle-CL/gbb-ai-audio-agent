@@ -48,13 +48,18 @@ async def send_tts_audio(
     If not available, temporarily acquires one from the pool for this operation.
     Adds latency tracking for TTS step and sends audio frames to React frontend.
 
-    Args:
-        text: Text to synthesize
-        ws: WebSocket connection
-        latency_tool: Optional latency tracking tool
-        voice_name: Optional agent-specific voice name (overrides default)
-        voice_style: Optional agent-specific voice style
-        rate: Optional speaking rate (e.g. "+3%")
+    :param text: Text to synthesize
+    :type text: str
+    :param ws: WebSocket connection
+    :type ws: WebSocket
+    :param latency_tool: Optional latency tracking tool
+    :type latency_tool: Optional[LatencyTool]
+    :param voice_name: Optional agent-specific voice name (overrides default)
+    :type voice_name: Optional[str]
+    :param voice_style: Optional agent-specific voice style
+    :type voice_style: Optional[str]
+    :param rate: Optional speaking rate (e.g. "+3%")
+    :type rate: Optional[str]
     """
     # Validate WebSocket connection
     if ws.client_state != WebSocketState.CONNECTED:
@@ -189,15 +194,25 @@ async def send_response_to_acs(
     In TRANSCRIPTION mode, audio playback is delegated via queue helper and may not
     perform local synthesis here; we stop the synthesis sub-timer immediately.
 
-    Args:
-        ws: WebSocket connection
-        text: Text to synthesize
-        blocking: Whether to wait for completion
-        latency_tool: Optional latency tracking tool
-        stream_mode: Streaming mode for ACS
-        voice_name: Optional agent-specific voice name (overrides default)
-        voice_style: Optional agent-specific voice style
-        rate: Optional speaking rate
+    :param ws: WebSocket connection
+    :type ws: WebSocket
+    :param text: Text to synthesize
+    :type text: str
+    :param blocking: Whether to wait for completion
+    :type blocking: bool
+    :param latency_tool: Optional latency tracking tool
+    :type latency_tool: Optional[LatencyTool]
+    :param stream_mode: Streaming mode for ACS
+    :type stream_mode: StreamMode
+    :param voice_name: Optional agent-specific voice name (overrides default)
+    :type voice_name: Optional[str]
+    :param voice_style: Optional agent-specific voice style
+    :type voice_style: Optional[str]
+    :param rate: Optional speaking rate
+    :type rate: Optional[str]
+    :return: Task for async completion tracking in TRANSCRIPTION mode, None for MEDIA mode
+    :rtype: Optional[asyncio.Task]
+    :raises RuntimeError: When TTS synthesis fails or times out, or ACS caller not initialized
     """
 
     if latency_tool:
@@ -323,6 +338,15 @@ async def push_final(
 
     • Browser/WebRTC – we already streamed TTS, just send the final JSON.
     • ACS            – same; streaming audio is finished, no repeat playback.
+
+    :param ws: WebSocket connection
+    :type ws: WebSocket
+    :param role: Role identifier for the message
+    :type role: str
+    :param content: Message content to send
+    :type content: str
+    :param is_acs: Whether this is an ACS call context
+    :type is_acs: bool
     """
     try:
         await ws.send_text(json.dumps({"type": role, "content": content}))

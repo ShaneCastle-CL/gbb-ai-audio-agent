@@ -52,8 +52,8 @@ class V1RealtimeHandler:
         """
         Initialize V1 realtime handler.
 
-        Args:
-            orchestrator: Optional orchestrator for conversation processing.
+        :param orchestrator: Optional orchestrator for conversation processing
+        :type orchestrator: Optional[callable]
         """
         self.orchestrator = orchestrator
         self.logger = get_logger("api.v1.handlers.realtime")
@@ -62,8 +62,10 @@ class V1RealtimeHandler:
         """
         Handle dashboard relay WebSocket connections.
 
-        Args:
-            websocket: WebSocket connection from dashboard client
+        :param websocket: WebSocket connection from dashboard client
+        :type websocket: WebSocket
+        :raises WebSocketDisconnect: When client disconnects
+        :raises Exception: When connection handling fails
         """
         with trace_acs_operation(
             tracer,
@@ -123,9 +125,12 @@ class V1RealtimeHandler:
         """
         Handle browser conversation WebSocket with orchestrator support.
 
-        Args:
-            websocket: WebSocket connection from browser client
-            orchestrator: Optional orchestrator for conversation processing
+        :param websocket: WebSocket connection from browser client
+        :type websocket: WebSocket
+        :param orchestrator: Optional orchestrator for conversation processing
+        :type orchestrator: Optional[callable]
+        :raises WebSocketDisconnect: When client disconnects
+        :raises Exception: When conversation handling fails
         """
         # Use provided orchestrator or fallback to instance orchestrator
         active_orchestrator = orchestrator or self.orchestrator
@@ -403,5 +408,12 @@ class V1RealtimeHandler:
 def create_v1_realtime_handler(
     orchestrator: Optional[callable] = None,
 ) -> V1RealtimeHandler:
-    """Factory function for creating V1 realtime handlers."""
+    """
+    Factory function for creating V1 realtime handlers.
+    
+    :param orchestrator: Optional orchestrator for conversation processing
+    :type orchestrator: Optional[callable]
+    :return: Configured V1 realtime handler instance
+    :rtype: V1RealtimeHandler
+    """
     return V1RealtimeHandler(orchestrator=orchestrator)

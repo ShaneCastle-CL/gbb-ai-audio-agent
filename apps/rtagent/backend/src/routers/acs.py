@@ -68,6 +68,17 @@ tracer = trace.get_tracer(__name__)
 # Models
 # --------------------------------------------------------------------------- #
 class CallRequest(BaseModel):
+    """
+    Request model for initiating outbound calls through Azure Communication Services.
+
+    This model defines the required parameters for making outbound calls including
+    target phone number validation and formatting requirements. It ensures proper
+    data structure for ACS call initiation with comprehensive validation support.
+
+    :param target_number: The destination phone number for the outbound call.
+    :return: Validated CallRequest instance ready for ACS processing.
+    :raises ValidationError: If target_number format is invalid or missing.
+    """
     target_number: str
 
 
@@ -76,7 +87,18 @@ class CallRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 @router.post(ACS_CALL_OUTBOUND_PATH)
 async def initiate_call(call: CallRequest, request: Request):
-    """Initiate an outbound call through ACS."""
+    """
+    Initiate an outbound call through Azure Communication Services with comprehensive tracing.
+
+    This endpoint handles outbound call requests by validating phone numbers, checking
+    service availability, and initiating calls through ACS. It provides complete
+    observability with distributed tracing and proper error handling for production use.
+
+    :param call: The call request containing target phone number and configuration.
+    :param request: The FastAPI request object containing application state and context.
+    :return: JSON response with call initiation status and connection details.
+    :raises HTTPException: If call initiation fails due to service unavailability or validation errors.
+    """
     span_attrs = create_service_handler_attrs(
         service_name="acs_router",
         operation="initiate_call",
@@ -169,7 +191,17 @@ async def initiate_call(call: CallRequest, request: Request):
 
 @router.post(ACS_CALL_INBOUND_PATH or "/api/call/answer")
 async def answer_call(request: Request):
-    """Handle inbound call events."""
+    """
+    Handle inbound call events from Azure Communication Services with authentication validation.
+
+    This endpoint processes incoming call notifications, validates authentication when
+    enabled, and manages the call answering workflow. It provides comprehensive
+    error handling and observability for inbound call management in production systems.
+
+    :param request: The FastAPI request object containing call event data and application state.
+    :return: JSON response indicating call answer status and next steps.
+    :raises HTTPException: If authentication fails or call answering encounters errors.
+    """
     span_attrs = create_service_handler_attrs(
         service_name="acs_router", operation="answer_call"
     )
@@ -218,7 +250,17 @@ async def answer_call(request: Request):
 
 @router.post(ACS_CALL_CALLBACK_PATH or "/api/call/callbacks")
 async def callbacks(request: Request):
-    """Handle ACS callback events."""
+    """
+    Handle Azure Communication Services callback events with comprehensive processing.
+
+    This endpoint receives and processes various ACS callback events including call
+    state changes, participant updates, and media notifications. It validates service
+    dependencies, enforces authentication, and routes events to appropriate handlers.
+
+    :param request: The FastAPI request object containing ACS callback event data.
+    :return: JSON response acknowledging callback processing status.
+    :raises HTTPException: If required services are unavailable or authentication fails.
+    """
     # Validate dependencies
     if not request.app.state.acs_caller:
         return JSONResponse({"error": "ACS not initialised"}, status_code=503)
@@ -303,7 +345,17 @@ async def callbacks(request: Request):
 
 @router.websocket(ACS_WEBSOCKET_PATH or "/ws/call/stream")
 async def acs_media_ws(ws: WebSocket):
-    """Handle WebSocket media streaming for ACS calls."""
+    """
+    Handle WebSocket media streaming for Azure Communication Services calls with real-time processing.
+
+    This WebSocket endpoint manages bidirectional audio streaming between ACS and the
+    voice agent system. It provides real-time audio processing, speech recognition,
+    synthesis, and conversation orchestration with comprehensive error handling and observability.
+
+    :param ws: The WebSocket connection for real-time media streaming and communication.
+    :return: None (maintains persistent connection until termination).
+    :raises WebSocketDisconnect: If the WebSocket connection is terminated unexpectedly.
+    """
     cid = None
     handler = None
 

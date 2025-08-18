@@ -23,8 +23,15 @@ router = APIRouter()
 
 def _validate_phone_number(phone_number: str) -> tuple[bool, str]:
     """
-    Validate ACS phone number format.
-    Returns (is_valid, error_message_if_invalid)
+    Validate Azure Communication Services phone number format and structure.
+
+    This function performs comprehensive validation of phone numbers used with ACS,
+    ensuring they meet international dialing standards and service requirements
+    for successful call initiation and routing.
+
+    :param phone_number: The phone number string to validate for ACS compatibility.
+    :return: Tuple containing validation status (bool) and error message (str, empty if valid).
+    :raises: None (validation errors returned as tuple values, not exceptions).
     """
     if not phone_number or phone_number == "null":
         return False, "Phone number not provided"
@@ -47,8 +54,14 @@ def _validate_phone_number(phone_number: str) -> tuple[bool, str]:
 @router.get("/health")
 async def health():
     """
-    Basic health check endpoint - always returns 200 if server is running.
-    Used by load balancers for basic liveness checks.
+    Provide basic application health status for load balancer liveness checks.
+
+    This endpoint serves as a simple liveness probe that confirms the FastAPI
+    application is running and responsive. It always returns HTTP 200 with
+    a healthy status message when the server process is operational.
+
+    :return: Dictionary containing status confirmation and server running message.
+    :raises: None (endpoint designed to always succeed when server is operational).
     """
     return {"status": "healthy", "message": "Server is running!"}
 
@@ -56,8 +69,16 @@ async def health():
 @router.get("/readiness")
 async def readiness(request: Request):
     """
-    Fast readiness probe: checks only that core dependencies are initialized and responsive within 1-5s.
-    No deep or blocking checks. Returns degraded if any are not ready.
+    Perform comprehensive readiness validation of core system dependencies.
+
+    This endpoint conducts fast health checks across critical application dependencies
+    including Redis, Azure OpenAI, Speech Services, ACS caller, and real-time agents.
+    Each component is tested within a 1-second timeout to ensure responsive operation
+    for Kubernetes readiness probes and load balancer routing decisions.
+
+    :param request: FastAPI request object providing access to application state and dependencies.
+    :return: JSONResponse with overall readiness status and detailed component health results.
+    :raises HTTPException: Returns 503 Service Unavailable if core dependencies are unhealthy.
     """
     start_time = time.time()
     health_checks = []
@@ -130,6 +151,17 @@ async def readiness(request: Request):
 
 
 async def _check_redis_fast(redis_manager) -> Dict:
+    """
+    Perform fast Redis connectivity and responsiveness validation.
+
+    This function executes a lightweight ping operation against Redis to verify
+    the connection is active and the service is responding within acceptable
+    timeouts for readiness probe requirements.
+
+    :param redis_manager: The Redis client manager instance for connection testing.
+    :return: Dictionary containing component status, timing, and error details if applicable.
+    :raises: None (all exceptions captured and returned as status information).
+    """
     start = time.time()
     if not redis_manager:
         return {
@@ -163,6 +195,17 @@ async def _check_redis_fast(redis_manager) -> Dict:
 
 
 async def _check_azure_openai_fast(openai_client) -> Dict:
+    """
+    Perform fast Azure OpenAI service connectivity and availability validation.
+
+    This function executes a lightweight operation against the Azure OpenAI client
+    to verify the service connection is active and the API endpoint is responding
+    within acceptable timeouts for readiness requirements.
+
+    :param openai_client: The Azure OpenAI client instance for service testing.
+    :return: Dictionary containing component status, timing, and error details if applicable.
+    :raises: None (all exceptions captured and returned as status information).
+    """
     start = time.time()
     if not openai_client:
         return {
@@ -179,6 +222,18 @@ async def _check_azure_openai_fast(openai_client) -> Dict:
 
 
 async def _check_speech_services_fast(tts_pool, stt_pool) -> Dict:
+    """
+    Perform fast Azure Speech Services resource pool availability validation.
+
+    This function checks both Text-to-Speech and Speech-to-Text resource pools
+    to verify they are initialized and have available instances for real-time
+    voice processing operations within readiness probe timeouts.
+
+    :param tts_pool: The Text-to-Speech client pool for voice synthesis testing.
+    :param stt_pool: The Speech-to-Text client pool for voice recognition testing.
+    :return: Dictionary containing component status, timing, and error details if applicable.
+    :raises: None (all exceptions captured and returned as status information).
+    """
     start = time.time()
     if not tts_pool or not stt_pool:
         return {
@@ -215,6 +270,17 @@ async def _check_speech_services_fast(tts_pool, stt_pool) -> Dict:
 
 
 async def _check_acs_caller_fast(acs_caller) -> Dict:
+    """
+    Perform fast Azure Communication Services caller client validation.
+
+    This function verifies the ACS caller client is properly initialized and
+    configured with valid connection strings and endpoints for telephony
+    operations within readiness probe requirements.
+
+    :param acs_caller: The Azure Communication Services caller client for telephony testing.
+    :return: Dictionary containing component status, timing, and error details if applicable.
+    :raises: None (all exceptions captured and returned as status information).
+    """
     """Fast ACS caller check with comprehensive phone number and config validation."""
     start = time.time()
 
@@ -284,6 +350,18 @@ async def _check_acs_caller_fast(acs_caller) -> Dict:
 
 
 async def _check_rt_agents_fast(auth_agent, claim_intake_agent) -> Dict:
+    """
+    Perform fast real-time conversation agent availability validation.
+
+    This function verifies both authentication and claim intake agents are properly
+    initialized and ready to handle conversation orchestration and dialog flow
+    management within readiness probe timeouts.
+
+    :param auth_agent: The authentication agent for user verification and authorization.
+    :param claim_intake_agent: The claim intake agent for main conversation dialog processing.
+    :return: Dictionary containing component status, timing, and error details if applicable.
+    :raises: None (all exceptions captured and returned as status information).
+    """
     start = time.time()
     if not auth_agent or not claim_intake_agent:
         return {
