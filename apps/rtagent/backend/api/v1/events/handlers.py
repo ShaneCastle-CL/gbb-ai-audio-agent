@@ -24,7 +24,9 @@ from opentelemetry.trace import SpanKind
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 from utils.ml_logging import get_logger
 from .types import CallEventContext, ACSEventTypes
+
 from apps.rtagent.backend.api.v1.handlers.dtmf_validation_lifecycle import DTMFValidationLifecycle
+from apps.rtagent.backend.settings import DTMF_VALIDATION_ENABLED
 
 logger = get_logger("v1.events.handlers")
 tracer = trace.get_tracer(__name__)
@@ -153,20 +155,16 @@ class CallEventHandlers:
 
             logger.info(f"   Caller phone number: {caller_id if caller_id else 'unknown'}")
 
-
-            try:
-                await DTMFValidationLifecycle.setup_aws_connect_validation_flow(
-                    context, 
-                    call_conn,
-                )
-                # call_conn.start_continuous_dtmf_recognition(
-                #     target_participant=caller_participant.identifier,
-                #     operation_context=f"dtmf_recognition_{context.call_connection_id}"
-                # )
-            except Exception as e:
-                logger.error(
-                    f"❌ Failed to start continuous DTMF recognition for {context.call_connection_id}: {e}"
-                )
+            if DTMF_VALIDATION_ENABLED:
+                try:
+                    await DTMFValidationLifecycle.setup_aws_connect_validation_flow(
+                        context, 
+                        call_conn,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"❌ Failed to start continuous DTMF recognition for {context.call_connection_id}: {e}"
+                    )
             # Broadcast connection status to WebSocket clients
             try:
                 if context.clients:

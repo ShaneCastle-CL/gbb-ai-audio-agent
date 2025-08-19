@@ -422,14 +422,10 @@ async def _process_media_stream(
         try:
             # Main message processing loop
             message_count = 0
-            redis_mgr = websocket.app.state.redis
-            session_key = call_connection_id
-            dtmf_validated = False
             while (
                 websocket.client_state == WebSocketState.CONNECTED
                 and websocket.application_state == WebSocketState.CONNECTED
             ):
-                logger.debug(f"📨 Waiting for message #{message_count + 1}")
                 msg = await websocket.receive_text()
                 message_count += 1
                
