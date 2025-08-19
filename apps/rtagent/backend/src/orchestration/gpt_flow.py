@@ -44,6 +44,11 @@ from apps.rtagent.backend.src.shared_ws import (
     send_response_to_acs,
     send_tts_audio,
 )
+from apps.rtagent.backend.settings import AZURE_OPENAI_ENDPOINT
+from utils.ml_logging import get_logger
+from utils.trace_context import create_trace_context
+from apps.rtagent.backend.src.utils.tracing import (
+    create_service_handler_attrs,
 from apps.rtagent.backend.src.utils.tracing_utils import (
     create_service_dependency_attrs,
     create_service_handler_attrs,

@@ -56,6 +56,14 @@ from apps.rtagent.backend.settings import (
     GREETING_VOICE_TTS,
     ENTRA_EXEMPT_PATHS,
     ENABLE_AUTH_VALIDATION,
+    # Documentation settings
+    ENABLE_DOCS,
+    DOCS_URL,
+    REDOC_URL,
+    OPENAPI_URL,
+    SECURE_DOCS_URL,
+    ENVIRONMENT,
+    DEBUG_MODE,
 )
 
 from apps.rtagent.backend.src.agents.base import ARTAgent
@@ -229,22 +237,18 @@ async def lifespan(app: FastAPI):
 #  App factory with Dynamic Documentation
 # --------------------------------------------------------------------------- #
 def create_app() -> FastAPI:
-    """
-    Create and configure the main FastAPI application instance with comprehensive settings.
+    """Create FastAPI app with configurable documentation."""
 
-    This function initializes the FastAPI application with complete documentation,
-    contact information, license details, OpenAPI tags, and lifecycle management.
-    It provides the foundation for the real-time voice agent API with proper
-    documentation generation capabilities.
-
-    :param: None (uses configuration from imported modules and environment).
-    :return: Fully configured FastAPI application instance ready for deployment.
-    :raises ImportError: If required documentation modules cannot be imported.
-    """
-    from apps.rtagent.backend.api.swagger_docs import get_tags, get_description
-
-    tags = get_tags()
-    description = get_description()
+    # Conditionally get documentation based on settings
+    if ENABLE_DOCS:
+        from apps.rtagent.backend.api.swagger_docs import get_tags, get_description
+        tags = get_tags()
+        description = get_description()
+        logger.info(f"📚 API documentation enabled for environment: {ENVIRONMENT}")
+    else:
+        tags = None
+        description = "Real-Time Voice Agent API"
+        logger.info(f"📚 API documentation disabled for environment: {ENVIRONMENT}")
 
     app = FastAPI(
         title="Real-Time Voice Agent API",
@@ -257,10 +261,26 @@ def create_app() -> FastAPI:
         },
         openapi_tags=tags,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url=DOCS_URL,
+        redoc_url=REDOC_URL,
+        openapi_url=OPENAPI_URL,
     )
+
+    # Add secure docs endpoint if configured and docs are enabled
+    if SECURE_DOCS_URL and ENABLE_DOCS:
+        from fastapi.openapi.docs import get_swagger_ui_html
+        from fastapi.responses import HTMLResponse
+        
+        @app.get(SECURE_DOCS_URL, include_in_schema=False)
+        async def secure_docs():
+            """Secure documentation endpoint."""
+            return get_swagger_ui_html(
+                openapi_url=OPENAPI_URL or "/openapi.json",
+                title=f"{app.title} - Secure Docs"
+            )
+        
+        logger.info(f"🔒 Secure docs endpoint available at: {SECURE_DOCS_URL}")
+
     return app
 
 
@@ -320,31 +340,58 @@ def setup_app_middleware_and_routes(app: FastAPI):
 
     # Health endpoints are now included in v1_router at /api/v1/health
 
+    # Add environment and docs status info endpoint
+    @app.get("/api/info", tags=["System"], include_in_schema=ENABLE_DOCS)
+    async def get_system_info():
+        """Get system environment and documentation status."""
+        return {
+            "environment": ENVIRONMENT,
+            "debug_mode": DEBUG_MODE,
+            "docs_enabled": ENABLE_DOCS,
+            "docs_url": DOCS_URL,
+            "redoc_url": REDOC_URL,
+            "openapi_url": OPENAPI_URL,
+            "secure_docs_url": SECURE_DOCS_URL,
+        }
+
 
 # Create the app
 app = None
 
 
 def initialize_app():
-    """
-    Initialize the complete application with comprehensive configuration and setup.
-
-    This function creates the FastAPI application instance and applies all necessary
-    middleware, routes, and configuration settings. It serves as the main entry
-    point for application initialization in production and development environments.
-
-    :param: None (uses global configuration and imported settings).
-    :return: Fully initialized FastAPI application instance ready for deployment.
-    :raises RuntimeError: If application initialization fails at any stage.
-    """
+    """Initialize app with configurable documentation."""
     global app
     app = create_app()
     setup_app_middleware_and_routes(app)
+    
+    # Log documentation status
+    if ENABLE_DOCS:
+        logger.info(f"📚 Swagger docs available at: {DOCS_URL}")
+        logger.info(f"📚 ReDoc available at: {REDOC_URL}")
+        if SECURE_DOCS_URL:
+            logger.info(f"🔒 Secure docs available at: {SECURE_DOCS_URL}")
+    else:
+        logger.info("📚 API documentation is disabled for this environment")
+    
     return app
 
 
 # Initialize the app
 app = initialize_app()
+
+# --------------------------------------------------------------------------- #
+#  Main entry point for uv run
+# --------------------------------------------------------------------------- #
+def main():
+    """Entry point for uv run rtagent-server."""
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(
+        app,                  # Use app object directly
+        host="0.0.0.0",       # nosec: B104
+        port=port,
+        reload=False,         # Don't use reload in production
+    )
 
 # --------------------------------------------------------------------------- #
 #  CLI entry-point
