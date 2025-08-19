@@ -61,7 +61,7 @@ from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.utils.tracing import log_with_context
 from apps.rtagent.backend.src.utils.auth import validate_acs_ws_auth, AuthError
 from utils.ml_logging import get_logger
-from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
+from src.tools.latency_tool import LatencyTool
 from azure.communication.callautomation import PhoneNumberIdentifier
 
 # Import V1 components
@@ -82,8 +82,8 @@ async def get_media_status():
     """
     Get the current status of media streaming configuration.
 
-    Returns:
-        dict: Current media streaming configuration and status
+    :return: Current media streaming configuration and status
+    :rtype: dict
     """
     return {
         "status": "available",
@@ -107,11 +107,10 @@ async def create_media_session(request: MediaSessionRequest):
     """
     Create a new media streaming session.
 
-    Args:
-        request: Media session configuration
-
-    Returns:
-        MediaSessionResponse: Session creation result with WebSocket connection details
+    :param request: Media session configuration
+    :type request: MediaSessionRequest
+    :return: Session creation result with WebSocket connection details
+    :rtype: MediaSessionResponse
     """
     session_id = str(uuid.uuid4())
 
@@ -131,11 +130,10 @@ async def get_media_session(session_id: str):
     """
     Get the status of a specific media session.
 
-    Args:
-        session_id: The unique session identifier
-
-    Returns:
-        dict: Session status and information
+    :param session_id: The unique session identifier
+    :type session_id: str
+    :return: Session status and information
+    :rtype: dict
     """
     # This is a placeholder - in a real implementation, you'd query session state
     return {
@@ -157,9 +155,10 @@ async def acs_media_stream(
     Provides enterprise-grade audio streaming with pluggable orchestrator support.
     Follows V1 architecture patterns with clean separation of concerns.
 
-    Args:
-        websocket: WebSocket connection from ACS
-        orchestrator: Injected conversation orchestrator
+    :param websocket: WebSocket connection from ACS
+    :type websocket: WebSocket
+    :raises WebSocketDisconnect: When client disconnects
+    :raises HTTPException: When dependencies or validation fail
     """
     handler = None
     call_connection_id = None
@@ -278,7 +277,13 @@ async def acs_media_stream(
 
 
 async def _validate_websocket_dependencies(websocket: WebSocket) -> None:
-    """Validate required app state dependencies."""
+    """
+    Validate required app state dependencies.
+
+    :param websocket: WebSocket connection to validate
+    :type websocket: WebSocket
+    :raises HTTPException: When dependencies are missing or invalid
+    """
     if (
         not hasattr(websocket.app.state, "acs_caller")
         or not websocket.app.state.acs_caller
@@ -291,7 +296,13 @@ async def _validate_websocket_dependencies(websocket: WebSocket) -> None:
 
 
 async def _validate_websocket_auth(websocket: WebSocket) -> None:
-    """Validate WebSocket authentication if enabled."""
+    """
+    Validate WebSocket authentication if enabled.
+
+    :param websocket: WebSocket connection to authenticate
+    :type websocket: WebSocket
+    :raises HTTPException: When authentication fails
+    """
     try:
         _ = await validate_acs_ws_auth(websocket)
         logger.info("WebSocket authenticated successfully")
@@ -304,7 +315,15 @@ async def _validate_websocket_auth(websocket: WebSocket) -> None:
 async def _validate_call_connection(
     websocket: WebSocket, call_connection_id: str
 ) -> None:
-    """Validate that the call connection exists."""
+    """
+    Validate that the call connection exists.
+
+    :param websocket: WebSocket connection for error handling
+    :type websocket: WebSocket
+    :param call_connection_id: Call connection identifier to validate
+    :type call_connection_id: str
+    :raises HTTPException: When call connection is not found
+    """
     acs_caller = websocket.app.state.acs_caller
     call_connection = acs_caller.get_call_connection(call_connection_id)
 
@@ -322,7 +341,21 @@ async def _create_media_handler(
     session_id: str,
     orchestrator: callable,
 ):
-    """Create appropriate media handler based on streaming mode."""
+    """
+    Create appropriate media handler based on streaming mode.
+
+    :param websocket: WebSocket connection for media streaming
+    :type websocket: WebSocket
+    :param call_connection_id: Unique call connection identifier
+    :type call_connection_id: str
+    :param session_id: Session identifier for tracking
+    :type session_id: str
+    :param orchestrator: Orchestrator function for conversation management
+    :type orchestrator: callable
+    :return: Configured media handler instance
+    :rtype: Union[ACSMediaHandler, TranscriptionHandler]
+    :raises HTTPException: When streaming mode is invalid
+    """
 
     # Check if there's already an active handler for this call ID
     if call_connection_id in _active_handlers:
@@ -366,13 +399,17 @@ async def _create_media_handler(
         websocket.state.target_participant = PhoneNumberIdentifier(target_phone_number)
 
     websocket.state.cm = memory_manager
-    websocket.state.call_conn = websocket.app.state.acs_caller.get_call_connection(call_connection_id)
+    websocket.state.call_conn = websocket.app.state.acs_caller.get_call_connection(
+        call_connection_id
+    )
 
     if ACS_STREAMING_MODE == StreamMode.MEDIA:
         # Use the V1 ACS media handler - acquire recognizer from pool
         per_conn_recognizer = await websocket.app.state.stt_pool.acquire()
         websocket.state.stt_client = per_conn_recognizer
-        logger.info(f"Acquired STT recognizer from pool for ACS call {call_connection_id}")
+        logger.info(
+            f"Acquired STT recognizer from pool for ACS call {call_connection_id}"
+        )
         handler = ACSMediaHandler(
             websocket=websocket,
             orchestrator_func=orchestrator,
@@ -405,7 +442,17 @@ async def _create_media_handler(
 async def _process_media_stream(
     websocket: WebSocket, handler, call_connection_id: str
 ) -> None:
-    """Process incoming WebSocket media messages with clean error handling."""
+    """
+    Process incoming WebSocket media messages with clean error handling.
+
+    :param websocket: WebSocket connection for message processing
+    :type websocket: WebSocket
+    :param handler: Media handler instance for message processing
+    :param call_connection_id: Call connection identifier for logging
+    :type call_connection_id: str
+    :raises WebSocketDisconnect: When client disconnects
+    :raises Exception: When message processing fails
+    """
     with tracer.start_as_current_span(
         "api.v1.media.process_stream",
         kind=SpanKind.SERVER,
@@ -465,7 +512,16 @@ async def _process_media_stream(
 def _log_websocket_disconnect(
     e: WebSocketDisconnect, session_id: str, call_connection_id: Optional[str]
 ) -> None:
-    """Log WebSocket disconnection with appropriate level."""
+    """
+    Log WebSocket disconnection with appropriate level.
+
+    :param e: WebSocket disconnect exception
+    :type e: WebSocketDisconnect
+    :param session_id: Session identifier for logging
+    :type session_id: str
+    :param call_connection_id: Call connection identifier for logging
+    :type call_connection_id: Optional[str]
+    """
     if e.code == 1000:
         log_with_context(
             logger,
@@ -505,7 +561,16 @@ def _log_websocket_disconnect(
 def _log_websocket_error(
     e: Exception, session_id: str, call_connection_id: Optional[str]
 ) -> None:
-    """Log WebSocket errors with full context."""
+    """
+    Log WebSocket errors with full context.
+
+    :param e: Exception that occurred
+    :type e: Exception
+    :param session_id: Session identifier for logging
+    :type session_id: str
+    :param call_connection_id: Call connection identifier for logging
+    :type call_connection_id: Optional[str]
+    """
     if isinstance(e, asyncio.CancelledError):
         log_with_context(
             logger,
@@ -533,7 +598,17 @@ def _log_websocket_error(
 async def _cleanup_websocket_resources(
     websocket: WebSocket, handler, call_connection_id: Optional[str], session_id: str
 ) -> None:
-    """Clean up WebSocket resources following V1 patterns."""
+    """
+    Clean up WebSocket resources following V1 patterns.
+
+    :param websocket: WebSocket connection to clean up
+    :type websocket: WebSocket
+    :param handler: Media handler to stop and clean up
+    :param call_connection_id: Call connection identifier for cleanup
+    :type call_connection_id: Optional[str]
+    :param session_id: Session identifier for logging
+    :type session_id: str
+    """
     with tracer.start_as_current_span(
         "api.v1.media.cleanup_resources",
         kind=SpanKind.INTERNAL,
@@ -560,8 +635,12 @@ async def _cleanup_websocket_resources(
             if hasattr(websocket.state, "stt_client") and websocket.state.stt_client:
                 try:
                     websocket.state.stt_client.stop()
-                    await websocket.app.state.stt_pool.release(websocket.state.stt_client)
-                    logger.info(f"Released STT recognizer back to pool for call {call_connection_id}")
+                    await websocket.app.state.stt_pool.release(
+                        websocket.state.stt_client
+                    )
+                    logger.info(
+                        f"Released STT recognizer back to pool for call {call_connection_id}"
+                    )
                 except Exception as e:
                     logger.error(f"Error releasing STT recognizer: {e}", exc_info=True)
 

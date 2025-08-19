@@ -93,16 +93,30 @@ class ThreadBridge:
     """
 
     def __init__(self, main_loop: Optional[asyncio.AbstractEventLoop] = None):
-        # Store the main event loop for use in cross-thread communication
-        self.main_loop = main_loop
+        """
+        Initialize cross-thread communication bridge.
+
+        :param main_loop: Main event loop for cross-thread communication
+        :type main_loop: Optional[asyncio.AbstractEventLoop]
+        """
 
     def set_main_loop(self, loop: asyncio.AbstractEventLoop):
-        """Set the main event loop reference for cross-thread communication."""
+        """
+        Set the main event loop reference for cross-thread communication.
+
+        :param loop: Main event loop instance
+        :type loop: asyncio.AbstractEventLoop
+        """
         self.main_loop = loop
         logger.debug(f"🔗 ThreadBridge main loop set: {id(loop)}")
 
     def schedule_barge_in(self, handler_func: Callable):
-        """Schedule barge-in handler to run on main event loop ASAP."""
+        """
+        Schedule barge-in handler to run on main event loop ASAP.
+
+        :param handler_func: Barge-in handler function to schedule
+        :type handler_func: Callable
+        """
         logger.info(f"🚨 SCHEDULE_BARGE_IN CALLED - Starting barge-in scheduling...")
         logger.debug(f"🔍 Handler function: {handler_func}")
         logger.debug(
@@ -134,7 +148,15 @@ class ThreadBridge:
             )
 
     def queue_speech_result(self, speech_queue: asyncio.Queue, event: SpeechEvent):
-        """Queue final speech result for Route Turn Thread processing."""
+        """
+        Queue final speech result for Route Turn Thread processing.
+
+        :param speech_queue: Async queue for speech events
+        :type speech_queue: asyncio.Queue
+        :param event: Speech event to queue
+        :type event: SpeechEvent
+        :raises RuntimeError: When unable to queue speech event
+        """
         # Try direct put_nowait first (fastest and most reliable)
         try:
             speech_queue.put_nowait(event)
@@ -209,6 +231,18 @@ class SpeechSDKThread:
         barge_in_handler: Callable,
         speech_queue: asyncio.Queue,
     ):
+        """
+        Initialize Speech SDK Thread Manager.
+
+        :param recognizer: Speech recognition client instance
+        :type recognizer: StreamingSpeechRecognizerFromBytes
+        :param thread_bridge: Cross-thread communication bridge
+        :type thread_bridge: ThreadBridge
+        :param barge_in_handler: Handler function for barge-in events
+        :type barge_in_handler: Callable
+        :param speech_queue: Queue for speech events
+        :type speech_queue: asyncio.Queue
+        """
         self.recognizer = recognizer
         self.thread_bridge = thread_bridge
         self.barge_in_handler = barge_in_handler
@@ -222,7 +256,11 @@ class SpeechSDKThread:
         self._setup_callbacks()
 
     def _setup_callbacks(self):
-        """Configure speech recognition callbacks for immediate response."""
+        """
+        Configure speech recognition callbacks for immediate response.
+
+        :raises Exception: When callback setup fails
+        """
 
         def on_partial(text: str, lang: str, speaker_id: Optional[str] = None):
             """🚨 IMMEDIATE: Trigger barge-in detection"""
@@ -301,7 +339,9 @@ class SpeechSDKThread:
             raise
 
     def prepare_thread(self):
-        """Prepare the speech recognition thread but don't start recognizer yet."""
+        """
+        Prepare the speech recognition thread but don't start recognizer yet.
+        """
         if self.thread_running:
             logger.warning("Speech SDK thread already prepared")
             return
@@ -328,7 +368,11 @@ class SpeechSDKThread:
         logger.info("Speech SDK thread prepared (recognizer not started yet)")
 
     def start_recognizer(self):
-        """Start the actual speech recognizer (called on AudioMetadata)."""
+        """
+        Start the actual speech recognizer (called on AudioMetadata).
+
+        :raises Exception: When recognizer startup fails
+        """
         if self.recognizer_started:
             logger.debug("Speech recognizer already started")
             return
@@ -407,7 +451,9 @@ class SpeechSDKThread:
             raise
 
     async def _test_barge_in_after_delay(self):
-        """Test method to manually trigger barge-in for verification."""
+        """
+        Test method to manually trigger barge-in for verification.
+        """
         await asyncio.sleep(5.0)
         logger.info("🧪 MANUAL BARGE-IN TEST: Triggering test barge-in...")
         try:
@@ -420,7 +466,9 @@ class SpeechSDKThread:
             logger.error(f"❌ Manual barge-in test traceback: {traceback.format_exc()}")
 
     async def _test_partial_callback_after_delay(self):
-        """Test method to manually trigger partial callback for verification."""
+        """
+        Test method to manually trigger partial callback for verification.
+        """
         await asyncio.sleep(3.0)
         logger.info(
             "🧪 MANUAL PARTIAL CALLBACK TEST: Simulating partial speech detection..."
@@ -441,7 +489,9 @@ class SpeechSDKThread:
             )
 
     def stop(self):
-        """Stop speech recognition and thread."""
+        """
+        Stop speech recognition and thread.
+        """
         if self._stopped:
             logger.debug("Speech SDK thread already stopped or stopping")
             return
@@ -487,6 +537,18 @@ class RouteTurnThread:
         memory_manager: Optional[MemoManager],
         websocket: WebSocket,
     ):
+        """
+        Initialize Route Turn Thread Manager.
+
+        :param speech_queue: Queue for incoming speech events
+        :type speech_queue: asyncio.Queue
+        :param orchestrator_func: Function for conversation orchestration
+        :type orchestrator_func: Callable
+        :param memory_manager: Memory manager for conversation state
+        :type memory_manager: Optional[MemoManager]
+        :param websocket: WebSocket connection for communication
+        :type websocket: WebSocket
+        """
         self.speech_queue = speech_queue
         self.orchestrator_func = orchestrator_func
         self.memory_manager = memory_manager
@@ -499,7 +561,9 @@ class RouteTurnThread:
         self._stopped = False  # Prevent multiple stop calls
 
     async def start(self):
-        """Start the route turn processing loop."""
+        """
+        Start the route turn processing loop.
+        """
         if self.running:
             logger.warning("Route turn thread already running")
             return
@@ -576,7 +640,12 @@ class RouteTurnThread:
                     break
 
     async def _process_final_speech(self, event: SpeechEvent):
-        """Process final speech through orchestrator."""
+        """
+        Process final speech through orchestrator.
+
+        :param event: Final speech event to process
+        :type event: SpeechEvent
+        """
         with tracer.start_as_current_span(
             "v1.route_turn_thread.process_speech",
             kind=SpanKind.CLIENT,
@@ -635,9 +704,11 @@ class RouteTurnThread:
         - Status updates
         - Any direct text-to-speech scenarios
 
-        Args:
-            event: SpeechEvent containing the text to play
-            playback_type: Type of playback for logging/tracing (e.g., "greeting", "announcement", "error")
+        :param event: SpeechEvent containing the text to play
+        :type event: SpeechEvent
+        :param playback_type: Type of playback for logging/tracing (e.g., "greeting", "announcement", "error")
+        :type playback_type: str
+        :raises asyncio.CancelledError: When playback is cancelled by barge-in
         """
         with tracer.start_as_current_span(
             "v1.route_turn_thread.process_direct_text_playback",
@@ -695,7 +766,9 @@ class RouteTurnThread:
                 self.current_response_task = None
 
     async def cancel_current_processing(self):
-        """Cancel current Route Turn processing (for barge-in interruption)."""
+        """
+        Cancel current Route Turn processing (for barge-in interruption).
+        """
         try:
             # Clear the speech queue to prevent stale events
             queue_size = self.speech_queue.qsize()
@@ -724,7 +797,9 @@ class RouteTurnThread:
             logger.error(f"Error cancelling Route Turn processing: {e}")
 
     async def stop(self):
-        """Stop the route turn processing loop."""
+        """
+        Stop the route turn processing loop.
+        """
         if self._stopped:
             logger.debug("Route Turn thread already stopped or stopping")
             return
@@ -764,6 +839,16 @@ class MainEventLoop:
         call_connection_id: str,
         route_turn_thread: Optional["RouteTurnThread"] = None,
     ):
+        """
+        Initialize Main Event Loop Manager.
+
+        :param websocket: WebSocket connection for communication
+        :type websocket: WebSocket
+        :param call_connection_id: ACS call connection identifier
+        :type call_connection_id: str
+        :param route_turn_thread: Reference for barge-in cancellation
+        :type route_turn_thread: Optional[RouteTurnThread]
+        """
         self.websocket = websocket
         self.call_connection_id = call_connection_id
         self.route_turn_thread = (
@@ -781,7 +866,9 @@ class MainEventLoop:
         self.last_queue_health_log = 0  # Track queue health logging
 
     async def handle_barge_in(self):
-        """🚨 Handle barge-in interruption with immediate response."""
+        """
+        Handle barge-in interruption with immediate response.
+        """
         with tracer.start_as_current_span(
             "v1.main_event_loop.handle_barge_in", kind=SpanKind.INTERNAL
         ):
@@ -823,7 +910,9 @@ class MainEventLoop:
                 asyncio.create_task(self._reset_barge_in_state())
 
     async def _cancel_current_playback(self):
-        """Cancel any current playback task immediately."""
+        """
+        Cancel any current playback task immediately.
+        """
         if self.current_playback_task and not self.current_playback_task.done():
             self.current_playback_task.cancel()
             try:
@@ -832,7 +921,9 @@ class MainEventLoop:
                 logger.debug("Playback task cancelled successfully")
 
     async def _send_stop_audio_command(self):
-        """Send immediate stop audio command to ACS."""
+        """
+        Send immediate stop audio command to ACS.
+        """
         try:
             stop_audio_data = {
                 "Kind": "StopAudio",
@@ -846,13 +937,22 @@ class MainEventLoop:
             logger.error(f"Failed to send stop audio command: {e}")
 
     async def _reset_barge_in_state(self):
-        """Reset barge-in state after brief delay."""
+        """
+        Reset barge-in state after brief delay.
+        """
         await asyncio.sleep(0.1)  # Brief delay to prevent rapid re-triggering
         self.barge_in_active.clear()
         logger.debug("Barge-in state reset")
 
     async def handle_media_message(self, stream_data: str, recognizer, acs_handler):
-        """🌐 Handle incoming media messages (Main Event Loop responsibility)."""
+        """
+        Handle incoming media messages (Main Event Loop responsibility).
+
+        :param stream_data: JSON string containing media message data
+        :type stream_data: str
+        :param recognizer: Speech recognition client
+        :param acs_handler: ACS media handler instance
+        """
         start_time = time.time()
         try:
             data = json.loads(stream_data)
@@ -955,9 +1055,9 @@ class MainEventLoop:
         """
         Process audio chunk asynchronously to prevent blocking the main event loop.
 
-        Args:
-            audio_bytes: Base64 string or raw bytes of audio data
-            recognizer: Speech recognizer instance
+        :param audio_bytes: Base64 string or raw bytes of audio data
+        :type audio_bytes: Union[str, bytes]
+        :param recognizer: Speech recognizer instance
         """
         chunk_start_time = time.time()
         try:
@@ -1023,7 +1123,11 @@ class MainEventLoop:
             )
 
     async def _play_greeting_when_ready(self, acs_handler=None):
-        """Queue greeting for playback through Route Turn Thread (maintains architecture consistency)."""
+        """
+        Queue greeting for playback through Route Turn Thread (maintains architecture consistency).
+
+        :param acs_handler: ACS media handler instance for greeting configuration
+        """
         if self.greeting_played:
             return  # Already played
 
@@ -1093,7 +1197,24 @@ class ACSMediaHandler:
         session_id: Optional[str] = None,
         greeting_text: str = GREETING,
     ):
-        """Initialize the three-thread architecture media handler."""
+        """
+        Initialize the three-thread architecture media handler.
+
+        :param websocket: WebSocket connection for media streaming
+        :type websocket: WebSocket
+        :param orchestrator_func: Orchestrator function for conversation management
+        :type orchestrator_func: Callable
+        :param call_connection_id: ACS call connection identifier
+        :type call_connection_id: str
+        :param recognizer: Speech recognition client instance
+        :type recognizer: Optional[StreamingSpeechRecognizerFromBytes]
+        :param memory_manager: Memory manager for conversation state
+        :type memory_manager: Optional[MemoManager]
+        :param session_id: Session identifier
+        :type session_id: Optional[str]
+        :param greeting_text: Text for greeting playback
+        :type greeting_text: str
+        """
 
         # Core dependencies
         self.websocket = websocket
@@ -1140,7 +1261,11 @@ class ACSMediaHandler:
         self._stopped = False  # Prevent multiple stop calls
 
     async def start(self):
-        """🚀 Start all three threads in coordinated fashion."""
+        """
+        Start all three threads in coordinated fashion.
+
+        :raises Exception: When thread startup fails
+        """
         with tracer.start_as_current_span(
             "v1.acs_media_handler.start",
             kind=SpanKind.INTERNAL,
@@ -1194,7 +1319,12 @@ class ACSMediaHandler:
                 raise
 
     async def handle_media_message(self, stream_data: str):
-        """🌐 Handle incoming media messages (Main Event Loop responsibility)."""
+        """
+        Handle incoming media messages (Main Event Loop responsibility).
+
+        :param stream_data: JSON string containing media message data
+        :type stream_data: str
+        """
         try:
             await self.main_event_loop.handle_media_message(
                 stream_data, self.recognizer, self
@@ -1205,7 +1335,9 @@ class ACSMediaHandler:
             # Log the error and continue processing subsequent messages
 
     async def stop(self):
-        """🛑 Stop all threads in reverse dependency order."""
+        """
+        Stop all threads in reverse dependency order.
+        """
         if self._stopped:
             logger.debug("ACS media handler already stopped or stopping")
             return
@@ -1240,7 +1372,12 @@ class ACSMediaHandler:
 
     @property
     def is_running(self) -> bool:
-        """Check if the handler is currently running."""
+        """
+        Check if the handler is currently running.
+
+        :return: True if handler is running, False otherwise
+        :rtype: bool
+        """
         return self.running
 
     def queue_direct_text_playback(
@@ -1255,13 +1392,14 @@ class ACSMediaHandler:
         This is a convenience method for external code to send text directly to ACS
         for TTS playback without going through the orchestrator.
 
-        Args:
-            text: Text to be played back
-            playback_type: Type of playback event (GREETING, ANNOUNCEMENT, STATUS_UPDATE, ERROR_MESSAGE)
-            language: Language for TTS (default: en-US)
-
-        Returns:
-            bool: True if successfully queued, False otherwise
+        :param text: Text to be played back
+        :type text: str
+        :param playback_type: Type of playback event (GREETING, ANNOUNCEMENT, STATUS_UPDATE, ERROR_MESSAGE)
+        :type playback_type: SpeechEventType
+        :param language: Language for TTS (default: en-US)
+        :type language: str
+        :return: True if successfully queued, False otherwise
+        :rtype: bool
         """
         if not self.running:
             logger.warning("Cannot queue text playback: media handler not running")

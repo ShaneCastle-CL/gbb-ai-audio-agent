@@ -42,15 +42,16 @@ def create_call_event(event_type: str, call_id: str, data: dict) -> CloudEvent:
     """
     Create a CloudEvent for call-related operations using V1 event system.
 
-    Args:
-        event_type: Type of the call event
-        call_id: Call connection ID
-        data: Event data payload
+    :param event_type: Type of the call event
+    :type event_type: str
+    :param call_id: Call connection ID
+    :type call_id: str
+    :param data: Event data payload
+    :type data: dict
+    :return: Properly formatted event for V1 processor
+    :rtype: CloudEvent
 
-    Returns:
-        CloudEvent: Properly formatted event for V1 processor
-
-    Note:
+    .. note::
         When using with CallEventProcessor.process_events(), remember to pass
         the request.app.state as the second argument for dependency injection.
     """
@@ -120,13 +121,13 @@ async def initiate_call(
     """
     Initiate an outbound call through Azure Communication Services.
 
-    Args:
-        request: Call initiation request with target phone number
-        http_request: FastAPI request object for accessing app state
-        orchestrator_func: Orchestrator function for conversation processing
-
-    Returns:
-        CallInitiateResponse: Call status and tracking information
+    :param request: Call initiation request with target phone number
+    :type request: CallInitiateRequest
+    :param http_request: FastAPI request object for accessing app state
+    :type http_request: Request
+    :return: Call status and tracking information
+    :rtype: CallInitiateResponse
+    :raises HTTPException: When call initiation fails or dependencies are unavailable
     """
     with trace_acs_operation(
         tracer, logger, "initiate_call", session_id=None, call_connection_id=None
@@ -265,7 +266,21 @@ async def list_calls(
         example="connected",
     ),
 ) -> CallListResponse:
-    """List calls with pagination and filtering."""
+    """
+    List calls with pagination and filtering.
+
+    :param request: FastAPI request object for accessing app state
+    :type request: Request
+    :param page: Page number (1-based)
+    :type page: int
+    :param limit: Number of items per page (1-100)
+    :type limit: int
+    :param status_filter: Filter calls by status
+    :type status_filter: Optional[str]
+    :return: Paginated list of calls with filtering results
+    :rtype: CallListResponse
+    :raises HTTPException: When database query fails or invalid parameters provided
+    """
     with trace_acs_operation(tracer, logger, "list_calls") as op:
         try:
             op.log_info(
@@ -405,11 +420,11 @@ async def answer_inbound_call(
     This endpoint handles Event Grid subscription validation and
     automatic call answering with conversation routing.
 
-    Args:
-        http_request: FastAPI request object containing Event Grid webhook payload
-
-    Returns:
-        JSONResponse: Processing result
+    :param http_request: FastAPI request object containing Event Grid webhook payload
+    :type http_request: Request
+    :return: Processing result
+    :rtype: JSONResponse
+    :raises HTTPException: When dependencies are unavailable or processing fails
     """
     # Validate dependencies
     if not http_request.app.state.acs_caller:
@@ -494,11 +509,11 @@ async def handle_acs_callbacks(
     This endpoint processes webhook events sent by ACS when call state changes
     occur. All processing is delegated to the V1 event system for consistency.
 
-    Args:
-        http_request: FastAPI request object containing the ACS webhook payload
-
-    Returns:
-        JSONResponse: Processing result
+    :param http_request: FastAPI request object containing the ACS webhook payload
+    :type http_request: Request
+    :return: Processing result
+    :rtype: JSONResponse
+    :raises Exception: When event processing fails or dependencies are unavailable
     """
     # Validate dependencies
     if not http_request.app.state.acs_caller:

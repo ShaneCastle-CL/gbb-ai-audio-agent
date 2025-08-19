@@ -104,12 +104,22 @@ def register_default_handlers() -> None:
 
 
 def get_processor_stats() -> dict:
-    """Get current processor statistics."""
+    """
+    Get current processor statistics.
+
+    :return: Dictionary containing processor metrics and statistics
+    :rtype: dict
+    """
     processor = get_call_event_processor()
     return processor.get_stats()
 
 
 def get_active_calls() -> set:
-    """Get currently active call connection IDs."""
+    """
+    Get currently active call connection IDs.
+
+    :return: Set of active call connection IDs
+    :rtype: set
+    """
     processor = get_call_event_processor()
     return processor.get_active_calls()

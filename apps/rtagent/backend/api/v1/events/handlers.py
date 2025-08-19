@@ -34,7 +34,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_call_initiated(context: CallEventContext) -> None:
-        """Handle call initiation events from API operations."""
+        """
+        Handle call initiation events from API operations.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_call_initiated",
             kind=SpanKind.INTERNAL,
@@ -69,7 +74,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_inbound_call_received(context: CallEventContext) -> None:
-        """Handle inbound call events from Event Grid webhooks."""
+        """
+        Handle inbound call events from Event Grid webhooks.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_inbound_call_received",
             kind=SpanKind.INTERNAL,
@@ -98,7 +108,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_call_answered(context: CallEventContext) -> None:
-        """Handle call answered events (both inbound and outbound)."""
+        """
+        Handle call answered events (both inbound and outbound).
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_call_answered",
             kind=SpanKind.INTERNAL,
@@ -130,6 +145,9 @@ class CallEventHandlers:
 
         This is the central handler for events from /callbacks endpoint,
         routing them to specific handlers based on event type.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
         """
         with tracer.start_as_current_span(
             "v1.handle_webhook_events",
@@ -189,7 +207,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_call_connected(context: CallEventContext) -> None:
-        """Handle call connected event - broadcast status and play greeting."""
+        """
+        Handle call connected event - broadcast status and play greeting.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_call_connected",
             kind=SpanKind.INTERNAL,
@@ -226,7 +249,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_call_disconnected(context: CallEventContext) -> None:
-        """Handle call disconnected event - log reason and cleanup."""
+        """
+        Handle call disconnected event - log reason and cleanup.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_call_disconnected",
             kind=SpanKind.INTERNAL,
@@ -248,7 +276,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_create_call_failed(context: CallEventContext) -> None:
-        """Handle create call failed event - log error details."""
+        """
+        Handle create call failed event - log error details.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_create_call_failed",
             kind=SpanKind.INTERNAL,
@@ -278,7 +311,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_answer_call_failed(context: CallEventContext) -> None:
-        """Handle answer call failed event - log error details."""
+        """
+        Handle answer call failed event - log error details.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_answer_call_failed",
             kind=SpanKind.INTERNAL,
@@ -308,7 +346,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_participants_updated(context: CallEventContext) -> None:
-        """Handle participant updates and start DTMF recognition."""
+        """
+        Handle participant updates and start DTMF recognition.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_participants_updated",
             kind=SpanKind.INTERNAL,
@@ -337,7 +380,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_dtmf_tone_received(context: CallEventContext) -> None:
-        """Handle DTMF tone with sequence validation."""
+        """
+        Handle DTMF tone with sequence validation.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         with tracer.start_as_current_span(
             "v1.handle_dtmf_tone_received",
             kind=SpanKind.INTERNAL,
@@ -360,12 +408,22 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_play_completed(context: CallEventContext) -> None:
-        """Handle play completed event."""
+        """
+        Handle play completed event.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         logger.info(f"🎵 Play completed: {context.call_connection_id}")
 
     @staticmethod
     async def handle_play_failed(context: CallEventContext) -> None:
-        """Handle play failed event."""
+        """
+        Handle play failed event.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         result_info = context.get_event_field("resultInformation", {})
         logger.error(
             f"🎵 Play failed: {context.call_connection_id}, reason: {result_info}"
@@ -373,12 +431,22 @@ class CallEventHandlers:
 
     @staticmethod
     async def handle_recognize_completed(context: CallEventContext) -> None:
-        """Handle recognize completed event."""
+        """
+        Handle recognize completed event.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         logger.info(f"🎤 Recognize completed: {context.call_connection_id}")
 
     @staticmethod
     async def handle_recognize_failed(context: CallEventContext) -> None:
-        """Handle recognize failed event."""
+        """
+        Handle recognize failed event.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         result_info = context.get_event_field("resultInformation", {})
         logger.error(
             f"🎤 Recognize failed: {context.call_connection_id}, reason: {result_info}"
@@ -390,14 +458,26 @@ class CallEventHandlers:
 
     @staticmethod
     def _extract_caller_id(caller_info: Dict[str, Any]) -> str:
-        """Extract caller ID from caller information."""
+        """
+        Extract caller ID from caller information.
+
+        :param caller_info: Caller information dictionary from ACS event
+        :type caller_info: Dict[str, Any]
+        :return: Extracted caller ID or 'unknown' if not found
+        :rtype: str
+        """
         if caller_info.get("kind") == "phoneNumber":
             return caller_info.get("phoneNumber", {}).get("value", "unknown")
         return caller_info.get("rawId", "unknown")
 
     @staticmethod
     async def _play_greeting(context: CallEventContext) -> None:
-        """Play greeting to connected call."""
+        """
+        Play greeting to connected call.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         try:
             if not context.acs_caller or not context.memo_manager:
                 return
@@ -424,7 +504,12 @@ class CallEventHandlers:
 
     @staticmethod
     async def _cleanup_call_state(context: CallEventContext) -> None:
-        """Clean up call state when call disconnects."""
+        """
+        Clean up call state when call disconnects.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        """
         try:
             if context.memo_manager and context.redis_mgr:
                 # Persist final state before cleanup
@@ -437,7 +522,16 @@ class CallEventHandlers:
     def _get_participant_phone(
         event: CloudEvent, memo_manager: Optional[Any]
     ) -> Optional[str]:
-        """Extract participant phone number from event."""
+        """
+        Extract participant phone number from event.
+
+        :param event: CloudEvent containing participant information
+        :type event: CloudEvent
+        :param memo_manager: Memory manager for accessing context
+        :type memo_manager: Optional[Any]
+        :return: Extracted phone number or None if not found
+        :rtype: Optional[str]
+        """
         try:
             event_data = CallEventHandlers._safe_get_event_data(event)
             participants = event_data.get("participants", [])
@@ -488,7 +582,14 @@ class CallEventHandlers:
     async def _start_dtmf_recognition(
         context: CallEventContext, target_phone: str
     ) -> None:
-        """Start DTMF recognition for participant."""
+        """
+        Start DTMF recognition for participant.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        :param target_phone: Phone number to start DTMF recognition for
+        :type target_phone: str
+        """
         try:
             if context.acs_caller:
                 call_conn = context.acs_caller.get_call_connection(
@@ -509,7 +610,14 @@ class CallEventHandlers:
 
     @staticmethod
     def _normalize_tone(tone: str) -> Optional[str]:
-        """Normalize DTMF tone to standard format."""
+        """
+        Normalize DTMF tone to standard format.
+
+        :param tone: Raw DTMF tone from ACS event
+        :type tone: str
+        :return: Normalized tone or None if invalid
+        :rtype: Optional[str]
+        """
         if not tone:
             return None
 
@@ -556,7 +664,16 @@ class CallEventHandlers:
     def _update_dtmf_sequence(
         context: CallEventContext, tone: str, sequence_id: Optional[int]
     ) -> None:
-        """Update DTMF sequence in memory."""
+        """
+        Update DTMF sequence in memory.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        :param tone: Normalized DTMF tone to add to sequence
+        :type tone: str
+        :param sequence_id: Optional sequence ID for ordering
+        :type sequence_id: Optional[int]
+        """
         if not context.memo_manager:
             return
 
@@ -600,7 +717,14 @@ class CallEventHandlers:
 
     @staticmethod
     def _validate_sequence(context: CallEventContext, sequence: str) -> None:
-        """Validate DTMF sequence."""
+        """
+        Validate DTMF sequence.
+
+        :param context: Call event context containing connection details and managers
+        :type context: CallEventContext
+        :param sequence: DTMF sequence to validate
+        :type sequence: str
+        """
         if not context.memo_manager:
             return
 
@@ -623,7 +747,14 @@ class CallEventHandlers:
 
     @staticmethod
     def _safe_get_event_data(event: CloudEvent) -> Dict[str, Any]:
-        """Safely extract event data as dictionary."""
+        """
+        Safely extract event data as dictionary.
+
+        :param event: CloudEvent to extract data from
+        :type event: CloudEvent
+        :return: Event data as dictionary
+        :rtype: Dict[str, Any]
+        """
         try:
             data = event.data
             if isinstance(data, dict):

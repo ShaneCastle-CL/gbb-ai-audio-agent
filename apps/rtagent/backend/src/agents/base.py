@@ -29,6 +29,17 @@ class ARTAgent:
         config_path: Optional[str | Path] = None,
         template_dir: str = "templates",
     ) -> None:
+        """
+        Initialize YAML-driven agent with configuration and prompt templates.
+
+        :param config_path: Path to agent configuration YAML file
+        :type config_path: Optional[str | Path]
+        :param template_dir: Directory containing prompt templates
+        :type template_dir: str
+        :raises Exception: When YAML config loading fails
+        :raises ValueError: When required configuration is missing
+        :raises TypeError: When tool configuration is invalid
+        """
         cfg_path = Path(config_path or self.CONFIG_PATH).expanduser().resolve()
         try:
             self._cfg = self._load_yaml(cfg_path)
@@ -84,6 +95,20 @@ class ARTAgent:
         is_acs: bool = False,
         **prompt_kwargs,
     ) -> Any:
+        """
+        Generate agent response using GPT with context-aware prompting.
+
+        :param cm: Conversation memory manager
+        :param user_prompt: User input text
+        :type user_prompt: str
+        :param ws: WebSocket connection for communication
+        :type ws: WebSocket
+        :param is_acs: Whether this is an ACS call context
+        :type is_acs: bool
+        :param prompt_kwargs: Additional template variables for prompt rendering
+        :return: GPT response processing result
+        :rtype: Any
+        """
         # For context-rich prompting
         system_prompt = self.pm.get_prompt(self.prompt_path, **prompt_kwargs)
         cm.ensure_system_prompt(
@@ -108,10 +133,23 @@ class ARTAgent:
 
     @staticmethod
     def _load_yaml(path: Path) -> Dict[str, Any]:
+        """
+        Load YAML configuration from file path.
+
+        :param path: Path to YAML configuration file
+        :type path: Path
+        :return: Parsed YAML configuration dictionary
+        :rtype: Dict[str, Any]
+        """
         with path.open("r", encoding="utf-8") as fh:
             return yaml.safe_load(fh) or {}
 
     def _validate_cfg(self) -> None:
+        """
+        Validate required configuration sections and keys.
+
+        :raises ValueError: When required configuration is missing
+        """
         required = [("agent", ["name"]), ("model", ["deployment_id"])]
         for section, keys in required:
             if section not in self._cfg:
@@ -123,6 +161,9 @@ class ARTAgent:
             raise ValueError("If 'prompts' is declared, it must include 'path'")
 
     def _log_loaded_summary(self) -> None:
+        """
+        Log summary of loaded agent configuration for debugging.
+        """
         desc_preview = shorten(self.description, width=60, placeholder="…")
         tool_names = [t["function"]["name"] for t in self.tools]
         voice_info = (

@@ -37,85 +37,147 @@ router = APIRouter()
 
 def _validate_phone_number(phone_number: str) -> tuple[bool, str]:
     """
-    Validate ACS phone number format.
-    Returns (is_valid, error_message_if_invalid)
+    Validate Azure Communication Services phone number format compliance.
+
+    This function performs comprehensive validation of phone number formatting
+    according to ACS requirements including proper country code prefix, digit
+    validation, and length constraints for international telephony standards.
+
+    :param phone_number: The phone number string to validate for ACS compatibility.
+    :return: Tuple containing validation result (True/False) and error message if invalid.
+    :raises TypeError: If phone_number is not a string type.
     """
-    if not phone_number or phone_number == "null":
-        return False, "Phone number not provided"
+    if not isinstance(phone_number, str):
+        logger.error(f"Phone number must be string, got {type(phone_number)}")
+        raise TypeError("Phone number must be a string")
 
-    if not phone_number.startswith("+"):
-        return False, f"Phone number must start with '+': {phone_number}"
+    try:
+        if not phone_number or phone_number == "null":
+            return False, "Phone number not provided"
 
-    if not phone_number[1:].isdigit():
-        return False, f"Phone number must contain only digits after '+': {phone_number}"
+        if not phone_number.startswith("+"):
+            return False, f"Phone number must start with '+': {phone_number}"
 
-    if len(phone_number) < 8 or len(phone_number) > 16:  # Basic length validation
-        return (
-            False,
-            f"Phone number length invalid (8-15 digits expected): {phone_number}",
-        )
+        if not phone_number[1:].isdigit():
+            return (
+                False,
+                f"Phone number must contain only digits after '+': {phone_number}",
+            )
 
-    return True, ""
+        if len(phone_number) < 8 or len(phone_number) > 16:  # Basic length validation
+            return (
+                False,
+                f"Phone number length invalid (8-15 digits expected): {phone_number}",
+            )
+
+        logger.debug(f"Phone number validation successful: {phone_number}")
+        return True, ""
+    except Exception as e:
+        logger.error(f"Error validating phone number: {e}")
+        raise
 
 
 def _validate_guid(guid_str: str) -> bool:
     """
-    Validate if a string is a valid GUID format.
-    Returns True if valid GUID, False otherwise.
-    """
-    if not guid_str:
-        return False
+    Validate string format compliance with GUID (Globally Unique Identifier) standards.
 
-    # GUID pattern: 8-4-4-4-12 hexadecimal digits
-    guid_pattern = re.compile(
-        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-    )
-    return bool(guid_pattern.match(guid_str))
+    This function performs strict validation of GUID format according to RFC 4122
+    standards, ensuring proper hexadecimal digit patterns and hyphen placement
+    for Azure resource identification and tracking systems.
+
+    :param guid_str: The string to validate against GUID format requirements.
+    :return: True if string matches valid GUID format, False otherwise.
+    :raises TypeError: If guid_str is not a string type.
+    """
+    if not isinstance(guid_str, str):
+        logger.error(f"GUID must be string, got {type(guid_str)}")
+        raise TypeError("GUID must be a string")
+
+    try:
+        if not guid_str:
+            logger.debug("Empty GUID string provided")
+            return False
+
+        # GUID pattern: 8-4-4-4-12 hexadecimal digits
+        guid_pattern = re.compile(
+            r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        )
+        result = bool(guid_pattern.match(guid_str))
+
+        if result:
+            logger.debug(f"GUID validation successful: {guid_str}")
+        else:
+            logger.debug(f"GUID validation failed: {guid_str}")
+
+        return result
+    except Exception as e:
+        logger.error(f"Error validating GUID: {e}")
+        raise
 
 
 def _validate_auth_configuration() -> tuple[bool, str]:
     """
-    Validate authentication configuration when ENABLE_AUTH_VALIDATION is True.
-    Returns (is_valid, error_message_if_invalid)
+    Validate authentication configuration for Azure AD integration compliance.
+
+    This function performs comprehensive validation of authentication settings
+    when ENABLE_AUTH_VALIDATION is enabled, ensuring proper GUID formatting
+    for client IDs, tenant IDs, and allowed client configurations for secure operation.
+
+    :param: None (reads from environment configuration variables).
+    :return: Tuple containing validation status and descriptive message about configuration state.
+    :raises ValueError: If critical authentication configuration is malformed.
     """
-    if not ENABLE_AUTH_VALIDATION:
-        return True, "Auth validation disabled"
+    try:
+        if not ENABLE_AUTH_VALIDATION:
+            logger.debug("Authentication validation is disabled")
+            return True, "Auth validation disabled"
 
-    validation_errors = []
+        validation_errors = []
 
-    # Check BACKEND_AUTH_CLIENT_ID is a valid GUID
-    if not BACKEND_AUTH_CLIENT_ID:
-        validation_errors.append("BACKEND_AUTH_CLIENT_ID is not set")
-    elif not _validate_guid(BACKEND_AUTH_CLIENT_ID):
-        validation_errors.append("BACKEND_AUTH_CLIENT_ID is not a valid GUID")
+        # Check BACKEND_AUTH_CLIENT_ID is a valid GUID
+        if not BACKEND_AUTH_CLIENT_ID:
+            validation_errors.append("BACKEND_AUTH_CLIENT_ID is not set")
+        elif not _validate_guid(BACKEND_AUTH_CLIENT_ID):
+            validation_errors.append("BACKEND_AUTH_CLIENT_ID is not a valid GUID")
 
-    # Check AZURE_TENANT_ID is a valid GUID
-    if not AZURE_TENANT_ID:
-        validation_errors.append("AZURE_TENANT_ID is not set")
-    elif not _validate_guid(AZURE_TENANT_ID):
-        validation_errors.append("AZURE_TENANT_ID is not a valid GUID")
+        # Check AZURE_TENANT_ID is a valid GUID
+        if not AZURE_TENANT_ID:
+            validation_errors.append("AZURE_TENANT_ID is not set")
+        elif not _validate_guid(AZURE_TENANT_ID):
+            validation_errors.append("AZURE_TENANT_ID is not a valid GUID")
 
-    # Check ALLOWED_CLIENT_IDS has at least one valid client ID
-    if not ALLOWED_CLIENT_IDS:
-        validation_errors.append(
-            "ALLOWED_CLIENT_IDS is empty - at least one client ID required"
-        )
-    else:
-        invalid_client_ids = [
-            cid for cid in ALLOWED_CLIENT_IDS if not _validate_guid(cid)
-        ]
-        if invalid_client_ids:
+        # Check ALLOWED_CLIENT_IDS has at least one valid client ID
+        if not ALLOWED_CLIENT_IDS:
             validation_errors.append(
-                f"Invalid GUID format in ALLOWED_CLIENT_IDS: {invalid_client_ids}"
+                "ALLOWED_CLIENT_IDS is empty - at least one client ID required"
             )
+        else:
+            invalid_client_ids = [
+                cid for cid in ALLOWED_CLIENT_IDS if not _validate_guid(cid)
+            ]
+            if invalid_client_ids:
+                validation_errors.append(
+                    f"Invalid GUID format in ALLOWED_CLIENT_IDS: {invalid_client_ids}"
+                )
 
-    if validation_errors:
-        return False, "; ".join(validation_errors)
+        if validation_errors:
+            error_message = "; ".join(validation_errors)
+            logger.error(
+                f"Authentication configuration validation failed: {error_message}"
+            )
+            return False, error_message
 
-    return (
-        True,
-        f"Auth validation enabled with {len(ALLOWED_CLIENT_IDS)} allowed client(s)",
-    )
+        success_message = (
+            f"Auth validation enabled with {len(ALLOWED_CLIENT_IDS)} allowed client(s)"
+        )
+        logger.info(
+            f"Authentication configuration validation successful: {success_message}"
+        )
+        return True, success_message
+
+    except Exception as e:
+        logger.error(f"Error validating authentication configuration: {e}")
+        raise
 
 
 @router.get(
@@ -164,7 +226,7 @@ async def health_check(request: Request) -> HealthResponse:
         # Session metrics snapshot (WebSocket connection metrics)
         sm = getattr(request.app.state, "session_metrics", None)
         ws_manager = getattr(request.app.state, "websocket_manager", None)
-        
+
         if sm is not None:
             if hasattr(sm, "get_snapshot"):
                 snap = await sm.get_snapshot()  # type: ignore[func-returns-value]
@@ -175,20 +237,20 @@ async def health_check(request: Request) -> HealthResponse:
             if isinstance(snap, dict):
                 # Use new metric names for clarity
                 active_connections = snap.get("active_connections", 0)
-                total_connected = snap.get("total_connected", 0) 
+                total_connected = snap.get("total_connected", 0)
                 total_disconnected = snap.get("total_disconnected", 0)
-                
+
                 # Cross-check with actual WebSocket manager count for accuracy
                 actual_ws_count = 0
                 if ws_manager and hasattr(ws_manager, "get_client_count"):
                     actual_ws_count = await ws_manager.get_client_count()
-                
+
                 session_metrics = {
-                    "connected": active_connections,        # Currently active WebSocket connections (from metrics)
-                    "disconnected": total_disconnected,     # Historical total disconnections
-                    "active": active_connections,           # Same as connected (real-time active)
-                    "total_connected": total_connected,     # Historical total connections made
-                    "actual_ws_count": actual_ws_count,     # Real-time count from WebSocket manager (cross-check)
+                    "connected": active_connections,  # Currently active WebSocket connections (from metrics)
+                    "disconnected": total_disconnected,  # Historical total disconnections
+                    "active": active_connections,  # Same as connected (real-time active)
+                    "total_connected": total_connected,  # Historical total connections made
+                    "actual_ws_count": actual_ws_count,  # Real-time count from WebSocket manager (cross-check)
                 }
     except Exception:
         session_metrics = None
@@ -450,7 +512,7 @@ async def _check_speech_services_fast(tts_pool, stt_pool) -> ServiceCheck:
             error="pools not initialized",
             check_time_ms=round((time.time() - start) * 1000, 2),
         )
-    
+
     # Check if pools are properly configured
     try:
         pool_info = {
@@ -464,7 +526,7 @@ async def _check_speech_services_fast(tts_pool, stt_pool) -> ServiceCheck:
     except Exception as e:
         return ServiceCheck(
             component="speech_services",
-            status="unhealthy", 
+            status="unhealthy",
             error=f"pool introspection failed: {e}",
             check_time_ms=round((time.time() - start) * 1000, 2),
         )
