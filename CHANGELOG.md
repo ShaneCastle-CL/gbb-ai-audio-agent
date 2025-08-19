@@ -8,7 +8,7 @@ This file meticulously documents all noteworthy changes made to this project.
 
 ## [1.0.0] - 2025-08-18
 
-After months of iterative development, the system now provides comprehensive real-time voice processing capabilities with enterprise-grade security, observability, and scalability.
+System now provides comprehensive real-time voice processing capabilities with enterprise-grade security, observability, and scalability.
 
 ### Added
 - Comprehensive agent health monitoring and status endpoints
@@ -28,7 +28,7 @@ After months of iterative development, the system now provides comprehensive rea
 
 ## [0.9.0] - 2025-08-13
 
-Final pre-production release focusing on deployment automation, security hardening, and operational readiness.
+Release focusing on deployment automation, security hardening, and operational readiness.
 
 ### Added
 - Automated deployment scripts with comprehensive error handling

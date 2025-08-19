@@ -13,12 +13,12 @@ try:
     with open("README.md", "r", encoding="utf-8") as f:
         long_description = f.read()
 except FileNotFoundError:
-    long_description = "Real-Time Voice Agent with Azure Cognitive Services"
+    long_description = "Real-time voice agent with Azure AI and Apps Service"
 
 setup(
     name="gbb-ai-audio-agent",
     version="1.0.0",
-    description="Real-time voice agent with Azure Cognitive Services",
+    description="Real-time voice agent with Azure AI and Apps Service",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Pablo Salvador, Jin Lee",
@@ -54,7 +54,7 @@ setup(
         "Topic :: Communications :: Telephony",
         "Topic :: Multimedia :: Sound/Audio :: Speech",
     ],
-    keywords="azure speech voice tts stt real-time audio cognitive-services",
+    keywords="azure speech voice tts stt real-time audio ai and apps-services",
     project_urls={
         "Documentation": "https://pablosalvador10.github.io/gbb-ai-audio-agent/",
         "Source": "https://github.com/pablosalvador10/gbb-ai-audio-agent",
