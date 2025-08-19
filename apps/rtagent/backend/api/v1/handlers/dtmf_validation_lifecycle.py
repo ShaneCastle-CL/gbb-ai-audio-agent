@@ -116,12 +116,12 @@ class DTMFValidationLifecycle:
                     if aws_validation_pending:
                         # Handle AWS Connect validation tone
                         await DTMFValidationLifecycle._handle_aws_connect_validation_tone(
-                            context, normalized_tone, sequence_id
+                            context, normalized_tone
                         )
                     else:
                         # Handle regular DTMF sequence
-                        DTMFValidationLifecycle._update_dtmf_sequence(context, normalized_tone, sequence_id)
-                        
+                        DTMFValidationLifecycle._update_dtmf_sequence(context, normalized_tone)
+
                         # Check if sequence is complete (ends with #)
                         current_sequence = context.memo_manager.get_context("dtmf_sequence", "")
                         if current_sequence.endswith("#"):
@@ -212,6 +212,7 @@ class DTMFValidationLifecycle:
                 input_sequence += tone
                 context.memo_manager.set_context("aws_connect_input_sequence", input_sequence)
                 logger.info(f"🔢 AWS Connect input sequence: {input_sequence}")
+                await context.memo_manager.persist_to_redis_async(redis_mgr=context.redis_mgr)
                     
         except Exception as e:
             logger.error(f"❌ Error handling AWS Connect validation tone: {e}")
@@ -286,6 +287,20 @@ class DTMFValidationLifecycle:
                 return True
             else:
                 logger.warning("⏰ DTMF validation timeout")
+                # Attempt to hang up the call if validation times out
+                try:
+                    # Get the call connection client and hang up
+
+                    if hasattr(redis_mgr, "get_call_connection"):
+                        call_conn = (call_connection_id)
+                        if call_conn:
+                            await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda: call_conn.hang_up(is_for_everyone=True)
+                            )
+                            logger.info(f"📞 Call {call_connection_id} hung up due to DTMF validation timeout")
+                except Exception as hangup_error:
+                    logger.error(f"❌ Error hanging up call {call_connection_id}: {hangup_error}")
                 return False
                 
         except Exception as e:
@@ -332,9 +347,18 @@ class DTMFValidationLifecycle:
 
         tone_str = str(tone).strip().lower()
         tone_map = {
-            "0": "0", "1": "1", "2": "2", "3": "3", "4": "4",
-            "5": "5", "6": "6", "7": "7", "8": "8", "9": "9",
-            "*": "*", "#": "#", "pound": "#", "star": "*"
+            "0": "0", "zero": "0",
+            "1": "1", "one": "1",
+            "2": "2", "two": "2",
+            "3": "3", "three": "3",
+            "4": "4", "four": "4",
+            "5": "5", "five": "5",
+            "6": "6", "six": "6",
+            "7": "7", "seven": "7",
+            "8": "8", "eight": "8",
+            "9": "9", "nine": "9",
+            "*": "*", "star": "*",
+            "#": "#", "pound": "#"
         }
 
         return tone_map.get(tone_str)

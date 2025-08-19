@@ -88,7 +88,37 @@ class SpeechEvent:
 # ============================================================================
 # 🔗 CROSS-THREAD COMMUNICATION INFRASTRUCTURE
 # ============================================================================
+# ============================================================================
+# 🗂️ Instrumented Speech Queue for Backpressure
+# ============================================================================
+import collections
+class BoundedSpeechQueue(asyncio.Queue):
+    """Instrumented bounded queue for speech events with drop-oldest on overflow."""
+    def __init__(self, maxsize: int = 10, *args, **kwargs):
+        super().__init__(maxsize=maxsize, *args, **kwargs)
+        self.high_watermark = 0
+        self.dropped_events = 0
+    
+    def _update_hwm(self):
+        qsz = self.qsize()
+        if qsz > self.high_watermark:
+            self.high_watermark = qsz
 
+    def put_nowait_or_drop_oldest(self, item: "SpeechEvent"):
+        try:
+            super().put_nowait(item)
+            self._update_hwm()
+            return True
+        except asyncio.QueueFull:
+            try:
+                # Drop the oldest item to make room for the newest
+                _ = self.get_nowait()
+                self.dropped_events += 1
+                super().put_nowait(item)
+                self._update_hwm()
+                return True
+            except Exception:
+                return False
 
 class ThreadBridge:
     """
@@ -137,11 +167,19 @@ class ThreadBridge:
 
     def queue_speech_result(self, speech_queue: asyncio.Queue, event: SpeechEvent):
         """Queue final speech result for Route Turn Thread processing."""
-        # Try direct put_nowait first (fastest and most reliable)
         try:
-            speech_queue.put_nowait(event)
-            logger.debug(self._call_log(f"📋 Speech event queued: {event.event_type.value} (queue: {speech_queue.qsize()})"))
-            return
+            # Prefer fast-path; if it's our instrumented queue, use drop-oldest
+            if hasattr(speech_queue, "put_nowait_or_drop_oldest"):
+                ok = speech_queue.put_nowait_or_drop_oldest(event)
+                if not ok:
+                    logger.warning(self._call_log("⚠️ Failed to enqueue even after drop-oldest; will fallback to threadsafe put"))
+                else:
+                    logger.debug(self._call_log(f"📋 Speech event queued: {event.event_type.value} (queue: {speech_queue.qsize()}, hwm={getattr(speech_queue,'high_watermark',-1)}, dropped={getattr(speech_queue,'dropped_events',-1)})"))
+                    return
+            else:
+                speech_queue.put_nowait(event)
+                logger.debug(self._call_log(f"📋 Speech event queued: {event.event_type.value} (queue: {speech_queue.qsize()})"))
+                return
         except asyncio.QueueFull:
             logger.warning(self._call_log(f"⚠️ Speech queue full ({speech_queue.qsize()}), using threadsafe fallback"))
         except Exception as e:
@@ -158,13 +196,10 @@ class ThreadBridge:
                 speech_queue.put(event), self.main_loop
             )
             logger.debug(self._call_log(f"📋 Speech event queued via threadsafe: {event.event_type.value}"))
-            # Wait for the operation to complete to catch any errors
             future.result(timeout=0.1)
         except Exception as e:
-            # Log the actual error details
             logger.error(self._call_log(f"❌ Failed to queue speech result: {type(e).__name__}: {e}"))
             logger.error(self._call_log(f"❌ Event: {event.event_type.value}, Queue size: {speech_queue.qsize()}"))
-            # This is a critical failure - event will be lost
             raise RuntimeError(f"Unable to queue speech event: {e}") from e
 
 
@@ -340,17 +375,17 @@ class SpeechSDKThread:
                 logger.error(f"❌ Test audio failed: {test_e}")
                 # Continue anyway - test failure doesn't mean recognizer is broken
 
-            # Add a manual barge-in test after 5 seconds to verify the mechanism
-            logger.info("🧪 Scheduling manual barge-in test in 5 seconds...")
-            asyncio.run_coroutine_threadsafe(
-                self._test_barge_in_after_delay(), asyncio.get_event_loop()
-            )
+            # # Add a manual barge-in test after 5 seconds to verify the mechanism
+            # logger.info("🧪 Scheduling manual barge-in test in 5 seconds...")
+            # asyncio.run_coroutine_threadsafe(
+            #     self._test_barge_in_after_delay(), asyncio.get_event_loop()
+            # )
 
-            # Also test partial callback triggering after 3 seconds
-            logger.info("🧪 Scheduling manual partial callback test in 3 seconds...")
-            asyncio.run_coroutine_threadsafe(
-                self._test_partial_callback_after_delay(), asyncio.get_event_loop()
-            )
+            # # Also test partial callback triggering after 3 seconds
+            # logger.info("🧪 Scheduling manual partial callback test in 3 seconds...")
+            # asyncio.run_coroutine_threadsafe(
+            #     self._test_partial_callback_after_delay(), asyncio.get_event_loop()
+            # )
 
         except Exception as e:
             logger.error(f"❌ Failed to start speech recognizer: {e}")
@@ -738,9 +773,6 @@ class MainEventLoop:
 
         # Audio processing task tracking
         self.active_audio_tasks: Set[asyncio.Task] = set()
-        self.max_concurrent_audio_tasks = int(
-            os.getenv("MAX_CONCURRENT_AUDIO_TASKS", "500")
-        )
         self.last_queue_health_log = 0  # Track queue health logging
 
         # 🔄 Memory Manager Refresh Tracking for Parallel Stream Updates
@@ -748,6 +780,27 @@ class MainEventLoop:
         self.memory_refresh_count = 0
         self.call_start_time = time.time()
         self.pending_refresh_task: Optional[asyncio.Task] = None
+
+        # 🎯 Improved Audio Processing Configuration
+        self.active_audio_tasks: Set[asyncio.Task] = set()
+        self.max_concurrent_audio_tasks = int(os.getenv("MAX_CONCURRENT_AUDIO_TASKS", "50"))  # Reduced from 500
+        self.max_emergency_audio_tasks = int(os.getenv("MAX_EMERGENCY_AUDIO_TASKS", "100"))   # Emergency threshold
+        
+        # Audio backpressure and quality management
+        self.audio_processing_semaphore = asyncio.Semaphore(self.max_concurrent_audio_tasks)
+        self.dropped_frames_count = 0
+        self.processed_frames_count = 0
+        self.last_performance_log = 0
+        
+        # Audio frame buffering for overflow situations
+        self.audio_overflow_buffer: asyncio.Queue = asyncio.Queue(maxsize=20)  # Short-term buffer
+        self.buffer_processing_task: Optional[asyncio.Task] = None
+        
+        # Validation gate: pre-warm recognizer but only feed audio when open
+        self._validation_gate_open = False
+        self._validation_task: Optional[asyncio.Task] = None
+        self._validation_log_once = False
+
 
     def _call_log(self, message: str) -> str:
         """Format log message with call connection ID prefix."""
@@ -785,19 +838,23 @@ class MainEventLoop:
             # Clear the pending task reference
             self.pending_refresh_task = None
 
-    def _get_fresh_validation_status(self) -> bool:
-        """
-        Get the most current DTMF validation status from memory manager.
-        
-        This method uses the locally cached context which gets refreshed periodically
-        from parallel streams via the adaptive refresh mechanism.
-        
-        Returns:
-            bool: True if DTMF validation is complete, False otherwise
-        """
-        return DTMFValidationLifecycle.get_fresh_dtmf_validation_status(
-            self.memory_manager, self.call_connection_id
-        )
+    async def _await_validation_and_open_gate(self):
+        """Wait once for DTMF validation, then open the audio gate and (optionally) play greeting."""
+        try:
+            validation_completed = await DTMFValidationLifecycle.wait_for_dtmf_validation_completion(
+                redis_mgr=self.redis_mgr,
+                call_connection_id=self.call_connection_id,
+                timeout_ms=30_000
+            )
+            if validation_completed:
+                logger.info(self._call_log("✅ DTMF validation complete — opening audio gate"))
+                self._validation_gate_open = True
+                if not self.greeting_played:
+                    await self._play_greeting(getattr(self.websocket, "_acs_media_handler", None))
+            else:
+                logger.warning(self._call_log("⏰ DTMF validation timeout — audio gate remains closed"))
+        except Exception as e:
+            logger.error(self._call_log(f"❌ Error awaiting validation: {e}"))
 
     async def handle_barge_in(self):
         """🚨 Handle barge-in interruption with immediate response."""
@@ -872,116 +929,54 @@ class MainEventLoop:
             data = json.loads(stream_data)
             kind = data.get("kind")
             # Log all message kinds with a shorthand
-            if kind:
-                if kind not in ("AudioData", "AudioMetadata"):
-                    logger.info(f">>>🔔 Unhandled media message kind: {kind}")
             if kind == "AudioMetadata":
                 logger.debug("Received audio metadata")
                 # AudioMetadata indicates call connection is ready for audio
-
-                if DTMF_VALIDATION_ENABLED:
-                    # Use centralized DTMF validation waiting logic
-                    validation_completed = await DTMFValidationLifecycle.wait_for_dtmf_validation_completion(
-                        redis_mgr=self.redis_mgr,
-                        call_connection_id=self.call_connection_id,
-                        timeout_ms=30_000  # 30 seconds max wait
-                    )
-                    if validation_completed:
-                        logger.info("✅ Validation complete. Starting recognizer...")
-                        if acs_handler and acs_handler.speech_sdk_thread:
-                            acs_handler.speech_sdk_thread.start_recognizer()
-                        if self.memory_manager:
-                            self.memory_manager.set_context("dtmf_validation_gate_open", True)
-                    else:
-                        logger.warning("⏰ Validation timeout. Skipping recognizer start.")
-                        return
-                else:
-                    if acs_handler and acs_handler.speech_sdk_thread:
-                        logger.debug("🎤 Starting recognizer from AudioMetadata...")
-                        acs_handler.speech_sdk_thread.start_recognizer()
-
+        
+                if acs_handler and acs_handler.speech_sdk_thread:
+                    logger.debug("🎤 Prewarming recognizer from AudioMetadata...")
                     acs_handler.speech_sdk_thread.start_recognizer()
+                else:
+                    logger.warning("⚠️ No Speech SDK thread available for starting recognizer")
+                
+                if DTMF_VALIDATION_ENABLED:
+                    # Kick off a one-time background waiter that opens the gate when ready
+                    if not self._validation_task or self._validation_task.done():
+                        self._validation_task = asyncio.create_task(self._await_validation_and_open_gate())
+                else:
+                                        # No validation — open the gate and optionally play greeting
+                    self._validation_gate_open = True
                     if not self.greeting_played:
                         await self._play_greeting(acs_handler)
 
 
             elif kind == "AudioData":
-                if DTMF_VALIDATION_ENABLED:
-                    validation_completed = await DTMFValidationLifecycle.wait_for_dtmf_validation_completion(
-                        redis_mgr=self.redis_mgr,
-                        call_connection_id=self.call_connection_id,
-                        timeout_ms=30_000  # 30 seconds max wait
-                    )
-                    if validation_completed:
-                        logger.info(self._call_log("✅ [AudioData] DTMF validation complete."))
-                    else:
-                        logger.warning(self._call_log("⏰ [AudioData] DTMF validation timeout."))
-                        return
+                # Fast gate-check to avoid expensive waits on every frame
+                if DTMF_VALIDATION_ENABLED and not self._validation_gate_open:
+                    if not self._validation_log_once:
+                        logger.info(self._call_log("🔒 Audio gate closed — holding frames until DTMF validation completes"))
+                        self._validation_log_once = True
+                    return
 
                 # Process audio data asynchronously to prevent blocking main event loop
                 audio_data_section = data.get("audioData", {})
                 is_silent = audio_data_section.get("silent", True)
 
                 logger.debug(f"🎵 AudioData received - silent: {is_silent}")
-                
                 if not is_silent:
                     audio_bytes = audio_data_section.get("data")
                     if audio_bytes:
-                        logger.debug(
-                            f"🎵 Non-silent audio received: {len(str(audio_bytes))} chars (base64)"
-                        )
-
-                        # Check recognizer state before processing
-                        if not recognizer:
-                            logger.error(
-                                "❌ No recognizer available for audio processing"
-                            )
-                        elif not hasattr(recognizer, "write_bytes"):
-                            logger.error("❌ Recognizer missing write_bytes method")
-                        elif (
-                            len(self.active_audio_tasks)
-                            >= self.max_concurrent_audio_tasks
-                        ):
-                            logger.warning(
-                                f"⚠️ Audio processing queue full ({len(self.active_audio_tasks)}/{self.max_concurrent_audio_tasks}), dropping frame"
-                            )
-                        else:
-
-                            logger.debug(
-                                f"🎤 Recognizer ready, scheduling audio processing (queue: {len(self.active_audio_tasks)}/{self.max_concurrent_audio_tasks})..."
-                            )
-                            # Schedule audio processing as a background task to prevent blocking
-                            task = asyncio.create_task(
-                                self._process_audio_chunk_async(audio_bytes, recognizer)
-                            )
-
-                            # Track active tasks for limiting and cleanup
-                            self.active_audio_tasks.add(task)
-                            task.add_done_callback(
-                                lambda t: self.active_audio_tasks.discard(t)
-                            )
-
-                            # Don't await the task to keep main loop non-blocking
-                            logger.debug(
-                                f"🔄 Audio processing task created: {id(task)} (active: {len(self.active_audio_tasks)})"
-                            )
-
-                            # Periodic queue health logging (every 5 seconds)
-                            current_time = time.time()
-                            if current_time - self.last_queue_health_log > 5.0:
-                                queue_usage = (
-                                    len(self.active_audio_tasks)
-                                    / self.max_concurrent_audio_tasks
-                                    * 100
-                                )
-                                logger.info(
-                                    f"📊 Audio queue health: {len(self.active_audio_tasks)}/{self.max_concurrent_audio_tasks} ({queue_usage:.1f}% utilization)"
-                                )
-                                self.last_queue_health_log = current_time
-                    else:
-                        logger.debug("🔇 AudioData received but no audio bytes found")
+                        # 🎯 Smart Audio Processing with Backpressure
+                        await self._process_audio_with_backpressure(audio_bytes, recognizer)
                 else:
-                    logger.debug("🔇 Silent audio frame skipped")
+                    logger.info("🔕 Silence detected")
+            elif kind == "DtmfData": 
+                # Log DTMF data messages for tracing and debugging
+                dtmf_data = data.get("dtmfData", {})
+                logger.info(self._call_log(f"🔔 DTMF Data received: {dtmf_data}"))
+            else:
+                logger.info(f">>>🔔 Unhandled media message kind: {kind}")
+
 
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in media message: {e}")
@@ -1068,6 +1063,59 @@ class MainEventLoop:
             logger.error(
                 f"❌ Audio bytes type: {type(audio_bytes)}, length: {len(audio_bytes) if audio_bytes else 0}"
             )
+    async def _process_audio_with_backpressure(self, audio_bytes: Union[str, bytes], recognizer) -> None:
+        """
+        Acquire a bounded concurrency slot quickly; if saturated, buffer briefly, else drop.
+        """
+        acquired = False
+        try:
+            # Try to acquire quickly to keep loop snappy
+            acquired = await asyncio.wait_for(self.audio_processing_semaphore.acquire(), timeout=0.005)
+        except asyncio.TimeoutError:
+            acquired = False
+
+        if acquired:
+            try:
+                await self._process_audio_chunk_async(audio_bytes, recognizer)
+                self.processed_frames_count += 1
+            finally:
+                self.audio_processing_semaphore.release()
+            return
+
+        # Couldn't acquire fast — try short overflow buffer
+        try:
+            self.audio_overflow_buffer.put_nowait(audio_bytes)
+            if not self.buffer_processing_task or self.buffer_processing_task.done():
+                self.buffer_processing_task = asyncio.create_task(self._drain_overflow_buffer(recognizer))
+        except asyncio.QueueFull:
+            self.dropped_frames_count += 1
+            now = time.time()
+            if now - self.last_performance_log > 1.0:
+                self.last_performance_log = now
+                logger.warning(self._call_log(f"⚠️ Audio overflow: dropped_frames={self.dropped_frames_count}, processed_frames={self.processed_frames_count}"))
+
+    async def _drain_overflow_buffer(self, recognizer) -> None:
+        """Drain the short overflow buffer without starving the main loop."""
+        while not self.audio_overflow_buffer.empty():
+            try:
+                audio_bytes = self.audio_overflow_buffer.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            try:
+                acquired = await asyncio.wait_for(self.audio_processing_semaphore.acquire(), timeout=0.010)
+            except asyncio.TimeoutError:
+                # Give up this cycle; requeue and exit to avoid tight spin
+                try:
+                    self.audio_overflow_buffer.put_nowait(audio_bytes)
+                except asyncio.QueueFull:
+                    self.dropped_frames_count += 1
+                return
+            try:
+                await self._process_audio_chunk_async(audio_bytes, recognizer)
+                self.processed_frames_count += 1
+            finally:
+                self.audio_processing_semaphore.release()
+
 
     async def _play_greeting(self, acs_handler=None):
         """Queue greeting for playback through Route Turn Thread (maintains architecture consistency)."""
@@ -1158,7 +1206,8 @@ class ACSMediaHandler:
         )
 
         # Cross-thread communication infrastructure
-        self.speech_queue = asyncio.Queue(maxsize=10)  # Bounded queue for backpressure
+        max_q = int(os.getenv("SPEECH_QUEUE_MAXSIZE", "10"))
+        self.speech_queue = BoundedSpeechQueue(maxsize=max_q)  # Instrumented bounded queue
         self.thread_bridge = ThreadBridge(call_connection_id)  # Pass call ID to bridge
 
         # Initialize Route Turn Thread first (needed for MainEventLoop reference)
