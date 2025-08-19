@@ -7,10 +7,27 @@ from typing import Callable, Optional
 
 from colorama import Fore, Style
 from colorama import init as colorama_init
-from opentelemetry import trace
-from opentelemetry.sdk._logs import LoggingHandler
 
-from utils.telemetry_config import setup_azure_monitor
+# Early .env load to check DISABLE_CLOUD_TELEMETRY before importing any OTel
+try:
+    from dotenv import load_dotenv
+    if os.path.isfile('.env'):
+        load_dotenv(override=False)
+except Exception:
+    pass
+
+# Conditionally import OpenTelemetry based on DISABLE_CLOUD_TELEMETRY
+_telemetry_disabled = os.getenv("DISABLE_CLOUD_TELEMETRY", "false").lower() == "true"
+
+if not _telemetry_disabled:
+    from opentelemetry import trace
+    from opentelemetry.sdk._logs import LoggingHandler
+    from utils.telemetry_config import setup_azure_monitor
+else:
+    # Mock objects when telemetry is disabled
+    trace = None
+    LoggingHandler = None
+    setup_azure_monitor = lambda *args, **kwargs: None
 
 colorama_init(autoreset=True)
 
@@ -85,6 +102,16 @@ class PrettyFormatter(logging.Formatter):
 
 class TraceLogFilter(logging.Filter):
     def filter(self, record):
+        if _telemetry_disabled or trace is None:
+            # Set default values when telemetry is disabled
+            record.trace_id = "-"
+            record.span_id = "-"
+            record.session_id = "-"
+            record.call_connection_id = "-"
+            record.operation_name = "-"
+            record.component = "-"
+            return True
+            
         span = trace.get_current_span()
         context = span.get_span_context() if span else None
         record.trace_id = (
@@ -133,6 +160,9 @@ def configure_azure_monitor(logger_name: Optional[str] = None):
     Configure Azure Monitor for the specified logger or root logger.
     This ensures logs are sent to Application Insights with proper trace correlation.
     """
+    if _telemetry_disabled:
+        return
+        
     setup_azure_monitor(logger_name)
 
     # Get the target logger
@@ -141,18 +171,19 @@ def configure_azure_monitor(logger_name: Optional[str] = None):
     )
 
     # Check if Azure Monitor handler is already attached to avoid duplicates
-    has_azure_handler = any(
-        isinstance(h, LoggingHandler) for h in target_logger.handlers
-    )
-    if not has_azure_handler:
-        try:
-            handler = LoggingHandler(level=logging.INFO)
-            target_logger.addHandler(handler)
-            target_logger.debug(
-                f"Azure Monitor LoggingHandler attached to logger: {logger_name or 'root'}"
-            )
-        except Exception as e:
-            target_logger.debug(f"Failed to attach Azure Monitor handler: {e}")
+    if LoggingHandler is not None:
+        has_azure_handler = any(
+            isinstance(h, LoggingHandler) for h in target_logger.handlers
+        )
+        if not has_azure_handler:
+            try:
+                handler = LoggingHandler(level=logging.INFO)
+                target_logger.addHandler(handler)
+                target_logger.debug(
+                    f"Azure Monitor LoggingHandler attached to logger: {logger_name or 'root'}"
+                )
+            except Exception as e:
+                target_logger.debug(f"Failed to attach Azure Monitor handler: {e}")
 
     # Ensure trace filter is attached
     has_trace_filter = any(isinstance(f, TraceLogFilter) for f in target_logger.filters)
@@ -177,6 +208,9 @@ def set_span_correlation_attributes(
         operation_name: Name of the current operation
         custom_attributes: Additional custom attributes to set
     """
+    if _telemetry_disabled or trace is None:
+        return
+        
     span = trace.get_current_span()
     if not span or not span.is_recording():
         return
@@ -254,8 +288,11 @@ def get_logger(
     is_production = os.environ.get("ENV", "dev").lower() == "prod"
 
     # Ensure Azure Monitor LoggingHandler is attached if not already present
-    has_azure_handler = any(isinstance(h, LoggingHandler) for h in logger.handlers)
-    if not has_azure_handler and os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    has_azure_handler = (
+        LoggingHandler is not None and 
+        any(isinstance(h, LoggingHandler) for h in logger.handlers)
+    )
+    if not has_azure_handler and not _telemetry_disabled and LoggingHandler is not None and os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         try:
             azure_handler = LoggingHandler(level=logging.INFO)
             logger.addHandler(azure_handler)
@@ -289,16 +326,17 @@ def log_function_call(
     def decorator_log_function_call(func):
         @functools.wraps(func)
         def wrapper_log_function_call(*args, **kwargs):
-            from opentelemetry.trace import get_current_span
+            if not _telemetry_disabled and trace is not None:
+                from opentelemetry.trace import get_current_span
 
-            span = get_current_span()
-            if span and span.is_recording():
-                # These values must be passed via kwargs or resolved from context/session manager
-                session_id = kwargs.get("session_id", "-")
-                call_connection_id = kwargs.get("call_connection_id", "-")
+                span = get_current_span()
+                if span and span.is_recording():
+                    # These values must be passed via kwargs or resolved from context/session manager
+                    session_id = kwargs.get("session_id", "-")
+                    call_connection_id = kwargs.get("call_connection_id", "-")
 
-                span.set_attribute("ai.session.id", call_connection_id)
-                span.set_attribute("ai.user.id", session_id)
+                    span.set_attribute("ai.session.id", call_connection_id)
+                    span.set_attribute("ai.user.id", session_id)
 
             logger = get_logger(logger_name)
             func_name = func.__name__

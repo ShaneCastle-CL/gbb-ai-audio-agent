@@ -26,6 +26,16 @@ class HealthResponse(BaseModel):
         description="Additional health details",
         example={"api_version": "v1", "service": "rtagent-backend"},
     )
+    active_sessions: int | None = Field(
+        default=None,
+        description="Current number of active realtime conversation sessions (None if unavailable)",
+        example=3,
+    )
+    session_metrics: Dict[str, Any] | None = Field(
+        default=None,
+        description="Optional granular session metrics (connected/disconnected, etc.)",
+        example={"connected": 5, "disconnected": 2, "active": 3},
+    )
 
     class Config:
         json_schema_extra = {
@@ -35,6 +45,8 @@ class HealthResponse(BaseModel):
                 "timestamp": 1691668800.0,
                 "message": "Real-Time Audio Agent API v1 is running",
                 "details": {"api_version": "v1", "service": "rtagent-backend"},
+                "active_sessions": 3,
+                "session_metrics": {"connected": 5, "disconnected": 2, "active": 3},
             }
         }
 

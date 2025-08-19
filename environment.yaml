@@ -2,7 +2,6 @@ name: audioagent
 channels:
   - conda-forge
   - defaults
-  - jupyter
 dependencies:
   - python=3.11
   - pip

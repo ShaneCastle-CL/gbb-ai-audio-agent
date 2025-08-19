@@ -119,7 +119,7 @@ def _validate_auth_configuration() -> tuple[bool, str]:
 
 
 @router.get(
-    "/",
+    "/health",
     response_model=HealthResponse,
     summary="Basic Health Check",
     description="Basic health check endpoint that returns 200 if the server is running. Used by load balancers for liveness checks.",
@@ -141,16 +141,65 @@ def _validate_auth_configuration() -> tuple[bool, str]:
         }
     },
 )
-async def health_check() -> HealthResponse:
+async def health_check(request: Request) -> HealthResponse:
+    """Basic liveness endpoint.
+
+    Additionally (best-effort) augments response with:
+    - active_sessions: current active realtime conversation sessions
+    - session_metrics: websocket connection metrics snapshot
+    (Failure to gather these must NOT cause liveness failure.)
     """
-    Basic health check endpoint - always returns 200 if server is running.
-    Used by load balancers for basic liveness checks.
-    """
+    active_sessions: int | None = None
+    session_metrics: dict[str, Any] | None = None
+
+    try:
+        # Active sessions
+        session_manager = getattr(request.app.state, "session_manager", None)
+        if session_manager and hasattr(session_manager, "get_session_count"):
+            active_sessions = await session_manager.get_session_count()  # type: ignore[func-returns-value]
+    except Exception:
+        active_sessions = None
+
+    try:
+        # Session metrics snapshot (WebSocket connection metrics)
+        sm = getattr(request.app.state, "session_metrics", None)
+        ws_manager = getattr(request.app.state, "websocket_manager", None)
+        
+        if sm is not None:
+            if hasattr(sm, "get_snapshot"):
+                snap = await sm.get_snapshot()  # type: ignore[func-returns-value]
+            elif isinstance(sm, dict):  # fallback if already a dict
+                snap = sm
+            else:
+                snap = None
+            if isinstance(snap, dict):
+                # Use new metric names for clarity
+                active_connections = snap.get("active_connections", 0)
+                total_connected = snap.get("total_connected", 0) 
+                total_disconnected = snap.get("total_disconnected", 0)
+                
+                # Cross-check with actual WebSocket manager count for accuracy
+                actual_ws_count = 0
+                if ws_manager and hasattr(ws_manager, "get_client_count"):
+                    actual_ws_count = await ws_manager.get_client_count()
+                
+                session_metrics = {
+                    "connected": active_connections,        # Currently active WebSocket connections (from metrics)
+                    "disconnected": total_disconnected,     # Historical total disconnections
+                    "active": active_connections,           # Same as connected (real-time active)
+                    "total_connected": total_connected,     # Historical total connections made
+                    "actual_ws_count": actual_ws_count,     # Real-time count from WebSocket manager (cross-check)
+                }
+    except Exception:
+        session_metrics = None
+
     return HealthResponse(
         status="healthy",
         timestamp=time.time(),
         message="Real-Time Audio Agent API v1 is running",
         details={"api_version": "v1", "service": "rtagent-backend"},
+        active_sessions=active_sessions,
+        session_metrics=session_metrics,
     )
 
 
@@ -262,7 +311,15 @@ async def readiness_check(
                 check_time_ms=round((time.time() - start_time) * 1000, 2),
             )
 
-    # Check Redis connectivity
+    # Pre-compute active session count (thread-safe)
+    active_sessions = 0
+    try:
+        if hasattr(request.app.state, "session_manager"):
+            active_sessions = await request.app.state.session_manager.get_session_count()  # type: ignore[attr-defined]
+    except Exception:
+        active_sessions = -1  # signal error fetching sessions
+
+    # Check Redis connectivity (minimal – no verbose details)
     redis_status = await fast_ping(
         _check_redis_fast, request.app.state.redis, component="redis"
     )
@@ -276,11 +333,11 @@ async def readiness_check(
     )
     health_checks.append(openai_status)
 
-    # Check Speech Services
+    # Check Speech Services (pools)
     speech_status = await fast_ping(
         _check_speech_services_fast,
-        request.app.state.tts_client,
-        request.app.state.stt_client,
+        request.app.state.tts_pool,
+        request.app.state.stt_pool,
         component="speech_services",
     )
     health_checks.append(speech_status)
@@ -345,7 +402,6 @@ async def _check_redis_fast(redis_manager) -> ServiceCheck:
                 component="redis",
                 status="healthy",
                 check_time_ms=round((time.time() - start) * 1000, 2),
-                details="ping successful",
             )
         else:
             return ServiceCheck(
@@ -381,21 +437,43 @@ async def _check_azure_openai_fast(openai_client) -> ServiceCheck:
     )
 
 
-async def _check_speech_services_fast(tts_client, stt_client) -> ServiceCheck:
-    """Fast Speech Services check."""
+async def _check_speech_services_fast(tts_pool, stt_pool) -> ServiceCheck:
+    """Fast Speech Services check using pools.
+
+    Checks that both TTS and STT pools are initialized and ready.
+    """
     start = time.time()
-    if not tts_client or not stt_client:
+    if not tts_pool or not stt_pool:
         return ServiceCheck(
             component="speech_services",
             status="unhealthy",
-            error="not initialized",
+            error="pools not initialized",
             check_time_ms=round((time.time() - start) * 1000, 2),
         )
+    
+    # Check if pools are properly configured
+    try:
+        pool_info = {
+            "tts_pool_size": tts_pool._size,
+            "tts_pool_queue_size": tts_pool._q.qsize(),
+            "tts_pool_ready": tts_pool._ready.is_set(),
+            "stt_pool_size": stt_pool._size,
+            "stt_pool_queue_size": stt_pool._q.qsize(),
+            "stt_pool_ready": stt_pool._ready.is_set(),
+        }
+    except Exception as e:
+        return ServiceCheck(
+            component="speech_services",
+            status="unhealthy", 
+            error=f"pool introspection failed: {e}",
+            check_time_ms=round((time.time() - start) * 1000, 2),
+        )
+
     return ServiceCheck(
         component="speech_services",
         status="healthy",
         check_time_ms=round((time.time() - start) * 1000, 2),
-        details="TTS and STT clients initialized",
+        details=f"pools ready: TTS={pool_info['tts_pool_ready']}, STT={pool_info['stt_pool_ready']}",
     )
 
 

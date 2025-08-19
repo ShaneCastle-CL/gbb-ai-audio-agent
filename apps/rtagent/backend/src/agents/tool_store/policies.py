@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Policy-lookup helper for XYMZ Insurance’s RTAgent.
+Policy-lookup helper for XYMZ Insurance’s ARTAgent.
 
 Given a `policy_id` and a free-form `question`, returns a grounded,
 structured answer drawn from an in-memory mock database.

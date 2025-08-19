@@ -1,63 +1,60 @@
 #!/bin/bash
 
-# Define the path to your Zsh profile
+# Define the path to your shell profiles
 zshrc_path="$HOME/.zshrc"
 bashrc_path="$HOME/.bashrc"
 
+echo "🚀 Setting up development environment..."
+
+# Add local bin to PATH
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$zshrc_path"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$bashrc_path"
 
-cat $HOME/.zshrc
+# Source the current path
 export PATH="$HOME/.local/bin:$PATH"
 
-set -euo pipefail
+echo "📦 Installing Bicep CLI..."
+# Install Bicep CLI
+curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+chmod +x ./bicep
+sudo mv ./bicep /usr/local/bin/bicep
 
-echo "[post-create] Ensuring Python deps via uv..."
-if command -v uv >/dev/null 2>&1; then
-	uv sync || true
-else
-	echo "uv not found; skipping uv sync"
-fi
+echo "🐍 Setting up Python environment with uv..."
+# Sync Python dependencies using uv and pyproject.toml
+uv sync --dev
 
-echo "[post-create] Installing Azure Developer CLI (azd) if missing..."
-if ! command -v azd >/dev/null 2>&1; then
-	curl -fsSL https://aka.ms/install-azd.sh | bash || true
-else
-	echo "azd already installed"
-fi
+echo "🔧 Installing pre-commit hooks..."
+# Install pre-commit hooks
+uv run pre-commit install
 
-echo "[post-create] Ensuring Azure CLI extensions and Bicep..."
-if command -v az >/dev/null 2>&1; then
-	az bicep install || true
-	az bicep upgrade || true
-else
-	echo "Azure CLI not available; Bicep install skipped"
-fi
+echo "✅ Verifying tool installations..."
+# Verify installations
+echo "Azure CLI version:"
+az version --output table 2>/dev/null || echo "❌ Azure CLI not found"
 
-echo "[post-create] Installing Terraform if missing..."
-if ! command -v terraform >/dev/null 2>&1; then
-	TMP_DIR=$(mktemp -d)
-	pushd "$TMP_DIR" >/dev/null
-	# HashiCorp Linux x86_64 latest stable (pin can be added if required)
-	TERRAFORM_VERSION=${TERRAFORM_VERSION:-1.8.5}
-	curl -fsSLO "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
-	sudo unzip -o "terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -d /usr/local/bin
-	popd >/dev/null
-	rm -rf "$TMP_DIR"
-else
-	echo "Terraform already installed: $(terraform version | head -n1)"
-fi
+echo "Terraform version:"
+terraform version 2>/dev/null || echo "❌ Terraform not found"
 
-echo "[post-create] Installing frontend dependencies (React/Vite)..."
-FRONTEND_DIR="/workspaces/gbb-ai-audio-agent-migration-target/apps/rtagent/frontend"
-if [ -d "$FRONTEND_DIR" ]; then
-	pushd "$FRONTEND_DIR" >/dev/null
-	if command -v npm >/dev/null 2>&1; then
-		npm ci || npm install
-	else
-		echo "npm not found; Node feature may have failed to install"
-	fi
-	popd >/dev/null
-fi
+echo "Azure Developer CLI version:"
+azd version 2>/dev/null || echo "❌ Azure Developer CLI not found"
 
-echo "[post-create] Done."
+echo "Bicep version:"
+bicep --version 2>/dev/null || echo "❌ Bicep not found"
+
+echo "Python environment:"
+uv run python --version
+
+echo "🎉 Development environment setup complete!"
+
+# Display helpful commands
+echo ""
+echo "📋 Useful commands:"
+echo "  uv run rtagent                 # Run the application"
+echo "  uv run pytest                 # Run tests"
+echo "  uv run hatch run lint          # Run linting"
+echo "  uv run hatch run format        # Format code"
+echo "  uv run hatch run quality       # Run all quality checks"
+echo "  az login                       # Login to Azure"
+echo "  azd init                       # Initialize Azure Developer CLI"
+echo "  terraform init                 # Initialize Terraform"
+echo "  bicep build main.bicep         # Build Bicep template"

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------
-# RTAgent – Authentication Task Agent
+# ARTAgent – Authentication Task Agent
 # ---------------------------------------------------------------------
 agent:
   name: AuthAgent

@@ -1,8 +1,8 @@
-# RTAgent Voice AI - Data Architecture & Redis Implementation
+# ARTAgent Voice AI - Data Architecture & Redis Implementation
 
 ## Overview
 
-The RTAgent Voice AI Backend employs a sophisticated three-tier data architecture optimized for real-time voice processing at scale. This system provides hierarchical key organization, intelligent caching, and seamless data persistence for Azure Communication Services (ACS) calls and conversation sessions.
+The ARTAgent Voice AI Backend employs a sophisticated three-tier data architecture optimized for real-time voice processing at scale. This system provides hierarchical key organization, intelligent caching, and seamless data persistence for Azure Communication Services (ACS) calls and conversation sessions.
 
 ## Three-Tier Data Architecture
 
