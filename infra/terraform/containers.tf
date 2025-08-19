@@ -41,26 +41,6 @@ resource "azurerm_role_assignment" "acr_backend_pull" {
   principal_id         = azurerm_user_assigned_identity.backend.principal_id
 }
 
-# System-assigned managed identity role assignments for Metrics Publisher
-resource "azurerm_role_assignment" "frontend_metrics_publisher" {
-  scope                = azurerm_application_insights.main.id
-  role_definition_name = "Monitoring Metrics Publisher"
-  principal_id         = azurerm_container_app.frontend.identity[0].principal_id
-  depends_on           = [azurerm_container_app.frontend]
-  lifecycle {
-    ignore_changes = [principal_id]
-  }
-}
-
-resource "azurerm_role_assignment" "backend_metrics_publisher" {
-  scope                = azurerm_application_insights.main.id
-  role_definition_name = "Monitoring Metrics Publisher"
-  principal_id         = azurerm_container_app.backend.identity[0].principal_id
-  depends_on           = [azurerm_container_app.backend]
-  lifecycle {
-    ignore_changes = [principal_id]
-  }
-}
 
 # ============================================================================
 # CONTAINER APPS ENVIRONMENT
