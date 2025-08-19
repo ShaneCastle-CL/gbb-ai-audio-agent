@@ -17,6 +17,8 @@ SCRIPTS_DIR = apps/rtagent/scripts
 set_up_precommit_and_prepush:
 	pre-commit install -t pre-commit
 	pre-commit install -t pre-push
+
+
 # Run all code quality checks (formatting, linting, typing, security, etc.)
 check_code_quality:
 	# Ruff: auto-fix common Python code issues

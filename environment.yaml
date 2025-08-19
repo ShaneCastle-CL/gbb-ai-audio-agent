@@ -2,9 +2,15 @@ name: audioagent
 channels:
   - conda-forge
   - defaults
+  - jupyter
 dependencies:
   - python=3.11
   - pip
   - ipykernel
-  # Note: All Python dependencies are now managed through pyproject.toml
-  # Use 'uv sync' or 'uv sync --dev' to install dependencies
+  - pip:
+    - -r requirements.txt
+    - -r requirements-codequality.txt
+
+  # - pip:
+  #   # Install the local project in editable mode with dev extras
+  #   - -e .[dev]

@@ -20,7 +20,7 @@ Implements the documented three-thread architecture for low-latency voice intera
 - Non-blocking media streaming coordination
 
 """
-
+import os
 import asyncio
 import json
 import threading
@@ -738,8 +738,8 @@ class MainEventLoop:
 
         # Audio processing task tracking
         self.active_audio_tasks: Set[asyncio.Task] = set()
-        self.max_concurrent_audio_tasks = (
-            500  # Increased for real-time audio (500 frames/sec)
+        self.max_concurrent_audio_tasks = int(
+            os.getenv("MAX_CONCURRENT_AUDIO_TASKS", "500")
         )
         self.last_queue_health_log = 0  # Track queue health logging
 
