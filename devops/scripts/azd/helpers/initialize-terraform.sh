@@ -51,7 +51,15 @@ storage_exists() {
     result=$(az storage account show --name "$account" --resource-group "$rg" --query "provisioningState" -o tsv 2>/dev/null)
     log_info "Checked storage account '$account' in resource group '$rg': provisioningState=$result"
     echo "az storage account show --name \"$account\" --resource-group \"$rg\" --query \"provisioningState\" -o tsv"
-    echo "$result" | grep -q "Succeeded"
+    local result
+    result=$(az storage account show --name "$account" --resource-group "$rg" --query "provisioningState" -o tsv 2>/dev/null)
+    if [[ "$result" == "Succeeded" ]]; then
+        log_info "Storage account '$account' in resource group '$rg' exists and is provisioned."
+        return 0
+    else
+        log_info "Storage account '$account' in resource group '$rg' does not exist or is not provisioned (provisioningState=$result)."
+        return 1
+    fi
 }
 
 # Generate unique resource names
