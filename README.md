@@ -286,6 +286,90 @@ make purchase_acs_phone_number_ps
 - **🖥️ Cross-Platform:** Works on Windows, macOS, and Linux
 - **🔄 Resumable:** Failed deployments can be easily retried
 
+## **📚 Documentation**
+
+### **🌟 Beautiful API Documentation**
+
+We've created comprehensive, beautiful documentation using MkDocs Material that automatically generates from our enhanced docstrings:
+
+**🌐 [View Live Documentation](https://pablosalvador10.github.io/gbb-ai-audio-agent/)**
+
+### **📖 What's Included**
+
+- **🚀 Quick Start Guide:** Get up and running in minutes
+- **📋 Complete API Reference:** Auto-generated from docstrings with examples
+- **🏗️ Architecture Overview:** System design and component relationships  
+- **🔧 Configuration Guide:** Detailed setup and deployment options
+- **💡 Examples & Tutorials:** Real-world usage patterns
+- **🔍 Troubleshooting:** Common issues and solutions
+
+### **🛠️ Local Documentation Development**
+
+Build and serve documentation locally:
+
+```bash
+# Linux/macOS
+chmod +x serve-docs.sh
+./serve-docs.sh
+
+# Windows
+serve-docs.bat
+```
+
+This will:
+1. Install documentation dependencies
+2. Build the site with mkdocstrings
+3. Start a local server at `http://127.0.0.1:8000`
+4. Auto-reload when you make changes
+
+### **📝 Documentation Features**
+
+- **📱 Responsive Design:** Beautiful on desktop and mobile
+- **🔍 Full-Text Search:** Find anything instantly
+- **🎨 Syntax Highlighting:** Code examples with copy buttons
+- **🔗 Cross-References:** Navigate between related components
+- **📊 Interactive Examples:** Live code samples you can modify
+
+### **🤖 Auto-Generated API Docs**
+
+Our documentation automatically includes:
+
+#### SpeechSynthesizer
+- Complete method documentation with examples
+- Parameter descriptions and types
+- Return value specifications
+- Error handling patterns
+- Performance considerations
+
+#### StreamingSpeechRecognizer  
+- Real-time recognition capabilities
+- Callback system documentation
+- Language detection features
+- Session management patterns
+
+#### Utility Functions
+- Text processing helpers
+- SSML generation tools
+- Authentication utilities
+
+### **📚 Additional Resources**
+
+| Resource | Description |
+|----------|-------------|
+| [Architecture Guide](docs/Architecture.md) | System design and data flow |
+| [Azure Integration](docs/AzureIntegration.md) | Service dependencies and configuration |
+| [Troubleshooting](docs/Troubleshooting.md) | Common issues and solutions |
+| [Load Testing](docs/LoadTesting.md) | Performance testing guides |
+
+### **🔄 Documentation Deployment**
+
+Documentation automatically deploys to GitHub Pages when you push to `main`:
+
+1. **GitHub Actions** builds the site from your docstrings
+2. **mkdocstrings** extracts API documentation  
+3. **GitHub Pages** hosts the beautiful site
+4. **Auto-updates** whenever code changes
+
 ## **Load & Chaos Testing**
 Worried about the solution’s ability to scale under your application’s load? Here’s a guide to help you with horizontal scaling tests...
 

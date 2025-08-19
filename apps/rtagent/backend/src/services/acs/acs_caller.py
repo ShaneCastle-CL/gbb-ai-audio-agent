@@ -31,7 +31,17 @@ _instance: Optional[AcsCaller] = None
 
 
 def initialize_acs_caller_instance() -> Optional[AcsCaller]:
-    """Create and cache an `AcsCaller` if env vars are set; otherwise return None."""
+    """
+    Initialize and cache Azure Communication Services caller instance for telephony operations.
+
+    This function creates a singleton AcsCaller instance configured with environment
+    variables for outbound calling capabilities. It validates required configuration
+    parameters and constructs appropriate callback and WebSocket URLs for ACS
+    integration with the voice agent system.
+
+    :return: Configured AcsCaller instance if environment variables are properly set, None otherwise.
+    :raises ValueError: If required ACS configuration parameters are missing or invalid.
+    """
     global _instance  # noqa: PLW0603
     if _instance:
         return _instance

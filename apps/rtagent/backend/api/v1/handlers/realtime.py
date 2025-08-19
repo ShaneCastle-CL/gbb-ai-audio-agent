@@ -20,7 +20,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from apps.rtagent.backend.settings import GREETING
 from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_filter
-from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
+from src.tools.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message, send_tts_audio
 from src.postcall.push import build_and_flush
@@ -52,8 +52,8 @@ class V1RealtimeHandler:
         """
         Initialize V1 realtime handler.
 
-        Args:
-            orchestrator: Optional orchestrator for conversation processing.
+        :param orchestrator: Optional orchestrator for conversation processing
+        :type orchestrator: Optional[callable]
         """
         self.orchestrator = orchestrator
         self.logger = get_logger("api.v1.handlers.realtime")
@@ -62,15 +62,19 @@ class V1RealtimeHandler:
         """
         Handle dashboard relay WebSocket connections.
 
-        Args:
-            websocket: WebSocket connection from dashboard client
+        :param websocket: WebSocket connection from dashboard client
+        :type websocket: WebSocket
+        :raises WebSocketDisconnect: When client disconnects
+        :raises Exception: When connection handling fails
         """
         with trace_acs_operation(
             tracer,
             logger,
             "dashboard_relay",
         ) as op:
-            clients: set[WebSocket] = await websocket.app.state.websocket_manager.get_clients_snapshot()
+            clients: set[
+                WebSocket
+            ] = await websocket.app.state.websocket_manager.get_clients_snapshot()
             client_id = str(uuid.uuid4())[:8]
 
             op.log_info(f"Dashboard client connecting: {client_id}")
@@ -123,9 +127,12 @@ class V1RealtimeHandler:
         """
         Handle browser conversation WebSocket with orchestrator support.
 
-        Args:
-            websocket: WebSocket connection from browser client
-            orchestrator: Optional orchestrator for conversation processing
+        :param websocket: WebSocket connection from browser client
+        :type websocket: WebSocket
+        :param orchestrator: Optional orchestrator for conversation processing
+        :type orchestrator: Optional[callable]
+        :raises WebSocketDisconnect: When client disconnects
+        :raises Exception: When conversation handling fails
         """
         # Use provided orchestrator or fallback to instance orchestrator
         active_orchestrator = orchestrator or self.orchestrator
@@ -199,10 +206,10 @@ class V1RealtimeHandler:
                 cm.append_to_history(auth_agent.name, "assistant", GREETING)
 
                 # Broadcast greeting to dashboard with Auth Agent label
-                clients = await websocket.app.state.websocket_manager.get_clients_snapshot()
-                await broadcast_message(
-                    clients, GREETING, "Auth Agent"
+                clients = (
+                    await websocket.app.state.websocket_manager.get_clients_snapshot()
                 )
+                await broadcast_message(clients, GREETING, "Auth Agent")
 
                 # Send greeting audio
                 with trace_acs_dependency(
@@ -228,7 +235,10 @@ class V1RealtimeHandler:
                     if websocket.state.is_synthesizing:
                         try:
                             # Stop per-connection TTS synthesizer if available
-                            if hasattr(websocket.state, "tts_client") and websocket.state.tts_client:
+                            if (
+                                hasattr(websocket.state, "tts_client")
+                                and websocket.state.tts_client
+                            ):
                                 websocket.state.tts_client.stop_speaking()
                             websocket.state.is_synthesizing = False
                             logger.info(
@@ -365,7 +375,10 @@ class V1RealtimeHandler:
                     # Stop TTS
                     try:
                         # Stop per-connection TTS synthesizer if available
-                        if hasattr(websocket.state, "tts_client") and websocket.state.tts_client:
+                        if (
+                            hasattr(websocket.state, "tts_client")
+                            and websocket.state.tts_client
+                        ):
                             websocket.state.tts_client.stop_speaking()
                     except Exception as e:
                         logger.warning(f"Error stopping TTS during cleanup: {e}")
@@ -403,5 +416,12 @@ class V1RealtimeHandler:
 def create_v1_realtime_handler(
     orchestrator: Optional[callable] = None,
 ) -> V1RealtimeHandler:
-    """Factory function for creating V1 realtime handlers."""
+    """
+    Factory function for creating V1 realtime handlers.
+
+    :param orchestrator: Optional orchestrator for conversation processing
+    :type orchestrator: Optional[callable]
+    :return: Configured V1 realtime handler instance
+    :rtype: V1RealtimeHandler
+    """
     return V1RealtimeHandler(orchestrator=orchestrator)

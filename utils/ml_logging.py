@@ -11,7 +11,8 @@ from colorama import init as colorama_init
 # Early .env load to check DISABLE_CLOUD_TELEMETRY before importing any OTel
 try:
     from dotenv import load_dotenv
-    if os.path.isfile('.env'):
+
+    if os.path.isfile(".env"):
         load_dotenv(override=False)
 except Exception:
     pass
@@ -111,7 +112,7 @@ class TraceLogFilter(logging.Filter):
             record.operation_name = "-"
             record.component = "-"
             return True
-            
+
         span = trace.get_current_span()
         context = span.get_span_context() if span else None
         record.trace_id = (
@@ -173,7 +174,7 @@ def set_span_correlation_attributes(
     """
     if _telemetry_disabled or trace is None:
         return
-        
+
     span = trace.get_current_span()
     if not span or not span.is_recording():
         return
@@ -251,11 +252,15 @@ def get_logger(
     is_production = os.environ.get("ENV", "dev").lower() == "prod"
 
     # Ensure Azure Monitor LoggingHandler is attached if not already present
-    has_azure_handler = (
-        LoggingHandler is not None and 
-        any(isinstance(h, LoggingHandler) for h in logger.handlers)
+    has_azure_handler = LoggingHandler is not None and any(
+        isinstance(h, LoggingHandler) for h in logger.handlers
     )
-    if not has_azure_handler and not _telemetry_disabled and LoggingHandler is not None and os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    if (
+        not has_azure_handler
+        and not _telemetry_disabled
+        and LoggingHandler is not None
+        and os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    ):
         try:
             azure_handler = LoggingHandler(level=logging.INFO)
             logger.addHandler(azure_handler)

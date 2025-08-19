@@ -16,6 +16,19 @@ class LatencyTracker:
         )
 
     def summary(self) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate a summary of all latencies collected so far.
+
+        Returns a dictionary with stage names as keys and a sub-dictionary
+        with the following keys:
+
+        - "count": The number of samples collected for this stage.
+        - "avg": The average duration in seconds.
+        - "min": The shortest duration in seconds.
+        - "max": The longest duration in seconds.
+
+        If no samples have been collected for a stage, all values are 0.0.
+        """
         out: Dict[str, Dict[str, float]] = {}
         for stage, samples in self._bucket.items():
             durations = [s["dur"] for s in samples]

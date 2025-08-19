@@ -26,7 +26,17 @@ logger = logging.getLogger(__name__)
 
 
 def create_azure_openai_client():
-    """Create Azure OpenAI client with proper authentication for APIM."""
+    """
+    Create and configure Azure OpenAI client with appropriate authentication method.
+
+    This function establishes an authenticated connection to Azure OpenAI services,
+    supporting both API key authentication for development environments and
+    managed identity authentication for production deployments. The client is
+    configured with the latest API version for optimal feature compatibility.
+
+    :return: Configured AzureOpenAI client instance ready for conversational AI operations.
+    :raises ValueError: If neither API key nor managed identity authentication can be established.
+    """
 
     # Use API key if provided (for development/testing)
     if AZURE_OPENAI_KEY:

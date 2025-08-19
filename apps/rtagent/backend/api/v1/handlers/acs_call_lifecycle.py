@@ -50,7 +50,13 @@ tracer = trace.get_tracer(__name__)
 
 
 def safe_set_span_attributes(span, attributes: dict):
-    """Safely set span attributes without errors."""
+    """
+    Safely set span attributes without errors.
+
+    :param span: OpenTelemetry span instance
+    :param attributes: Dictionary of attributes to set
+    :type attributes: dict
+    """
     try:
         if span and span.is_recording():
             span.set_attributes(attributes)
@@ -65,11 +71,10 @@ def _safe_get_event_data(event: CloudEvent) -> Dict[str, Any]:
     CloudEvent.data can be various types (dict, str, bytes, etc.).
     This function ensures we always get a dictionary we can call .get() on.
 
-    Args:
-        event: CloudEvent object from Azure
-
-    Returns:
-        Dictionary containing event data, empty dict if parsing fails
+    :param event: CloudEvent object from Azure
+    :type event: CloudEvent
+    :return: Dictionary containing event data, empty dict if parsing fails
+    :rtype: Dict[str, Any]
     """
     try:
         data = event.data
@@ -107,13 +112,14 @@ def _get_event_field(event: CloudEvent, field_name: str, default: Any = None) ->
     """
     Safely get a field from CloudEvent data.
 
-    Args:
-        event: CloudEvent object
-        field_name: Name of field to extract
-        default: Default value if field not found
-
-    Returns:
-        Field value or default
+    :param event: CloudEvent object
+    :type event: CloudEvent
+    :param field_name: Name of field to extract
+    :type field_name: str
+    :param default: Default value if field not found
+    :type default: Any
+    :return: Field value or default
+    :rtype: Any
     """
     data = _safe_get_event_data(event)
     return data.get(field_name, default)
@@ -131,7 +137,9 @@ class ACSLifecycleHandler:
     """
 
     def __init__(self):
-        """Initialize ACS lifecycle handler."""
+        """
+        Initialize ACS lifecycle handler.
+        """
         self.logger = get_logger("api.v1.handlers.acs_lifecycle")
 
     async def _emit_call_event(
@@ -144,11 +152,13 @@ class ACSLifecycleHandler:
         """
         Emit a call event through the V1 event system.
 
-        Args:
-            event_type: Type of event to emit
-            call_connection_id: Call connection ID
-            data: Event data
-            redis_mgr: Redis manager for state access
+        :param event_type: Type of event to emit
+        :type event_type: str
+        :param call_connection_id: Call connection ID
+        :type call_connection_id: str
+        :param data: Event data
+        :type data: Dict[str, Any]
+        :param redis_mgr: Redis manager for state access
         """
         try:
             from azure.core.messaging import CloudEvent
@@ -185,14 +195,15 @@ class ACSLifecycleHandler:
         """
         Initiate an outbound call with orchestrator support.
 
-        Args:
-            acs_caller: The ACS caller instance
-            target_number: The phone number to call (E.164 format)
-            redis_mgr: Redis manager instance for state persistence
-            call_id: Optional call ID for tracking (auto-generated if None)
-
-        Returns:
-            Dict containing call initiation result
+        :param acs_caller: The ACS caller instance
+        :param target_number: The phone number to call (E.164 format)
+        :type target_number: str
+        :param redis_mgr: Redis manager instance for state persistence
+        :param call_id: Optional call ID for tracking (auto-generated if None)
+        :type call_id: str
+        :return: Call initiation result
+        :rtype: Dict[str, Any]
+        :raises HTTPException: When ACS caller is not initialized or call fails
         """
 
         if not acs_caller:
@@ -315,12 +326,12 @@ class ACSLifecycleHandler:
         Handles Event Grid subscription validation and incoming calls with
         simplified logic and V1 API migration standards.
 
-        Args:
-            request_body: Event Grid request body containing events
-            acs_caller: The ACS caller instance for call operations
-
-        Returns:
-            JSONResponse with validation response or call acceptance status
+        :param request_body: Event Grid request body containing events
+        :type request_body: Dict[str, Any]
+        :param acs_caller: The ACS caller instance for call operations
+        :return: Validation response or call acceptance status
+        :rtype: JSONResponse
+        :raises HTTPException: When ACS caller is not initialized or processing fails
         """
         if not acs_caller:
             raise HTTPException(503, "ACS Caller not initialised")
@@ -375,7 +386,16 @@ class ACSLifecycleHandler:
     async def _handle_subscription_validation(
         self, event_data: Dict[str, Any], span
     ) -> JSONResponse:
-        """Handle Event Grid subscription validation."""
+        """
+        Handle Event Grid subscription validation.
+
+        :param event_data: Event data containing validation code
+        :type event_data: Dict[str, Any]
+        :param span: OpenTelemetry span for tracing
+        :return: JSON response with validation code
+        :rtype: JSONResponse
+        :raises HTTPException: When validation code is missing
+        """
         validation_code = event_data.get("validationCode")
 
         if not validation_code:
@@ -392,7 +412,17 @@ class ACSLifecycleHandler:
     async def _handle_incoming_call(
         self, event_data: Dict[str, Any], acs_caller, span
     ) -> JSONResponse:
-        """Handle incoming call event."""
+        """
+        Handle incoming call event.
+
+        :param event_data: Event data containing call information
+        :type event_data: Dict[str, Any]
+        :param acs_caller: ACS caller instance for call operations
+        :param span: OpenTelemetry span for tracing
+        :return: JSON response with call acceptance status
+        :rtype: JSONResponse
+        :raises HTTPException: When call context is missing or call answering fails
+        """
         # Extract caller information
         caller_info = event_data.get("from", {})
         caller_id = self._extract_caller_id(caller_info)
@@ -459,7 +489,14 @@ class ACSLifecycleHandler:
         )
 
     def _extract_caller_id(self, caller_info: Dict[str, Any]) -> str:
-        """Extract caller ID from caller information."""
+        """
+        Extract caller ID from caller information.
+
+        :param caller_info: Caller information dictionary
+        :type caller_info: Dict[str, Any]
+        :return: Caller ID string
+        :rtype: str
+        """
         if caller_info.get("kind") == "phoneNumber":
             return caller_info.get("phoneNumber", {}).get("value", "unknown")
         return caller_info.get("rawId", "unknown")
@@ -467,7 +504,15 @@ class ACSLifecycleHandler:
     async def _initialize_call_state(
         self, call_connection_id: str, caller_id: str, acs_caller
     ) -> None:
-        """Initialize conversation state for the call."""
+        """
+        Initialize conversation state for the call.
+
+        :param call_connection_id: ACS call connection identifier
+        :type call_connection_id: str
+        :param caller_id: Caller identification string
+        :type caller_id: str
+        :param acs_caller: ACS caller instance for Redis access
+        """
         try:
             redis_mgr = getattr(acs_caller, "redis_mgr", None)
             if not redis_mgr:
@@ -500,12 +545,11 @@ class ACSLifecycleHandler:
         This method delegates ALL event processing to the events system for
         consistent handling of all ACS webhook events.
 
-        Args:
-            events: List of ACS webhook events to process
-            request: FastAPI request object containing app state dependencies
-
-        Returns:
-            Dict with processing status and metadata
+        :param events: List of ACS webhook events to process
+        :type events: list
+        :param request: FastAPI request object containing app state dependencies
+        :return: Processing status and metadata
+        :rtype: Dict[str, str]
         """
         from ..events import get_call_event_processor, register_default_handlers
         from azure.core.messaging import CloudEvent
@@ -611,12 +655,12 @@ def get_participant_phone(event: CloudEvent, cm: MemoManager) -> Optional[str]:
     """
     Extract participant phone number from event.
 
-    Args:
-        event: CloudEvent containing participant information
-        cm: MemoManager for context access
-
-    Returns:
-        Participant phone number or None if not found
+    :param event: CloudEvent containing participant information
+    :type event: CloudEvent
+    :param cm: MemoManager for context access
+    :type cm: MemoManager
+    :return: Participant phone number or None if not found
+    :rtype: Optional[str]
     """
 
     def digits_tail(s: Optional[str], n: int = 10) -> str:
@@ -662,16 +706,18 @@ def create_enterprise_media_handler(
     """
     Factory function for creating media handlers.
 
-    Args:
-        websocket: WebSocket connection
-        orchestrator: Conversation orchestrator
-        call_connection_id: ACS call connection ID
-        recognizer: Speech recognition client
-        cm: Conversation memory manager
-        session_id: Session identifier
-
-    Returns:
-        Configured ACSMediaHandler instance
+    :param websocket: WebSocket connection
+    :param orchestrator: Conversation orchestrator
+    :type orchestrator: callable
+    :param call_connection_id: ACS call connection ID
+    :type call_connection_id: str
+    :param recognizer: Speech recognition client
+    :param cm: Conversation memory manager
+    :type cm: MemoManager
+    :param session_id: Session identifier
+    :type session_id: str
+    :return: Configured ACSMediaHandler instance
+    :rtype: ACSMediaHandler
     """
     if orchestrator is None:
         orchestrator = get_orchestrator()

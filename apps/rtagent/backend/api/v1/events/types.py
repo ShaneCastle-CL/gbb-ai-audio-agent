@@ -30,7 +30,12 @@ class CallEventContext:
     clients: Optional[list] = None
 
     def get_event_data(self) -> Dict[str, Any]:
-        """Safely extract event data as dictionary."""
+        """
+        Safely extract event data as dictionary.
+
+        :return: Event data as dictionary
+        :rtype: Dict[str, Any]
+        """
         try:
             data = self.event.data
             if isinstance(data, dict):
@@ -51,7 +56,16 @@ class CallEventContext:
             return {}
 
     def get_event_field(self, field_name: str, default: Any = None) -> Any:
-        """Safely get a field from event data."""
+        """
+        Safely get a field from event data.
+
+        :param field_name: Name of the field to extract from event data
+        :type field_name: str
+        :param default: Default value to return if field not found
+        :type default: Any
+        :return: Field value or default if not found
+        :rtype: Any
+        """
         return self.get_event_data().get(field_name, default)
 
 
@@ -60,7 +74,12 @@ class CallEventHandler(Protocol):
     """Protocol for call event handlers following Azure Event Processor pattern."""
 
     async def __call__(self, context: CallEventContext) -> None:
-        """Handle a call event with the given context."""
+        """
+        Handle a call event with the given context.
+
+        :param context: Call event context containing event details and dependencies
+        :type context: CallEventContext
+        """
         ...
 
 
