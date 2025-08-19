@@ -6,7 +6,6 @@ and controllable retries.
 Public API
 ----------
 process_gpt_response() – Stream completions, emit TTS chunks, run tools.
-
 """
 
 import asyncio
@@ -49,10 +48,7 @@ from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
 from apps.rtagent.backend.src.utils.tracing import (
     create_service_handler_attrs,
-from apps.rtagent.backend.src.utils.tracing_utils import (
-    create_service_dependency_attrs,
-    create_service_handler_attrs,
-)
+    create_service_dependency_attrs)
 from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
 
@@ -62,7 +58,7 @@ if TYPE_CHECKING:  # pragma: no cover – typing-only import
 # ---------------------------------------------------------------------------
 # Logging / Tracing
 # ---------------------------------------------------------------------------
-logger = get_logger("gpt_flow")
+logger = get_logger("orchestration.gpt_flow")
 tracer = trace.get_tracer(__name__)
 
 _GPT_FLOW_TRACING = os.getenv("GPT_FLOW_TRACING", "true").lower() == "true"
@@ -132,9 +128,6 @@ def _extract_headers(container: Any) -> Dict[str, str]:
     """
     Best-effort header extraction from various SDK response/exception shapes.
 
-    The OpenAI Python SDK (incl. Azure flavor) may surface headers on different
-    attributes depending on streaming vs. non-streaming and version.
-
     We try the following in order:
       - container.headers
       - container.response.headers
@@ -146,26 +139,32 @@ def _extract_headers(container: Any) -> Dict[str, str]:
 
     if hasattr(container, "headers") and isinstance(container.headers, dict):
         headers = container.headers
+        logger.debug("Headers found directly on container", extra={"header_source": "direct", "event_type": "header_extraction"})
 
     if headers is None:
         for attr in cand_attrs:
             obj = getattr(container, attr, None)
             if obj is None:
                 continue
-            # Response-like object with 'headers' property
             maybe = getattr(obj, "headers", None)
             if isinstance(maybe, dict):
                 headers = maybe
+                logger.debug("Headers found via %s", attr, extra={"header_source": attr, "event_type": "header_extraction"})
                 break
-            # Some SDK impl: headers() method
             if callable(getattr(obj, "headers", None)):
                 try:
                     h = obj.headers()
                     if isinstance(h, dict):
                         headers = h
+                        logger.debug("Headers found via %s.headers() method", attr, extra={"header_source": f"{attr}.headers()", "event_type": "header_extraction"})
                         break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to call %s.headers(): %s", attr, e, extra={"header_source": f"{attr}.headers()", "error": str(e), "event_type": "header_extraction_error"})
+
+    if headers is None:
+        logger.warning("No headers could be extracted from container", extra={"container_type": type(container).__name__, "event_type": "header_extraction_failed"})
+    else:
+        logger.debug("Successfully extracted %d headers", len(headers), extra={"header_count": len(headers), "event_type": "header_extraction_success"})
 
     return headers or {}
 
@@ -173,10 +172,7 @@ def _extract_headers(container: Any) -> Dict[str, str]:
 def _rate_limit_from_headers(headers: Dict[str, str]) -> RateLimitInfo:
     """
     Parse AOAI rate-limit and tracing headers into RateLimitInfo.
-
-    Handles both Azure-prefixed and standard OpenAI headers where possible.
     """
-    # Normalize keys to lowercase for robust lookup
     h = {k.lower(): v for k, v in headers.items()}
 
     info = RateLimitInfo(
@@ -217,6 +213,19 @@ def _log_rate_limit(prefix: str, info: RateLimitInfo) -> None:
         info.reset_requests,
         info.reset_tokens,
         info.retry_after,
+        extra={
+            "aoai_request_id": info.request_id,
+            "aoai_region": info.region,
+            "aoai_remaining_requests": info.remaining_requests,
+            "aoai_remaining_tokens": info.remaining_tokens,
+            "aoai_limit_requests": info.limit_requests,
+            "aoai_limit_tokens": info.limit_tokens,
+            "aoai_reset_requests": info.reset_requests,
+            "aoai_reset_tokens": info.reset_tokens,
+            "aoai_retry_after": info.retry_after,
+            "event_type": "rate_limit_status",
+            "prefix": prefix
+        }
     )
 
 
@@ -256,6 +265,89 @@ def _inspect_client_retry_settings() -> None:
         logger.info("AOAI SDK retry: max_retries=%s transport=%s", max_retries, type(transport).__name__ if transport else None)
     except Exception:
         logger.debug("Unable to introspect SDK retry settings")
+
+
+# ---------------------------------------------------------------------------
+# Latency tool helpers (No-ops if ws.state.lt is missing)
+# ---------------------------------------------------------------------------
+class _NoOpLatency:
+    def start(self, *_args, **_kwargs):
+        return None
+
+    def stop(self, *_args, **_kwargs):
+        return None
+
+    def mark(self, *_args, **_kwargs):
+        return None
+
+
+def _lt(ws: WebSocket):
+    try:
+        return getattr(ws.state, "lt", _NoOpLatency())
+    except Exception:
+        return _NoOpLatency()
+
+
+def _log_latency_stop(name: str, dur: Any) -> None:
+    try:
+        if isinstance(dur, (int, float)):
+            logger.info("[Latency] %s: %.3f ms", name, float(dur))
+        else:
+            logger.info("[Latency] %s stopped", name)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Error helpers (status + header summary for logs)
+# ---------------------------------------------------------------------------
+def _extract_status_from_exc(exc: Exception) -> Optional[int]:
+    for attr in ("status", "status_code", "http_status", "statusCode"):
+        try:
+            v = getattr(exc, attr, None)
+            if isinstance(v, int):
+                return v
+        except Exception:
+            pass
+    for attr in ("response", "http_response", "_response"):
+        try:
+            obj = getattr(exc, attr, None)
+            if obj is None:
+                continue
+            v = getattr(obj, "status_code", None)
+            if isinstance(v, int):
+                return v
+            v = getattr(obj, "status", None)
+            if isinstance(v, int):
+                return v
+        except Exception:
+            pass
+    try:
+        s = str(exc)
+        for token in ("429", "500", "502", "503", "504", "400", "401", "403", "404"):
+            if token in s:
+                return int(token)
+    except Exception:
+        pass
+    return None
+
+
+def _summarize_headers(headers: Dict[str, str]) -> str:
+    keys = [
+        "x-request-id",
+        "x-ms-request-id",
+        "x-ms-region",
+        "x-ratelimit-remaining-requests",
+        "x-ratelimit-remaining-tokens",
+        "x-ratelimit-limit-requests",
+        "x-ratelimit-limit-tokens",
+        "x-ratelimit-reset-requests",
+        "x-ratelimit-reset-tokens",
+        "retry-after",
+    ]
+    low = {k.lower(): v for k, v in headers.items()}
+    pick = {k: low.get(k) for k in keys if low.get(k) is not None}
+    return json.dumps(pick)
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +444,7 @@ async def _emit_streaming_text(
                     await send_response_to_acs(
                         ws,
                         text,
-                        latency_tool=ws.state.lt,
+                        latency_tool=_lt(ws),
                         voice_name=voice_name,
                         voice_style=voice_style,
                         rate=voice_rate,
@@ -362,7 +454,7 @@ async def _emit_streaming_text(
                     await send_tts_audio(
                         text,
                         ws,
-                        latency_tool=ws.state.lt,
+                        latency_tool=_lt(ws),
                         voice_name=voice_name,
                         voice_style=voice_style,
                         rate=voice_rate,
@@ -387,7 +479,7 @@ async def _emit_streaming_text(
             await send_response_to_acs(
                 ws,
                 text,
-                latency_tool=ws.state.lt,
+                latency_tool=_lt(ws),
                 voice_name=voice_name,
                 voice_style=voice_style,
                 rate=voice_rate,
@@ -396,7 +488,7 @@ async def _emit_streaming_text(
             await send_tts_audio(
                 text,
                 ws,
-                latency_tool=ws.state.lt,
+                latency_tool=_lt(ws),
                 voice_name=voice_name,
                 voice_style=voice_style,
                 rate=voice_rate,
@@ -493,12 +585,6 @@ async def _openai_stream_with_retry(
 
     We try the SDK's streaming-response context (if present) to access headers.
     Falls back to normal `.create(**kwargs)`.
-
-    :param chat_kwargs: Arguments for chat.completions.create.
-    :param model_id: AOAI deployment ID (for logs/metrics).
-    :param dep_span: Active OTEL span to annotate with attributes/events.
-    :return: (response_stream_iterable, RateLimitInfo from initial response)
-    :raises: Propagates the last exception after exhausting retries.
     """
     _inspect_client_retry_settings()
 
@@ -506,18 +592,40 @@ async def _openai_stream_with_retry(
     last_info = RateLimitInfo()
     aoai_host = urlparse(AZURE_OPENAI_ENDPOINT).netloc or "api.openai.azure.com"
 
+    logger.info(
+        "Starting AOAI stream request: model=%s host=%s max_attempts=%d",
+        model_id,
+        aoai_host,
+        AOAI_RETRY_MAX_ATTEMPTS,
+        extra={
+            "model_id": model_id,
+            "aoai_host": aoai_host,
+            "max_attempts": AOAI_RETRY_MAX_ATTEMPTS,
+            "event_type": "aoai_stream_start"
+        }
+    )
+
     while True:
         attempts += 1
+        logger.info(
+            "AOAI stream attempt %d/%d",
+            attempts,
+            AOAI_RETRY_MAX_ATTEMPTS,
+            extra={
+                "attempt": attempts,
+                "max_attempts": AOAI_RETRY_MAX_ATTEMPTS,
+                "event_type": "aoai_stream_attempt"
+            }
+        )
+
         try:
-            # Prefer SDK's "with_streaming_response" when available
             with_stream_ctx = getattr(
                 az_openai_client.chat.completions, "with_streaming_response", None
             )
 
             if callable(with_stream_ctx):
-                # Newer SDKs
+                logger.debug("Using with_streaming_response context manager", extra={"sdk_method": "with_streaming_response", "event_type": "aoai_sdk_method"})
                 ctx = with_stream_ctx.create(**chat_kwargs)
-                # Context manager yields an object with http_response / headers
                 with ctx as resp_ctx:
                     headers = _extract_headers(resp_ctx)
                     last_info = _rate_limit_from_headers(headers)
@@ -525,37 +633,60 @@ async def _openai_stream_with_retry(
                     _set_span_rate_limit(dep_span, last_info)
                     dep_span.add_event("openai_stream_started", {"attempt": attempts})
 
+                    logger.info(
+                        "AOAI stream successful on attempt %d",
+                        attempts,
+                        extra={
+                            "attempt": attempts,
+                            "success": True,
+                            "event_type": "aoai_stream_success"
+                        }
+                    )
+
                     response_stream = resp_ctx
                     return response_stream, last_info
             else:
-                # Older SDKs – create returns an iterable stream; headers not exposed here
+                logger.debug("Using direct create method (older SDK)", extra={"sdk_method": "direct_create", "event_type": "aoai_sdk_method"})
                 response_stream = az_openai_client.chat.completions.create(**chat_kwargs)
                 dep_span.add_event("openai_stream_started", {"attempt": attempts})
-                # We may not have headers until an error; keep last_info default.
+                logger.info(
+                    "AOAI stream successful on attempt %d (no headers available)",
+                    attempts,
+                    extra={
+                        "attempt": attempts,
+                        "success": True,
+                        "headers_available": False,
+                        "event_type": "aoai_stream_success"
+                    }
+                )
                 return response_stream, last_info
 
         except Exception as exc:  # noqa: BLE001
-            # Attempt to parse headers from the exception for visibility
-            try:
-                headers = _extract_headers(exc)
-                last_info = _rate_limit_from_headers(headers)
-                _log_rate_limit("AOAI error", last_info)
-                _set_span_rate_limit(dep_span, last_info)
-            except Exception:
-                pass
+            # Try to log status + request-id + header snapshot every time (incl. 429)
+            headers = _extract_headers(exc)
+            last_info = _rate_limit_from_headers(headers)
+            status = _extract_status_from_exc(exc)
+
+            logger.error(
+                "AOAI stream error attempt=%s/%s status=%s req_id=%s retry_after=%s headers=%s exc=%s",
+                attempts,
+                AOAI_RETRY_MAX_ATTEMPTS,
+                status,
+                last_info.request_id,
+                last_info.retry_after,
+                _summarize_headers({k.lower(): v for k, v in headers.items()}),
+                repr(exc),
+                extra={"http_status": status, "aoai_request_id": last_info.request_id, "event_type": "aoai_stream_error"}
+            )
+
+            _log_rate_limit("AOAI error", last_info)
+            _set_span_rate_limit(dep_span, last_info)
 
             # Decide on retry
             should_retry, reason = _should_retry(exc)
             dep_span.add_event(
                 "openai_stream_exception",
-                {"attempt": attempts, "retry": should_retry, "reason": reason},
-            )
-            logger.warning(
-                "AOAI stream failed (attempt %s/%s) %s – %s",
-                attempts,
-                AOAI_RETRY_MAX_ATTEMPTS,
-                type(exc).__name__,
-                reason,
+                {"attempt": attempts, "retry": should_retry, "reason": reason, "status": status},
             )
 
             if not should_retry or attempts >= AOAI_RETRY_MAX_ATTEMPTS:
@@ -565,6 +696,11 @@ async def _openai_stream_with_retry(
 
             delay = _compute_delay(last_info, attempts)
             dep_span.set_attribute("retry.delay_sec", delay)
+            logger.info(
+                "Retrying AOAI stream in %.2f seconds (attempt %d/%d)",
+                delay, attempts, AOAI_RETRY_MAX_ATTEMPTS,
+                extra={"delay_seconds": delay, "attempt": attempts, "event_type": "aoai_stream_retry_delay"}
+            )
             await asyncio.sleep(delay)
 
 
@@ -577,7 +713,17 @@ def _should_retry(exc: Exception) -> Tuple[bool, str]:
     name = type(exc).__name__.lower()
     msg = str(exc).lower()
 
-    # OpenAI/HTTP transient classes (be permissive without importing SDK types)
+    logger.error(
+        "AOAI Exception Analysis: type=%s message='%s'",
+        type(exc).__name__,
+        str(exc)[:200],
+        extra={
+            "exception_type": type(exc).__name__,
+            "exception_message": str(exc),
+            "event_type": "aoai_exception_analysis"
+        }
+    )
+
     retryable_names = (
         "ratelimit", "timeout", "apitimeout", "serviceunavailable",
         "apierror", "apistatuserror", "httpresponseerror", "httpserror",
@@ -586,7 +732,6 @@ def _should_retry(exc: Exception) -> Tuple[bool, str]:
     if any(k in name for k in retryable_names) or any(k in msg for k in retryable_names):
         return True, f"retryable:{name}"
 
-    # Fallback on HTTP codes embedded in message text
     for code in ("429", "502", "503", "504"):
         if code in msg:
             return True, f"http:{code}"
@@ -631,8 +776,25 @@ async def _consume_openai_stream(
     final_chunks: List[str] = []
     tool = _ToolCallState()
 
-    # Both ctx and plain iterator support iteration over chunks
+    # TTFB ends on first delta; then we time the stream consume
+    lt = _lt(ws)
+    first_seen = False
+    consume_started = False
+
     for chunk in response_stream:
+        if not first_seen:
+            first_seen = True
+            try:
+                dur = lt.stop("aoai:ttfb")
+                _log_latency_stop("aoai:ttfb", dur)
+            except Exception:
+                pass
+            try:
+                lt.start("aoai:consume")
+                consume_started = True
+            except Exception:
+                consume_started = False
+
         if not getattr(chunk, "choices", None):
             continue
         delta = chunk.choices[0].delta
@@ -667,6 +829,13 @@ async def _consume_openai_stream(
                 pending, ws, is_acs, cm, call_connection_id, session_id
             )
             final_chunks.append(pending)
+
+    if consume_started:
+        try:
+            dur = lt.stop("aoai:consume")
+            _log_latency_stop("aoai:consume", dur)
+        except Exception:
+            pass
 
     return "".join(final_chunks).strip(), tool
 
@@ -716,6 +885,24 @@ async def process_gpt_response(  # noqa: PLR0913
     agent_history.append({"role": "user", "content": user_prompt})
     tool_set = available_tools or DEFAULT_TOOLS
 
+    logger.info(
+        "Starting GPT response processing: agent=%s model=%s prompt_len=%d tools=%d",
+        agent_name,
+        model_id,
+        len(user_prompt) if user_prompt else 0,
+        len(tool_set),
+        extra={
+            "agent_name": agent_name,
+            "model_id": model_id,
+            "prompt_length": len(user_prompt) if user_prompt else 0,
+            "tools_count": len(tool_set),
+            "is_acs": is_acs,
+            "call_connection_id": call_connection_id,
+            "session_id": session_id,
+            "event_type": "gpt_flow_start"
+        }
+    )
+
     # Create handler span for GPT flow service
     span_attrs = create_service_handler_attrs(
         service_name="gpt_flow",
@@ -759,6 +946,13 @@ async def process_gpt_response(  # noqa: PLR0913
         tool_state = _ToolCallState()
         last_rate_info = RateLimitInfo()
 
+        lt = _lt(ws)
+        # Total timer for AOAI path
+        try:
+            lt.start("aoai:total")
+        except Exception:
+            pass
+
         try:
             with tracer.start_as_current_span(
                 "gpt_flow.stream_completion",
@@ -778,6 +972,12 @@ async def process_gpt_response(  # noqa: PLR0913
                     "retry.jitter": AOAI_RETRY_JITTER_SEC,
                 },
             ) as dep_span:
+                # Start TTFB just before issuing the stream call
+                try:
+                    lt.start("aoai:ttfb")
+                except Exception:
+                    pass
+
                 response_stream, last_rate_info = await _openai_stream_with_retry(
                     chat_kwargs, model_id=model_id, dep_span=dep_span
                 )
@@ -792,10 +992,46 @@ async def process_gpt_response(  # noqa: PLR0913
                     dep_span.set_attribute("tool_name", tool_state.name)
 
         except Exception as exc:  # noqa: BLE001
+            # Ensure timers stop on all error paths
+            try:
+                dur = lt.stop("aoai:ttfb")
+                _log_latency_stop("aoai:ttfb", dur)
+            except Exception:
+                pass
+            try:
+                dur = lt.stop("aoai:consume")
+                _log_latency_stop("aoai:consume", dur)
+            except Exception:
+                pass
+            try:
+                dur = lt.stop("aoai:total")
+                _log_latency_stop("aoai:total", dur)
+            except Exception:
+                pass
+
             _log_rate_limit("AOAI final failure", last_rate_info)
             span.record_exception(exc)
-            logger.exception("AOAI streaming failed")
+
+            # Extra explicit error log incl. 429, request-id, headers
+            headers = _extract_headers(exc)
+            info = _rate_limit_from_headers(headers)
+            status = _extract_status_from_exc(exc)
+            logger.error(
+                "AOAI streaming failed status=%s req_id=%s headers=%s exc=%s",
+                status,
+                info.request_id,
+                _summarize_headers({k.lower(): v for k, v in headers.items()}),
+                repr(exc),
+                extra={"http_status": status, "aoai_request_id": info.request_id, "event_type": "gpt_flow_failure"}
+            )
             raise
+
+        finally:
+            try:
+                dur = lt.stop("aoai:total")
+                _log_latency_stop("aoai:total", dur)
+            except Exception:
+                pass
 
         # Finalize assistant text
         if full_text:
@@ -897,6 +1133,21 @@ async def _handle_tool_call(  # noqa: PLR0913
     :return: Parsed result dictionary from the tool execution.
     :raises ValueError: If tool_name does not exist in function_mapping.
     """
+    logger.info(
+        "Starting tool execution: tool=%s id=%s args_len=%d",
+        tool_name,
+        tool_id,
+        len(args) if args else 0,
+        extra={
+            "tool_name": tool_name,
+            "tool_id": tool_id,
+            "args_length": len(args) if args else 0,
+            "agent_name": agent_name,
+            "is_acs": is_acs,
+            "event_type": "tool_execution_start"
+        }
+    )
+
     with create_trace_context(
         name="gpt_flow.handle_tool_call",
         call_connection_id=call_connection_id,
@@ -913,6 +1164,15 @@ async def _handle_tool_call(  # noqa: PLR0913
         fn = function_mapping.get(tool_name)
         if fn is None:
             trace_ctx.set_attribute("error", f"Unknown tool '{tool_name}'")
+            logger.error(
+                "Unknown tool requested: %s",
+                tool_name,
+                extra={
+                    "tool_name": tool_name,
+                    "available_tools": list(function_mapping.keys() ),
+                    "event_type": "tool_execution_error"
+                }
+            )
             raise ValueError(f"Unknown tool '{tool_name}'")
 
         trace_ctx.set_attribute("tool.parameters_count", len(params))
@@ -929,16 +1189,52 @@ async def _handle_tool_call(  # noqa: PLR0913
             metadata={"tool_name": tool_name, "call_id": call_short_id, "parameters": params},
         ) as exec_ctx:
             t0 = time.perf_counter()
-            result_raw = await fn(params)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
+            try:
+                result_raw = await fn(params)
+                elapsed_ms = (time.perf_counter() - t0) * 1000
 
-            exec_ctx.set_attribute("execution.duration_ms", elapsed_ms)
-            exec_ctx.set_attribute("execution.success", True)
+                exec_ctx.set_attribute("execution.duration_ms", elapsed_ms)
+                exec_ctx.set_attribute("execution.success", True)
 
-            result: JSONDict = (
-                json.loads(result_raw) if isinstance(result_raw, str) else result_raw
-            )
-            exec_ctx.set_attribute("result.type", type(result).__name__)
+                result: JSONDict = (
+                    json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+                )
+                exec_ctx.set_attribute("result.type", type(result).__name__)
+
+                logger.info(
+                    "Tool execution successful: tool=%s duration=%.2fms result_type=%s",
+                    tool_name,
+                    elapsed_ms,
+                    type(result).__name__,
+                    extra={
+                        "tool_name": tool_name,
+                        "execution_duration_ms": elapsed_ms,
+                        "result_type": type(result).__name__,
+                        "success": True,
+                        "event_type": "tool_execution_success"
+                    }
+                )
+            except Exception as tool_exc:
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                exec_ctx.set_attribute("execution.duration_ms", elapsed_ms)
+                exec_ctx.set_attribute("execution.success", False)
+                exec_ctx.record_exception(tool_exc)
+
+                logger.error(
+                    "Tool execution failed: tool=%s duration=%.2fms error=%s",
+                    tool_name,
+                    elapsed_ms,
+                    str(tool_exc),
+                    extra={
+                        "tool_name": tool_name,
+                        "execution_duration_ms": elapsed_ms,
+                        "error_type": type(tool_exc).__name__,
+                        "error_message": str(tool_exc),
+                        "success": False,
+                        "event_type": "tool_execution_error"
+                    }
+                )
+                raise
 
         agent_history = cm.get_history(agent_name)
         agent_history.append(
@@ -963,6 +1259,12 @@ async def _handle_tool_call(  # noqa: PLR0913
 
         if is_acs:
             await _broadcast_dashboard(ws, cm, f"🛠️ {tool_name} ✔️", include_autoauth=False)
+
+        logger.info(
+            "Starting tool follow-up: tool=%s",
+            tool_name,
+            extra={"tool_name": tool_name, "event_type": "tool_followup_start"}
+        )
 
         trace_ctx.add_event("starting_tool_followup")
         await _process_tool_followup(

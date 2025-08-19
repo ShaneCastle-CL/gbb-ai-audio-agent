@@ -20,7 +20,7 @@ from fastapi import WebSocket
 from fastapi.websockets import WebSocketState
 
 from apps.rtagent.backend.settings import ACS_STREAMING_MODE, GREETING_VOICE_TTS
-from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
+from src.tools.latency_tool import LatencyTool
 from apps.rtagent.backend.src.services.acs.acs_helpers import (
     broadcast_message,
     play_response_with_queue,
@@ -31,6 +31,38 @@ from src.stateful.state_managment import MemoManager
 from utils.ml_logging import get_logger
 
 logger = get_logger("shared_ws")
+
+
+# ------- small internal helpers (no API change) --------------------------------
+def _lt_get_run_id(ws: WebSocket, lt: Optional[LatencyTool]) -> Optional[str]:
+    """Try to get the current run_id from LatencyTool or CoreMemory (if available)."""
+    try:
+        if lt and hasattr(lt, "get_current_run") and callable(lt.get_current_run):
+            rid = lt.get_current_run()
+            if rid:
+                return rid
+    except Exception:
+        pass
+    try:
+        cm = getattr(ws.state, "cm", None)
+        if cm:
+            return cm.get_value_from_corememory("current_run_id", None)
+    except Exception:
+        pass
+    return None
+
+
+def _lt_stop(lt: Optional[LatencyTool], stage: str, ws: WebSocket, meta: Optional[dict] = None):
+    """Stop a latency stage with optional meta, falling back if the tool doesn't support it."""
+    if not lt:
+        return
+    try:
+        return lt.stop(stage, ws.app.state.redis, meta=meta or {})
+    except TypeError:
+        # older LatencyTool that doesn't accept meta
+        return lt.stop(stage, ws.app.state.redis)
+    except Exception as e:
+        logger.error("Latency stop error for stage %s: %s", stage, e)
 
 
 async def send_tts_audio(
@@ -70,9 +102,18 @@ async def send_tts_audio(
         logger.warning("Empty text provided for TTS synthesis")
         return
 
+    # Prepare metadata for latency samples
+    run_id = _lt_get_run_id(ws, latency_tool)
+    style = voice_style or "chat"
+    eff_rate = rate or "+3%"
+    voice_to_use = voice_name or GREETING_VOICE_TTS
+
     if latency_tool:
-        latency_tool.start("tts")
-        latency_tool.start("tts:synthesis")
+        try:
+            latency_tool.start("tts")
+            latency_tool.start("tts:synthesis")
+        except Exception as e:
+            logger.error("Latency start error (browser tts): %s", e)
 
     # Get per-connection TTS synthesizer or acquire one temporarily
     synth = None
@@ -85,14 +126,11 @@ async def send_tts_audio(
             synth = await ws.app.state.tts_pool.acquire()
             temp_synth = True
             logger.warning(
-                f"Temporarily acquired TTS synthesizer from pool - session should have its own"
+                "Temporarily acquired TTS synthesizer from pool - session should have its own"
             )
 
         # Per-connection flag lives on ws.state (was already) – keep isolated
         ws.state.is_synthesizing = True  # type: ignore[attr-defined]
-        style = voice_style or "chat"
-        eff_rate = rate or "+3%"
-        voice_to_use = voice_name or GREETING_VOICE_TTS
 
         logger.debug(
             "tts.start voice=%s style=%s rate=%s text_preview=%r",
@@ -111,8 +149,12 @@ async def send_tts_audio(
             rate=eff_rate,
         )
 
-        if latency_tool:
-            latency_tool.stop("tts:synthesis", ws.app.state.redis)
+        _lt_stop(
+            latency_tool,
+            "tts:synthesis",
+            ws,
+            meta={"run_id": run_id, "mode": "browser", "voice": voice_to_use, "style": style, "rate": eff_rate},
+        )
 
         frames = SpeechSynthesizer.split_pcm_to_base64_frames(
             pcm_bytes, sample_rate=48000
@@ -126,6 +168,13 @@ async def send_tts_audio(
         except Exception:
             pass
         logger.debug("tts.frames_prepared count=%d", len(frames))
+
+        # Optional: track sending loop as a sub-stage
+        if latency_tool:
+            try:
+                latency_tool.start("tts:send_frames")
+            except Exception:
+                pass
 
         for i, frame in enumerate(frames):
             if ws.client_state != WebSocketState.CONNECTED:
@@ -145,16 +194,25 @@ async def send_tts_audio(
             except Exception as e:
                 logger.error(f"Failed to send audio frame {i}: {e}")
                 break
+
+        _lt_stop(
+            latency_tool,
+            "tts:send_frames",
+            ws,
+            meta={"run_id": run_id, "mode": "browser", "frames": len(frames)},
+        )
+
         logger.debug("tts.complete success=True frames_sent=%d", len(frames))
 
     except Exception as e:
         logger.error(f"TTS synthesis failed: {e}")
-        if latency_tool:
-            # Ensure synthesis sub-span is closed if failure before stop
-            try:
-                latency_tool.stop("tts:synthesis", ws.app.state.redis)
-            except Exception:
-                pass
+        # Ensure synthesis sub-stage is closed if we failed before stopping it
+        _lt_stop(
+            latency_tool,
+            "tts:synthesis",
+            ws,
+            meta={"run_id": run_id, "mode": "browser", "error": str(e)},
+        )
         try:
             await ws.send_json(
                 {
@@ -166,11 +224,12 @@ async def send_tts_audio(
         except Exception as send_error:
             logger.error(f"Failed to send error message to frontend: {send_error}")
     finally:
-        if latency_tool:
-            try:
-                latency_tool.stop("tts", ws.app.state.redis)
-            except Exception:
-                pass
+        _lt_stop(
+            latency_tool,
+            "tts",
+            ws,
+            meta={"run_id": run_id, "mode": "browser", "voice": voice_to_use},
+        )
         try:
             ws.state.is_synthesizing = False  # type: ignore[attr-defined]
         except Exception:
@@ -222,13 +281,26 @@ async def send_response_to_acs(
     :raises RuntimeError: When TTS synthesis fails or times out, or ACS caller not initialized
     """
 
+    # Prepare meta
+    run_id = _lt_get_run_id(ws, latency_tool)
+    style = voice_style or "chat"
+    eff_rate = rate or "+3%"
+    voice_to_use = voice_name or GREETING_VOICE_TTS
+
     if latency_tool:
-        latency_tool.start("tts")
-        latency_tool.start("tts:synthesis")
+        try:
+            latency_tool.start("tts")
+            latency_tool.start("tts:synthesis")
+        except Exception as e:
+            logger.error("Latency start error (ACS tts): %s", e)
 
     async def stop_latency(task):
-        if latency_tool:
-            latency_tool.stop("tts", ws.app.state.redis)
+        _lt_stop(
+            latency_tool,
+            "tts",
+            ws,
+            meta={"run_id": run_id, "mode": "acs", "voice": voice_to_use},
+        )
         # tts_tasks is per-connection; keep on ws.state
         if hasattr(ws.state, "tts_tasks"):
             ws.state.tts_tasks.discard(task)
@@ -245,36 +317,52 @@ async def send_response_to_acs(
                 synth = await ws.app.state.tts_pool.acquire()
                 temp_synth = True
                 logger.warning(
-                    f"ACS MEDIA: Temporarily acquired TTS synthesizer from pool - session should have its own"
+                    "ACS MEDIA: Temporarily acquired TTS synthesizer from pool - session should have its own"
                 )
 
-            # Use agent voice if provided, otherwise fallback to default
-            voice_to_use = voice_name or GREETING_VOICE_TTS
-
-            # Add timeout and retry logic for TTS synthesis
+            # Add timeout and retry logic for TTS synthesis (if your synth supports it externally)
             pcm_bytes = synth.synthesize_to_pcm(
                 text=text,
                 voice=voice_to_use,
                 sample_rate=16000,
-                style=voice_style or "chat",
-                rate=rate or "+3%",
+                style=style,
+                rate=eff_rate,
             )
             frames = SpeechSynthesizer.split_pcm_to_base64_frames(
                 pcm_bytes, sample_rate=16000
             )
 
-            if latency_tool:
-                latency_tool.stop("tts:synthesis", ws.app.state.redis)
+            _lt_stop(
+                latency_tool,
+                "tts:synthesis",
+                ws,
+                meta={
+                    "run_id": run_id,
+                    "mode": "acs",
+                    "voice": voice_to_use,
+                    "style": style,
+                    "rate": eff_rate,
+                    "frames": len(frames),
+                },
+            )
 
         except asyncio.TimeoutError:
             logger.error(f"TTS synthesis timed out for text: {text[:50]}...")
-            if latency_tool:
-                latency_tool.stop("tts", ws.app.state.redis)
+            _lt_stop(
+                latency_tool,
+                "tts",
+                ws,
+                meta={"run_id": run_id, "mode": "acs", "error": "timeout"},
+            )
             raise RuntimeError("TTS synthesis timed out")
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
-            if latency_tool:
-                latency_tool.stop("tts", ws.app.state.redis)
+            _lt_stop(
+                latency_tool,
+                "tts",
+                ws,
+                meta={"run_id": run_id, "mode": "acs", "error": str(e)},
+            )
             raise RuntimeError(f"TTS synthesis failed: {e}")
         finally:
             # Release temporary synthesizer back to pool if we acquired one
@@ -283,6 +371,13 @@ async def send_response_to_acs(
                     await ws.app.state.tts_pool.release(synth)
                 except Exception as e:
                     logger.error(f"Error releasing temporary TTS synthesizer: {e}")
+
+        # Optional: track sending loop as a sub-stage
+        if latency_tool:
+            try:
+                latency_tool.start("tts:send_frames")
+            except Exception:
+                pass
 
         # Send audio frames to ACS WebSocket
         try:
@@ -308,8 +403,18 @@ async def send_response_to_acs(
         except Exception as e:
             logger.error(f"Failed to send audio frames to ACS: {e}")
         finally:
-            if latency_tool:
-                latency_tool.stop("tts", ws.app.state.redis)
+            _lt_stop(
+                latency_tool,
+                "tts:send_frames",
+                ws,
+                meta={"run_id": run_id, "mode": "acs", "frames": len(frames)},
+            )
+            _lt_stop(
+                latency_tool,
+                "tts",
+                ws,
+                meta={"run_id": run_id, "mode": "acs", "voice": voice_to_use},
+            )
 
         # Return None for MEDIA mode (synchronous completion)
         return None
@@ -317,7 +422,21 @@ async def send_response_to_acs(
     elif stream_mode == StreamMode.TRANSCRIPTION:
         acs_caller = ws.app.state.acs_caller
         if not acs_caller:
+            _lt_stop(
+                latency_tool,
+                "tts",
+                ws,
+                meta={"run_id": run_id, "mode": "acs", "error": "no_acs_caller"},
+            )
             raise RuntimeError("ACS caller is not initialized in WebSocket state.")
+
+        # No local synthesis here; close the synthesis sub-stage immediately
+        _lt_stop(
+            latency_tool,
+            "tts:synthesis",
+            ws,
+            meta={"run_id": run_id, "mode": "acs", "note": "delegated_to_queue"},
+        )
 
         # Fetch participant from per-connection state (moved off app.state)
         target_participant = getattr(ws.state, "target_participant", None)

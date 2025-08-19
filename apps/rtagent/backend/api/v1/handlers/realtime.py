@@ -20,7 +20,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from apps.rtagent.backend.settings import GREETING
 from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_filter
-from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
+from src.tools.latency_tool import LatencyTool
 from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
 from apps.rtagent.backend.src.shared_ws import broadcast_message, send_tts_audio
 from src.postcall.push import build_and_flush

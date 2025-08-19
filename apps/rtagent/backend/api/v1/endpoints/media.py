@@ -61,7 +61,7 @@ from src.stateful.state_managment import MemoManager
 from apps.rtagent.backend.src.utils.tracing import log_with_context
 from apps.rtagent.backend.src.utils.auth import validate_acs_ws_auth, AuthError
 from utils.ml_logging import get_logger
-from apps.rtagent.backend.src.latency.latency_tool import LatencyTool
+from src.tools.latency_tool import LatencyTool
 from azure.communication.callautomation import PhoneNumberIdentifier
 
 # Import V1 components

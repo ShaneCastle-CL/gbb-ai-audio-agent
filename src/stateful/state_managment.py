@@ -50,8 +50,11 @@ from src.agenticmemory.types import ChatHistory, CoreMemory
 from src.agenticmemory.utils import LatencyTracker
 
 # TODO Fix this area
-from src.prompts.prompt_manager import PromptManager
 from src.redis.manager import AzureRedisManager
+from src.tools.latency_helpers import StageSample  
+from src.tools.latency_helpers import PersistentLatency
+
+
 from utils.ml_logging import get_logger
 
 logger = get_logger("src.stateful.state_managment")
@@ -769,7 +772,20 @@ class MemoManager:
             for the same stage, enabling statistical analysis of
             performance patterns over time.
         """
-        self.latency.note(stage, start_t, end_t)
+        # compute and append to CoreMemory["latency"] to preserve behavior
+        bucket = self.corememory.get("latency", {"runs": {}, "order": []})
+        run_id = bucket.get("current_run_id") or "legacy"
+        sample = StageSample(stage=stage, start=start_t, end=end_t, dur=end_t - start_t)
+        # append
+        runs = bucket.setdefault("runs", {})
+        run = runs.setdefault(run_id, {"run_id": run_id, "label": "legacy", "created_at": start_t, "samples": []})
+        run["samples"].append({
+            "stage": sample.stage, "start": sample.start, "end": sample.end, "dur": sample.dur, "meta": {}
+        })
+        order = bucket.setdefault("order", [])
+        if run_id not in order:
+            order.append(run_id)
+        self.corememory.set("latency", bucket)
 
     def latency_summary(self) -> Dict[str, Dict[str, float]]:
         """
@@ -809,7 +825,7 @@ class MemoManager:
             MemoManager instance was created. Use this for performance
             monitoring and optimization analysis.
         """
-        return self.latency.summary()
+        return PersistentLatency(self).session_summary()
 
     # --- HISTORY ------------------------------------------------------
     def append_to_history(self, agent: str, role: str, content: str) -> None:
