@@ -9,6 +9,7 @@ Registers legacy handlers with the V1 CallEventProcessor for clean event process
 from .processor import get_call_event_processor
 from .handlers import CallEventHandlers
 from .types import ACSEventTypes, V1EventTypes
+from ..handlers.dtmf_validation_lifecycle import DTMFValidationLifecycle
 from utils.ml_logging import get_logger
 
 logger = get_logger("v1.events.registration")
@@ -41,15 +42,6 @@ def register_default_handlers() -> None:
     )
 
     processor.register_handler(
-        V1EventTypes.INBOUND_CALL_RECEIVED,
-        CallEventHandlers.handle_inbound_call_received,
-    )
-
-    processor.register_handler(
-        V1EventTypes.CALL_ANSWERED, CallEventHandlers.handle_call_answered
-    )
-
-    processor.register_handler(
         V1EventTypes.WEBHOOK_EVENTS, CallEventHandlers.handle_webhook_events
     )
 
@@ -76,9 +68,14 @@ def register_default_handlers() -> None:
         CallEventHandlers.handle_participants_updated,
     )
 
-    # Register DTMF handlers
+    # Register DTMF handlers (delegated to DTMFValidationLifecycle)
     processor.register_handler(
-        ACSEventTypes.DTMF_TONE_RECEIVED, CallEventHandlers.handle_dtmf_tone_received
+        ACSEventTypes.DTMF_TONE_RECEIVED, DTMFValidationLifecycle.handle_dtmf_tone_received
+    )
+    
+    processor.register_handler(
+        V1EventTypes.DTMF_RECOGNITION_START_REQUESTED, 
+        DTMFValidationLifecycle.handle_dtmf_recognition_start_requested
     )
 
     # Register media handlers

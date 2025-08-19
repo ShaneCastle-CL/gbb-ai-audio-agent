@@ -1,23 +1,23 @@
 """
-Simple Event Utilities for V1 API
+event Event Utilities for V1 API
 =================================
 
 Lightweight event utilities focused on real-time voice operations.
-Replaces the complex event system with simple, direct patterns.
+Replaces the complex event system with event, direct patterns.
 """
 
 import time
 from typing import Dict, Any, Optional
 from utils.ml_logging import get_logger
 
-logger = get_logger("v1.simple_events")
+logger = get_logger("v1.events")
 
 
 async def emit_call_lifecycle_event(
     event_type: str, call_id: str, data: Optional[Dict[str, Any]] = None
 ) -> None:
     """
-    Simple call lifecycle event emission for REST API tracking.
+    event call lifecycle event emission for REST API tracking.
 
     Args:
         event_type: Type of event (call.initiated, call.connected, etc.)
@@ -37,9 +37,9 @@ async def emit_call_lifecycle_event(
     )
 
 
-def get_simple_health_status() -> Dict[str, Any]:
+def get_event_health_status() -> Dict[str, Any]:
     """
-    Simple health status without complex event registry overhead.
+    event health status without complex event registry overhead.
 
     Returns:
         Basic health information for monitoring
@@ -54,7 +54,7 @@ def get_simple_health_status() -> Dict[str, Any]:
 
 def get_system_metrics() -> Dict[str, Any]:
     """
-    Simple system metrics without event registry complexity.
+    event system metrics without event registry complexity.
 
     Returns:
         Basic system metrics for monitoring

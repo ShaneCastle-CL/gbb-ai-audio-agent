@@ -108,3 +108,6 @@ class V1EventTypes:
     # State management events
     CALL_STATE_UPDATED = "V1.Call.StateUpdated"
     CALL_CLEANUP_REQUESTED = "V1.Call.CleanupRequested"
+    
+    # DTMF management events
+    DTMF_RECOGNITION_START_REQUESTED = "V1.DTMF.RecognitionStartRequested"

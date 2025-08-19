@@ -146,7 +146,44 @@ class AzureRedisManager:
                 self.logger.error("Failed to refresh Redis token: %s", e)
                 # retry sooner if something goes wrong
                 time.sleep(5)
+                
+    def publish_event(self, stream_key: str, event_data: Dict[str, Any]) -> str:
+        """Append an event to a Redis stream."""
+        with self._redis_span("Redis.XADD"):
+            return self.redis_client.xadd(stream_key, event_data)
 
+    def read_events_blocking(
+        self,
+        stream_key: str,
+        last_id: str = "$",
+        block_ms: int = 30000,
+        count: int = 1,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Block and read new events from a Redis stream starting after `last_id`.
+        Returns list of new events (or None on timeout).
+        """
+        with self._redis_span("Redis.XREAD"):
+            streams = self.redis_client.xread(
+                {stream_key: last_id}, block=block_ms, count=count
+            )
+            return streams if streams else None
+    async def publish_event_async(self, stream_key: str, event_data: Dict[str, Any]) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.publish_event, stream_key, event_data)
+
+    async def read_events_blocking_async(
+        self,
+        stream_key: str,
+        last_id: str = "$",
+        block_ms: int = 30000,
+        count: int = 1,
+    ) -> Optional[List[Dict[str, Any]]]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self.read_events_blocking, stream_key, last_id, block_ms, count
+        )
+        
     async def ping(self) -> bool:
         """Check Redis connectivity."""
         try:
@@ -165,8 +202,8 @@ class AzureRedisManager:
         """Set a string value in Redis (optionally with TTL)."""
         with self._redis_span("Redis.SET"):
             if ttl_seconds is not None:
-                return bool(self.redis_client.setex(key, ttl_seconds, value))
-            return bool(self.redis_client.set(key, value))
+                return self.redis_client.setex(key, ttl_seconds, str(value))
+            return self.redis_client.set(key, str(value))
 
     def get_value(self, key: str) -> Optional[str]:
         """Get a string value from Redis."""

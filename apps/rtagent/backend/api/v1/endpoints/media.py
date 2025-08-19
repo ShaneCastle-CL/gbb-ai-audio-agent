@@ -422,6 +422,9 @@ async def _process_media_stream(
         try:
             # Main message processing loop
             message_count = 0
+            redis_mgr = websocket.app.state.redis
+            session_key = call_connection_id
+            dtmf_validated = False
             while (
                 websocket.client_state == WebSocketState.CONNECTED
                 and websocket.application_state == WebSocketState.CONNECTED
@@ -429,14 +432,13 @@ async def _process_media_stream(
                 logger.debug(f"📨 Waiting for message #{message_count + 1}")
                 msg = await websocket.receive_text()
                 message_count += 1
-
-                if msg:
-                    # logger.info(f"📨 Received message #{message_count} ({len(msg)} chars)")
-                    # Handle message based on streaming mode
-                    if ACS_STREAMING_MODE == StreamMode.MEDIA:
-                        await handler.handle_media_message(msg)
-                    elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
-                        await handler.handle_transcription_message(msg)
+               
+                # logger.info(f"📨 Received message #{message_count} ({len(msg)} chars)")
+                # Handle message based on streaming mode
+                if ACS_STREAMING_MODE == StreamMode.MEDIA:
+                    await handler.handle_media_message(msg)
+                elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
+                    await handler.handle_transcription_message(msg)
 
         except WebSocketDisconnect as e:
             # Handle WebSocket disconnects gracefully - this is normal when calls end
