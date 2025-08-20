@@ -1,8 +1,8 @@
 """
-V1 Call Event Handlers (Simplified)
+V1 Call Event Handlers 
 ===================================
 
-Simplified event handlers with DTMF logic moved to DTMFValidationLifecycle.
+Event handlers with DTMF logic moved to DTMFValidationLifecycle.
 Focuses on core call lifecycle events only.
 
 Key Features:
@@ -34,7 +34,7 @@ tracer = trace.get_tracer(__name__)
 
 class CallEventHandlers:
     """
-    Simplified event handlers for Azure Communication Services call events.
+    Event handlers for Azure Communication Services call events.
 
     Centralized handlers for core call lifecycle events:
     - API-initiated operations (call initiation, answering)
