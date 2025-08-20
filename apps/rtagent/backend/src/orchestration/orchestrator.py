@@ -299,8 +299,8 @@ async def _send_agent_greeting(
         )
     else:
         greeting = (
-            f"Hi again {caller_name}, {agent_name} specialist back on the line. "
-            f"Let's continue with {topic}."
+            f"Welcome back, {caller_name}. {agent_name} specialist here. "
+            f"What else can I assist you with?"
         )
 
     cm.append_to_history(actual_agent_name, "assistant", greeting)
