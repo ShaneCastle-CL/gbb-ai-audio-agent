@@ -82,6 +82,13 @@ AZURE_COSMOS_CONNECTION_STRING: str = os.getenv("AZURE_COSMOS_CONNECTION_STRING"
 AZURE_COSMOS_DATABASE_NAME: str = os.getenv("AZURE_COSMOS_DATABASE_NAME", "")
 AZURE_COSMOS_COLLECTION_NAME: str = os.getenv("AZURE_COSMOS_COLLECTION_NAME", "")
 
+# Custom Validation Flow Feature Flags
+DTMF_VALIDATION_ENABLED: bool = os.getenv("DTMF_VALIDATION_ENABLED", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+    "on",
+)
 
 # ------------------------------------------------------------------------------
 # Azure Identity / Authentication

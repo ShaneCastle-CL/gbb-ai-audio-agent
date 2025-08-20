@@ -38,79 +38,6 @@ graph TB
     B3 --> C1
 ```
 
-```mermaid
-graph TB
-    subgraph Physical["🖥️ Physical Thread Architecture"]
-        subgraph SpeechSDKThread["🧵 Azure Speech SDK Thread"]
-            direction TB
-            A1["🎯 Speech SDK Core"] 
-            A2["🔄 Continuous Recognition"]
-            A3["⚡ on_partial callback<br/><small>🚨 IMMEDIATE - No Blocking</small>"]
-            A4["✅ on_final callback<br/><small>📋 QUEUED - Non-Blocking</small>"]
-            A5["❌ on_cancel callback"]
-            
-            A1 --> A2
-            A2 --> A3
-            A2 --> A4  
-            A2 --> A5
-        end
-        
-        subgraph RouteLoopThread["🧵 Route Turn Loop Thread"]
-            direction TB
-            B1["🔄 route_turn_loop()<br/><small>Separate Thread via threading.Thread</small>"]
-            B2["await queue.get()<br/><small>🚫 BLOCKS until speech available</small>"]
-            B3["🎯 Task Creation<br/><small>asyncio.create_task(route_and_playback)</small>"]
-
-            B1 --> B2
-            B2 --> B3
-        end
-
-        subgraph MainEventLoop["🧵 Main Event Loop (FastAPI/uvicorn)"]
-            direction TB
-            C2["📡 WebSocket Media Handler"]
-            C3["🚫 _handle_barge_in_async<br/><small>⚡ Scheduled via run_coroutine_threadsafe</small>"]
-            C4["📝 _handle_final_async<br/><small>📋 Scheduled via run_coroutine_threadsafe</small>"]
-            C5["🎵 playback_task<br/><small>route_and_playback - Can be cancelled</small>"]
-            C6["🛑 send_stop_audio"]
-            
-            C2 --> C5
-        end
-    end
-    
-    subgraph Logical["🔗 Cross-Thread Communication (Non-Blocking)"]
-        direction LR
-        D1["🎤 Speech Event"] 
-        D2["🔗 run_coroutine_threadsafe<br/><small>Thread-safe async bridge</small>"]
-        D3["📋 asyncio.Queue<br/><small>Thread-safe message passing</small>"]
-        D4["⚡ Immediate Actions<br/><small>Barge-in detection</small>"]
-        
-        D1 --> D2
-        D2 --> D3
-        D2 --> D4
-    end
-    
-    %% Cross-thread connections
-    A3 -.->|"� IMMEDIATE<br/>run_coroutine_threadsafe"| C3
-    A4 -.->|"� QUEUED<br/>run_coroutine_threadsafe"| C4
-    C4 -.->|"📤 queue.put()"| B2
-    C3 --> C6
-    C3 -.->|"❌ playback_task.cancel()"| C5
-    B3 -.->|"🎵 New Task Reference"| C5
-    
-    %% Styling for clarity
-    classDef speechThread fill:#9B59B6,stroke:#6B3E99,stroke-width:3px,color:#FFFFFF
-    classDef routeThread fill:#FF6B35,stroke:#E55100,stroke-width:3px,color:#FFFFFF  
-    classDef mainThread fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#FFFFFF
-    classDef communication fill:#27AE60,stroke:#1E8449,stroke-width:2px,color:#FFFFFF
-    classDef immediate fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#FFFFFF
-    
-    class A1,A2,A3,A4,A5 speechThread
-    class B1,B2,B3 routeThread
-    class C1,C2,C3,C4,C5,C6 mainThread
-    class D1,D2,D3 communication
-    class D4 immediate
-```
-
 ---
 
 ## 🔄➡️🧵 Architecture Evolution: From Parallel Overview to Thread Focus
@@ -413,80 +340,12 @@ sequenceDiagram
 
 ---
 
-## 🔧 Key Implementation Details
+## Key Implementation Details
 
-### � Barge-In Detection
+### Barge-In Detection
 
-```mermaid
-graph TB
-    subgraph Isolation["� Thread Isolation Design"]
-        subgraph Speech["🧵 Speech SDK Thread (Isolated)"]
-            direction TB
-            S1["🎯 Real-time Audio Processing"]
-            S2["�🔄 Continuous Recognition Loop"]
-            S3["⚡ Callback Triggers<br/><small>on_partial, on_final</small>"]
-            S4["🚀 Cross-thread Scheduling<br/><small>run_coroutine_threadsafe</small>"]
-            
-            S1 --> S2 --> S3 --> S4
-        end
-        
-        subgraph Route["🧵 Route Turn Thread (Isolated)"]
-            direction TB
-            R1["📥 Blocking Queue Operations<br/><small>await queue.get()</small>"]
-            R2["🎯 AI Agent Processing<br/><small>LLM + TTS Generation</small>"]
-            R3["🎵 Playback Task Creation<br/><small>asyncio.create_task</small>"]
-            
-            R1 --> R2 --> R3
-        end
-        
-        subgraph Main["🧵 Main Event Loop (Isolated)"]
-            direction TB
-            M1["🌐 FastAPI WebSocket Server"]
-            M2["📡 Real-time Message Handling"]
-            M3["⚡ Barge-in Response<br/><small>Task cancellation</small>"]
-            M4["🛑 ACS Stop Commands"]
-            
-            M1 --> M2 --> M3 --> M4
-        end
-    end
-    
-    subgraph Concurrent["🔄 Concurrent Operations (All Simultaneous)"]
-        direction LR
-        C1["🎤 Audio Recognition<br/><small>Never stops</small>"]
-        C2["🧠 AI Processing<br/><small>Can be cancelled</small>"]  
-        C3["📡 WebSocket Handling<br/><small>Always responsive</small>"]
-        C4["🔄 Queue Management<br/><small>Thread-safe</small>"]
-        
-        C1 -.-> C2
-        C1 -.-> C3
-        C2 -.-> C3
-        C2 -.-> C4
-        C3 -.-> C4
-    end
-    
-    %% Cross-thread communication (non-blocking)
-    S4 -.->|"🚀 Non-blocking"| M3
-    S4 -.->|"📋 Queue Put"| R1
-    R3 -.->|"🎵 Task Reference"| M2
-    M3 -.->|"❌ Task Cancel"| R2
-    
-    %% Performance indicators
-    S1 -.->|"< 10ms"| M3
-    M3 -.->|"< 1ms"| R2
-    R1 -.->|"< 50ms"| M2
-    
-    classDef speechStyle fill:#9B59B6,stroke:#6B3E99,stroke-width:3px,color:#FFFFFF
-    classDef routeStyle fill:#FF6B35,stroke:#E55100,stroke-width:3px,color:#FFFFFF
-    classDef mainStyle fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#FFFFFF
-    classDef concurrentStyle fill:#27AE60,stroke:#1E8449,stroke-width:2px,color:#FFFFFF
-    
-    class S1,S2,S3,S4 speechStyle
-    class R1,R2,R3 routeStyle
-    class M1,M2,M3,M4 mainStyle
-    class C1,C2,C3,C4 concurrentStyle
-```
 
-### 🎯 Thread Responsibility Matrix
+### Thread Responsibility Matrix
 
 | Thread | Primary Responsibility | Can Block? | Handles Barge-in? | Performance Critical? |
 |--------|------------------------|------------|-------------------|----------------------|

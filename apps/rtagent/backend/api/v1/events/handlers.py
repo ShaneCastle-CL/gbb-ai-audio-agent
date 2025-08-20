@@ -1,15 +1,22 @@
 """
-V1 Call Event Handlers
-======================
+V1 Call Event Handlers 
+===================================
 
-Event handlers migrated from legacy acs_event_handlers.py and adapted for V1 Event Processor pattern.
-Focuses on core business logic without complex event registration overhead.
+Event handlers with DTMF logic moved to DTMFValidationLifecycle.
+Focuses on core call lifecycle events only.
+
+Key Features:
+- Basic call lifecycle handling (connected, disconnected, etc.)
+- Delegates DTMF processing to DTMFValidationLifecycle
+- Comprehensive event routing for all ACS webhook events
+- Proper OpenTelemetry tracing and error handling
 """
 
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
 from azure.core.messaging import CloudEvent
+from azure.communication.callautomation import PhoneNumberIdentifier
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -17,6 +24,9 @@ from opentelemetry.trace import SpanKind
 from apps.rtagent.backend.src.shared_ws import broadcast_message
 from utils.ml_logging import get_logger
 from .types import CallEventContext, ACSEventTypes
+
+from apps.rtagent.backend.api.v1.handlers.dtmf_validation_lifecycle import DTMFValidationLifecycle
+from apps.rtagent.backend.settings import DTMF_VALIDATION_ENABLED
 
 logger = get_logger("v1.events.handlers")
 tracer = trace.get_tracer(__name__)
@@ -26,10 +36,10 @@ class CallEventHandlers:
     """
     Event handlers for Azure Communication Services call events.
 
-    Centralized handlers for ALL call lifecycle events including:
+    Centralized handlers for core call lifecycle events:
     - API-initiated operations (call initiation, answering)
     - ACS webhook events (connected, disconnected, etc.)
-    - Media and recognition events
+    - Media and recognition events (delegates DTMF to DTMFValidationLifecycle)
     """
 
     @staticmethod
@@ -158,19 +168,21 @@ class CallEventHandlers:
                 "event.source": "acs_webhook",
             },
         ):
-            logger.info(f"🔗 Processing webhook event: {context.event_type}")
-
-            # Route to specific handlers based on event type
-            from .types import ACSEventTypes
-
+            logger.info(f"🌐 Webhook event: {context.event_type} for {context.call_connection_id}")
+            
+            # Route to specific handlers
             if context.event_type == ACSEventTypes.CALL_CONNECTED:
                 await CallEventHandlers.handle_call_connected(context)
             elif context.event_type == ACSEventTypes.CALL_DISCONNECTED:
                 await CallEventHandlers.handle_call_disconnected(context)
+            elif context.event_type == ACSEventTypes.CREATE_CALL_FAILED:
+                await CallEventHandlers.handle_create_call_failed(context)
+            elif context.event_type == ACSEventTypes.ANSWER_CALL_FAILED:
+                await CallEventHandlers.handle_answer_call_failed(context)
             elif context.event_type == ACSEventTypes.PARTICIPANTS_UPDATED:
                 await CallEventHandlers.handle_participants_updated(context)
             elif context.event_type == ACSEventTypes.DTMF_TONE_RECEIVED:
-                await CallEventHandlers.handle_dtmf_tone_received(context)
+                await DTMFValidationLifecycle.handle_dtmf_tone_received(context)
             elif context.event_type == ACSEventTypes.PLAY_COMPLETED:
                 await CallEventHandlers.handle_play_completed(context)
             elif context.event_type == ACSEventTypes.PLAY_FAILED:
@@ -179,31 +191,17 @@ class CallEventHandlers:
                 await CallEventHandlers.handle_recognize_completed(context)
             elif context.event_type == ACSEventTypes.RECOGNIZE_FAILED:
                 await CallEventHandlers.handle_recognize_failed(context)
-            elif context.event_type == ACSEventTypes.CREATE_CALL_FAILED:
-                await CallEventHandlers.handle_create_call_failed(context)
-            elif context.event_type == ACSEventTypes.ANSWER_CALL_FAILED:
-                await CallEventHandlers.handle_answer_call_failed(context)
             else:
-                logger.info(
-                    f"🔍 No specific handler for event type: {context.event_type}"
-                )
+                logger.warning(f"⚠️  Unhandled webhook event type: {context.event_type}")
 
-            # Update general webhook processing stats
-            if context.memo_manager:
-                try:
-                    webhook_count = context.memo_manager.get_context(
-                        "webhook_events_processed", 0
-                    )
-                    context.memo_manager.update_context(
-                        "webhook_events_processed", webhook_count + 1
-                    )
-                    context.memo_manager.update_context(
-                        "last_webhook_event", context.event_type
-                    )
+            # Update webhook statistics
+            try:
+                if context.memo_manager:
+                    context.memo_manager.update_context("last_webhook_event", context.event_type)
                     if context.redis_mgr:
                         context.memo_manager.persist_to_redis(context.redis_mgr)
-                except Exception as e:
-                    logger.error(f"Failed to update webhook stats: {e}")
+            except Exception as e:
+                logger.error(f"Failed to update webhook stats: {e}")
 
     @staticmethod
     async def handle_call_connected(context: CallEventContext) -> None:
@@ -222,7 +220,40 @@ class CallEventHandlers:
             },
         ):
             logger.info(f"📞 Call connected: {context.call_connection_id}")
+            
+            # Extract target phone from call connected event
+            call_conn = context.acs_caller.get_call_connection(context.call_connection_id)
+            participants = call_conn.list_participants()
 
+            caller_participant = None
+            acs_participant = None
+            caller_id = None
+
+            for participant in participants:
+                identifier = participant.identifier
+                if getattr(identifier, "kind", None) == 'phone_number':
+                    caller_participant = participant
+                    caller_id = identifier.properties.get('value')
+                elif getattr(identifier, "kind", None) == "communicationUser":
+                    acs_participant = participant
+
+            if not caller_participant:
+                logger.warning("Caller participant not found in participants list.")
+            if not acs_participant:
+                logger.warning("ACS participant not found in participants list.")
+
+            logger.info(f"   Caller phone number: {caller_id if caller_id else 'unknown'}")
+
+            if DTMF_VALIDATION_ENABLED:
+                try:
+                    await DTMFValidationLifecycle.setup_aws_connect_validation_flow(
+                        context, 
+                        call_conn,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"❌ Failed to start continuous DTMF recognition for {context.call_connection_id}: {e}"
+                    )
             # Broadcast connection status to WebSocket clients
             try:
                 if context.clients:
@@ -235,17 +266,14 @@ class CallEventHandlers:
                                 "timestamp": context.get_event_data()
                                 .get("callConnectionProperties", {})
                                 .get("connectedTime"),
+                                "validation_flow": "aws_connect_simulation",
                             }
                         ),
                     )
             except Exception as e:
                 logger.error(f"Failed to broadcast call connected: {e}")
-
-            # Play greeting if in transcription mode
-            if context.memo_manager:
-                stream_mode = context.memo_manager.get_context("stream_mode", "media")
-                if stream_mode == "transcription":
-                    await CallEventHandlers._play_greeting(context)
+                
+            # Note: Greeting and conversation flow will be triggered AFTER validation succeeds
 
     @staticmethod
     async def handle_call_disconnected(context: CallEventContext) -> None:
@@ -263,16 +291,14 @@ class CallEventHandlers:
                 "event.type": context.event_type,
             },
         ):
-            disconnect_reason = context.get_event_field(
-                "resultInformation", "No reason provided"
-            )
-            logger.info(
-                f"📞 Call disconnected: {context.call_connection_id}, reason: {disconnect_reason}"
-            )
-
-            # Cleanup call state
-            if context.memo_manager:
-                await CallEventHandlers._cleanup_call_state(context)
+            # Extract disconnect reason
+            event_data = context.get_event_data()
+            disconnect_reason = event_data.get("callConnectionState")
+            
+            logger.info(f"📞 Call disconnected: {context.call_connection_id}, reason: {disconnect_reason}")
+            
+            # Clean up call state
+            await CallEventHandlers._cleanup_call_state(context)
 
     @staticmethod
     async def handle_create_call_failed(context: CallEventContext) -> None:
@@ -291,23 +317,7 @@ class CallEventHandlers:
             },
         ):
             result_info = context.get_event_field("resultInformation", {})
-            error_code = result_info.get("code", "Unknown")
-            error_message = result_info.get("message", "No details provided")
-
-            logger.error(f"❌ Create call failed: {context.call_connection_id}")
-            logger.error(f"   Error Code: {error_code}")
-            logger.error(f"   Error Message: {error_message}")
-
-            # Update context with failure information
-            if context.memo_manager:
-                try:
-                    context.memo_manager.update_context("call_creation_failed", True)
-                    context.memo_manager.update_context("failure_reason", error_message)
-                    context.memo_manager.update_context("failure_code", error_code)
-                    if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
-                except Exception as e:
-                    logger.error(f"Failed to update failure state: {e}")
+            logger.error(f"❌ Create call failed: {context.call_connection_id}, reason: {result_info}")
 
     @staticmethod
     async def handle_answer_call_failed(context: CallEventContext) -> None:
@@ -326,23 +336,7 @@ class CallEventHandlers:
             },
         ):
             result_info = context.get_event_field("resultInformation", {})
-            error_code = result_info.get("code", "Unknown")
-            error_message = result_info.get("message", "No details provided")
-
-            logger.error(f"❌ Answer call failed: {context.call_connection_id}")
-            logger.error(f"   Error Code: {error_code}")
-            logger.error(f"   Error Message: {error_message}")
-
-            # Update context with failure information
-            if context.memo_manager:
-                try:
-                    context.memo_manager.update_context("call_answer_failed", True)
-                    context.memo_manager.update_context("failure_reason", error_message)
-                    context.memo_manager.update_context("failure_code", error_code)
-                    if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
-                except Exception as e:
-                    logger.error(f"Failed to update answer failure state: {e}")
+            logger.error(f"❌ Answer call failed: {context.call_connection_id}, reason: {result_info}")
 
     @staticmethod
     async def handle_participants_updated(context: CallEventContext) -> None:
@@ -360,32 +354,22 @@ class CallEventHandlers:
                 "event.type": context.event_type,
             },
         ):
-            logger.info(f"👥 Participants updated: {context.call_connection_id}")
-
             try:
-                # Extract participant phone number
-                target_phone = CallEventHandlers._get_participant_phone(
-                    context.event, context.memo_manager
-                )
-
-                # if target_phone and context.acs_caller:
-                #     # Start DTMF recognition as background task
-                #     asyncio.create_task(
-                #         CallEventHandlers._start_dtmf_recognition(context, target_phone)
-                #     )
-                #     logger.info(f"🎯 Started DTMF recognition for {target_phone}")
-
+                participants = context.get_event_field("participants", [])
+                logger.info(f"👥 Participants updated: {len(participants)} participants")
+                
+                # Log participant details
+                for i, participant in enumerate(participants):
+                    identifier = participant.get("identifier", {})
+                    is_muted = participant.get("isMuted", False)
+                    logger.info(f"   Participant {i+1}: {identifier.get('kind', 'unknown')}, muted: {is_muted}")
+                    
             except Exception as e:
                 logger.error(f"Error in participants updated handler: {e}")
 
     @staticmethod
     async def handle_dtmf_tone_received(context: CallEventContext) -> None:
-        """
-        Handle DTMF tone with sequence validation.
-
-        :param context: Call event context containing connection details and managers
-        :type context: CallEventContext
-        """
+        """Handle DTMF tone with sequence validation."""
         with tracer.start_as_current_span(
             "v1.handle_dtmf_tone_received",
             kind=SpanKind.INTERNAL,
@@ -453,7 +437,7 @@ class CallEventHandlers:
         )
 
     # ============================================================================
-    # Helper Methods (adapted from legacy implementation)
+    # Helper Methods
     # ============================================================================
 
     @staticmethod
@@ -511,6 +495,14 @@ class CallEventHandlers:
         :type context: CallEventContext
         """
         try:
+            # Basic cleanup - delegate DTMF cleanup to lifecycle handler
+            logger.info(f"🧹 Cleaning up call state: {context.call_connection_id}")
+            
+            # Clear memo context if available
+            if context.memo_manager:
+                context.memo_manager.update_context("call_active", False)
+                context.memo_manager.update_context("call_disconnected", True)
+                
             if context.memo_manager and context.redis_mgr:
                 # Persist final state before cleanup
                 context.memo_manager.persist_to_redis(context.redis_mgr)
