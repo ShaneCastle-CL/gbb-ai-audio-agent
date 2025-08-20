@@ -532,6 +532,11 @@ class MainEventLoop:
                             self.active_audio_tasks.add(task)
                             task.add_done_callback(lambda t: self.active_audio_tasks.discard(t))
 
+            elif kind == "DtmfData":
+                tone = data.get('dtmfData').get('data')
+                logger.info(f"[{self.call_id_short}] DTMF tone received: {tone}")
+                # DTMF handling is delegated to DTMFValidationLifecycle via event handlers
+
         except json.JSONDecodeError as e:
             logger.error(f"[{self.call_id_short}] Invalid JSON: {e}")
         except Exception as e:
