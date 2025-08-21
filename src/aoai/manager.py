@@ -57,6 +57,12 @@ class NoOpTraceContext:
     def set_attribute(self, key, value):
         pass
 
+    def add_event(self, name, attributes=None):
+        pass
+
+    def record_exception(self, exception):
+        pass
+
 
 def _is_aoai_tracing_enabled() -> bool:
     """Check if Azure OpenAI tracing is enabled."""

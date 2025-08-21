@@ -211,6 +211,10 @@ class NoOpTraceContext:
         """No-op implementation of add_event."""
         pass
 
+    def record_exception(self, exception) -> None:
+        """No-op implementation of record_exception."""
+        pass
+
 
 def create_trace_context(
     name: str,
