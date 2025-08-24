@@ -44,7 +44,7 @@ from utils.ml_logging import get_logger
 logger = get_logger("v1.handlers.acs_media_lifecycle")
 tracer = trace.get_tracer(__name__)
 
-# P0 FIX: Replace RLock with atomic dict operations for better concurrency
+# Replace RLock with atomic dict operations for better concurrency
 # Use concurrent.futures.thread.ThreadPoolExecutor's internal dict pattern
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -159,7 +159,7 @@ class SpeechSDKThread:
     - Immediate callback execution (< 10ms)
     - Cross-thread communication via ThreadBridge
     - Never blocks on queue operations
-    - P0 FIX: Pre-initializes push_stream to prevent audio data loss
+    - Pre-initializes push_stream to prevent audio data loss
     """
     
     def __init__(
@@ -178,8 +178,8 @@ class SpeechSDKThread:
         self.recognizer_started = False
         self.stop_event = threading.Event()
         self._stopped = False
-        
-        # P0 FIX: Setup callbacks FIRST, then pre-initialize recognizer
+
+        # Setup callbacks FIRST, then pre-initialize recognizer
         # This ensures callbacks are registered before any recognizer operations
         self._setup_callbacks()
         self._pre_initialize_recognizer()
@@ -528,7 +528,7 @@ class MainEventLoop:
         self.barge_in_active = threading.Event()
         self.greeting_played = False
         self.active_audio_tasks: Set[asyncio.Task] = set()
-        # P0 FIX: Remove hard limit on concurrent audio tasks - let system scale naturally
+        # Remove hard limit on concurrent audio tasks - let system scale naturally
         # Previous limit of 50 was a major bottleneck for concurrency
         self.max_concurrent_audio_tasks = None  # No artificial limit
 
@@ -603,9 +603,8 @@ class MainEventLoop:
                     audio_bytes = audio_data_section.get("data")
                     if audio_bytes and recognizer:
                         # logger.info(f"[{self.call_id_short}] Processing audio chunk: {len(audio_bytes)} base64 chars, recognizer_started={getattr(acs_handler.speech_sdk_thread, 'recognizer_started', False)}")
-                        
-                        # P0 FIX: No artificial throttling - process all audio chunks
-                        # Previous throttling was major bottleneck for concurrent streams
+
+                        # No artificial throttling - process all audio chunks
                         if self.max_concurrent_audio_tasks is None or len(self.active_audio_tasks) < self.max_concurrent_audio_tasks:
                             task = asyncio.create_task(
                                 self._process_audio_chunk_async(audio_bytes, recognizer)
@@ -774,7 +773,7 @@ class ACSMediaHandler:
             try:
                 logger.info(f"[{self.call_id_short}] Starting three-thread media handler")
                 
-                # P0 FIX: Lock-free atomic registration - much faster for concurrent connections
+                # Lock-free atomic registration
                 existing = _active_handlers.get(self.call_connection_id)
                 if existing and existing.is_running:
                     logger.warning(f"[{self.call_id_short}] Stopping existing handler")
@@ -824,7 +823,7 @@ class ACSMediaHandler:
                 self._stopped = True
                 self.running = False
 
-                # P0 FIX: Lock-free cleanup - atomic dict operation (safe if called multiple times)
+                # Lock-free cleanup
                 _active_handlers.pop(self.call_connection_id, None)
 
                 # Stop components with individual error isolation
@@ -914,7 +913,7 @@ class ACSMediaHandler:
             return False
 
 
-# P0 FIX: Lock-free utility functions for debugging
+# Lock-free utility functions for debugging
 def get_active_handlers_count() -> int:
     """Get count of active handlers (lock-free)."""
     return len(_active_handlers)

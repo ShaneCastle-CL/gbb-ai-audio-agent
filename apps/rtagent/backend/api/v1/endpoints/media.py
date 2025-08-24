@@ -383,7 +383,7 @@ async def _create_media_handler(
     if ACS_STREAMING_MODE == StreamMode.MEDIA:
         # Use the V1 ACS media handler - acquire recognizer from pool
         try:
-            # P0 FIX: Add defensive pool monitoring to prevent deadlocks
+            # Defensive pool monitoring to prevent deadlocks
             stt_queue_size = websocket.app.state.stt_pool._q.qsize()
             tts_queue_size = websocket.app.state.tts_pool._q.qsize()
             logger.info(f"Pool status before acquire: STT={stt_queue_size}, TTS={tts_queue_size}")
@@ -636,8 +636,7 @@ async def _cleanup_websocket_resources(
                 except Exception as e:
                     logger.error(f"Error releasing STT recognizer: {e}", exc_info=True)
             
-            # P0 FIX: Release TTS synthesizer back to pool (was missing!)
-            # This was causing TTS pool exhaustion after 8 sessions
+            # Release TTS synthesizer back to pool
             if hasattr(websocket.state, "tts_client") and websocket.state.tts_client:
                 try:
                     await websocket.app.state.tts_pool.release(
@@ -660,8 +659,7 @@ async def _cleanup_websocket_resources(
                         Status(StatusCode.ERROR, f"Handler cleanup error: {e}")
                     )
 
-                # P0 FIX: Don't double-remove from registry - handler.stop() already removes itself
-                # This prevents cleanup race conditions and double-cleanup errors
+                # Don't double-remove from registry - handler.stop() already removes itself
                 logger.debug(f"Handler cleanup complete for call {call_connection_id}")
 
             span.set_status(Status(StatusCode.OK))
