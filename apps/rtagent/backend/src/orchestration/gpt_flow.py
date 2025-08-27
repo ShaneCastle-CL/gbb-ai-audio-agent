@@ -556,7 +556,7 @@ async def _broadcast_dashboard(
             session_id,
         )
         
-        # 🔒 SESSION-SAFE: Use session-specific broadcasting instead of topic-based
+        # SESSION-SAFE: Use session-specific broadcasting instead of topic-based
         await broadcast_message(None, message, sender, app_state=ws.app.state, session_id=session_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to broadcast dashboard message: %s", exc)

@@ -13,6 +13,7 @@ multi-tier architecture designed for 1000+ concurrent sessions.
 """
 
 import asyncio
+import os
 import time
 import uuid
 from collections import defaultdict
@@ -24,6 +25,13 @@ from src.speech.text_to_speech import SpeechSynthesizer
 from utils.ml_logging import get_logger
 
 logger = get_logger("dedicated_tts_pool")
+
+# Environment-based configuration for production optimization
+TTS_POOL_SIZE = int(os.getenv("POOL_SIZE_TTS", "100"))
+TTS_POOL_PREWARMING_ENABLED = os.getenv("TTS_POOL_PREWARMING_ENABLED", "true").lower() == "true"
+TTS_PREWARMING_BATCH_SIZE = int(os.getenv("POOL_PREWARMING_BATCH_SIZE", "10"))
+TTS_CLIENT_MAX_AGE_SECONDS = int(os.getenv("CLIENT_MAX_AGE_SECONDS", "3600"))
+TTS_CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "180"))
 
 
 class ClientTier(Enum):
@@ -84,19 +92,20 @@ class DedicatedTtsPoolManager:
     def __init__(
         self,
         *,
-        warm_pool_size: int = 50,
-        max_dedicated_clients: int = 200,
-        prewarming_batch_size: int = 5,
-        cleanup_interval_seconds: float = 300,
-        client_max_age_seconds: float = 1800,
-        enable_prewarming: bool = True
+        warm_pool_size: int = None,
+        max_dedicated_clients: int = None,
+        prewarming_batch_size: int = None,
+        cleanup_interval_seconds: float = None,
+        client_max_age_seconds: float = None,
+        enable_prewarming: bool = None
     ):
-        self._warm_pool_size = warm_pool_size
-        self._max_dedicated_clients = max_dedicated_clients
-        self._prewarming_batch_size = prewarming_batch_size
-        self._cleanup_interval = cleanup_interval_seconds
-        self._client_max_age = client_max_age_seconds
-        self._enable_prewarming = enable_prewarming
+        # Use environment variables with defaults for production optimization
+        self._warm_pool_size = warm_pool_size or TTS_POOL_SIZE
+        self._max_dedicated_clients = max_dedicated_clients or (TTS_POOL_SIZE * 2)
+        self._prewarming_batch_size = prewarming_batch_size or TTS_PREWARMING_BATCH_SIZE
+        self._cleanup_interval = cleanup_interval_seconds or TTS_CLEANUP_INTERVAL_SECONDS
+        self._client_max_age = client_max_age_seconds or TTS_CLIENT_MAX_AGE_SECONDS
+        self._enable_prewarming = enable_prewarming if enable_prewarming is not None else TTS_POOL_PREWARMING_ENABLED
         
         # Session-specific dedicated clients
         self._dedicated_clients: Dict[str, TtsSessionClient] = {}
