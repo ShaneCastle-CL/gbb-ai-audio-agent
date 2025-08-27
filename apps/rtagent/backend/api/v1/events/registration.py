@@ -8,7 +8,6 @@ Registers legacy handlers with the V1 CallEventProcessor for clean event process
 
 from .processor import get_call_event_processor
 from .handlers import CallEventHandlers
-from .voice_live_handlers import VoiceLiveHandlers
 from .types import ACSEventTypes, V1EventTypes
 from ..handlers.dtmf_validation_lifecycle import DTMFValidationLifecycle
 from utils.ml_logging import get_logger
@@ -100,91 +99,6 @@ def register_default_handlers() -> None:
     _handlers_registered = True  # Mark as registered
     logger.info("✅ V1 call event handlers registered successfully")
 
-
-def register_voice_live_handlers() -> None:
-    """
-    Register Live Voice event handlers with the V1 Event Processor.
-    
-    This function integrates Live Voice events with the existing CallEventProcessor
-    to ensure consistent event processing patterns across the application.
-    """
-    logger.info("🎤 Registering Live Voice event handlers...")
-    processor = get_call_event_processor()
-    
-    # Register session management handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_SESSION_INITIALIZED,
-        VoiceLiveHandlers.handle_session_initialized
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_SESSION_CONNECTED,
-        VoiceLiveHandlers.handle_session_connected
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_SESSION_DISCONNECTED,
-        VoiceLiveHandlers.handle_session_disconnected
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_SESSION_ERROR,
-        VoiceLiveHandlers.handle_session_error
-    )
-    
-    # Register Azure AI Speech handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_AZURE_SPEECH_CONNECTED,
-        VoiceLiveHandlers.handle_azure_speech_connected
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_AZURE_SPEECH_DISCONNECTED,
-        VoiceLiveHandlers.handle_azure_speech_disconnected
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_AZURE_SPEECH_ERROR,
-        VoiceLiveHandlers.handle_azure_speech_error
-    )
-    
-    # Register audio processing handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_AUDIO_DATA_RECEIVED,
-        VoiceLiveHandlers.handle_audio_data_received
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_AUDIO_PROCESSING_ERROR,
-        VoiceLiveHandlers.handle_audio_processing_error
-    )
-    
-    # Register text processing handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_TEXT_TRANSCRIPTION_RECEIVED,
-        VoiceLiveHandlers.handle_text_transcription_received
-    )
-    
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_TEXT_RESPONSE_GENERATED,
-        VoiceLiveHandlers.handle_text_response_generated
-    )
-    
-    # Register configuration handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_CONFIGURATION_UPDATED,
-        VoiceLiveHandlers.handle_configuration_updated
-    )
-    
-    # Register performance monitoring handlers
-    processor.register_handler(
-        V1EventTypes.LIVE_VOICE_METRICS_UPDATED,
-        VoiceLiveHandlers.handle_metrics_updated
-    )
-    
-    logger.info("✅ Live Voice event handlers registered successfully")
-
-
 def register_all_handlers() -> None:
     """
     Register all event handlers (Call and Live Voice) with the V1 Event Processor.
@@ -193,8 +107,6 @@ def register_all_handlers() -> None:
     the complete event processing system.
     """
     register_default_handlers()
-    register_voice_live_handlers()
-
 
 def get_processor_stats() -> dict:
     """

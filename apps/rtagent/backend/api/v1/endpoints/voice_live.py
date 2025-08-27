@@ -43,7 +43,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 # Core application imports
-from apps.rtagent.backend.settings import ENABLE_AUTH_VALIDATION
+from config.app_config import ENABLE_AUTH_VALIDATION
 from utils.ml_logging import get_logger
 
 # V1 components
