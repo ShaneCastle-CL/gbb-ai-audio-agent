@@ -8,6 +8,7 @@ class StreamMode(Enum):
     TRANSCRIPTION = (
         "transcription"  # ACS <-> Azure AI Speech realtime transcription streaming
     )
+    VOICE_LIVE = "voice_live"  # Azure AI Voice Live streaming mode
     REALTIME = "realtime"  # Real-time WebRTC streaming for browser clients
 
     def __str__(self) -> str:
@@ -23,13 +24,3 @@ class StreamMode(Enum):
         raise ValueError(
             f"Invalid stream mode: {value}. Valid options: {[m.value for m in cls]}"
         )
-
-    @property
-    def is_audio_streaming(self) -> bool:
-        """Check if this mode involves direct audio streaming"""
-        return self in [StreamMode.MEDIA, StreamMode.REALTIME]
-
-    @property
-    def is_acs_compatible(self) -> bool:
-        """Check if this mode is compatible with Azure Communication Services"""
-        return self in [StreamMode.MEDIA, StreamMode.TRANSCRIPTION]

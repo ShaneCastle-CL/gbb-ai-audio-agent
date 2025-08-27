@@ -426,3 +426,7 @@ _back
 .secrets
 .env.test
 .gitignore
+
+baseline_results/
+tests/load/sessions/
+

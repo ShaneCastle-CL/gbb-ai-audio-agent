@@ -78,7 +78,7 @@ class CallEventHandlers:
                             "target_number", target_number
                         )
                     if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
+                        await context.memo_manager.persist_to_redis_async(context.redis_mgr)
                 except Exception as e:
                     logger.error(f"Failed to update call state: {e}")
 
@@ -112,7 +112,7 @@ class CallEventHandlers:
                     context.memo_manager.update_context("caller_info", caller_info)
                     context.memo_manager.update_context("api_version", "v1")
                     if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
+                        await context.memo_manager.persist_to_redis_async(context.redis_mgr)
                 except Exception as e:
                     logger.error(f"Failed to initialize inbound call state: {e}")
 
@@ -144,7 +144,7 @@ class CallEventHandlers:
                         "answered_at", datetime.utcnow().isoformat() + "Z"
                     )
                     if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
+                        await context.memo_manager.persist_to_redis_async(context.redis_mgr)
                 except Exception as e:
                     logger.error(f"Failed to update call answer state: {e}")
 
@@ -199,7 +199,7 @@ class CallEventHandlers:
                 if context.memo_manager:
                     context.memo_manager.update_context("last_webhook_event", context.event_type)
                     if context.redis_mgr:
-                        context.memo_manager.persist_to_redis(context.redis_mgr)
+                        await context.memo_manager.persist_to_redis_async(context.redis_mgr)
             except Exception as e:
                 logger.error(f"Failed to update webhook stats: {e}")
 
@@ -505,8 +505,8 @@ class CallEventHandlers:
                 
             if context.memo_manager and context.redis_mgr:
                 # Persist final state before cleanup
-                context.memo_manager.persist_to_redis(context.redis_mgr)
-                logger.info(f"🧹 Call state cleaned up for {context.call_connection_id}")
+                await context.memo_manager.persist_to_redis_async(context.redis_mgr)
+            logger.info(f"🧹 Call state cleaned up for {context.call_connection_id}")
         except Exception as e:
             logger.error(f"Failed to cleanup call state: {e}")
 

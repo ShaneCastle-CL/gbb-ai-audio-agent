@@ -8,5 +8,11 @@ the app from the direct SDK dependency.
 
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from src.speech.text_to_speech import SpeechSynthesizer
+from src.speech.voice_live import AzureVoiceLiveClient, create_voice_live_client
 
-__all__ = ["SpeechSynthesizer", "StreamingSpeechRecognizerFromBytes"]
+__all__ = [
+    "SpeechSynthesizer", 
+    "StreamingSpeechRecognizerFromBytes", 
+    "AzureVoiceLiveClient",
+    "create_voice_live_client"
+]
