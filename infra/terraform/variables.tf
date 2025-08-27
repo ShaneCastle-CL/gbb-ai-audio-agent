@@ -109,7 +109,7 @@ variable "redis_sku" {
   default     = "MemoryOptimized_M20"
   validation {
     condition = contains([
-      "MemoryOptimized_M10", "MemoryOptimized_M20", "MemoryOptimized_M50", 
+      "MemoryOptimized_M10", "MemoryOptimized_M20", "MemoryOptimized_M50",
       "MemoryOptimized_M100", "ComputeOptimized_X5", "ComputeOptimized_X10"
     ], var.redis_sku)
     error_message = "Redis SKU must be a valid Enterprise tier SKU."
