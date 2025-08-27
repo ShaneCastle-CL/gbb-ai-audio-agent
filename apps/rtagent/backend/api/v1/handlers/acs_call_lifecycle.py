@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid  # 🎯 Added for inbound call session ID generation
 from typing import Any, Dict, Optional, List
 from datetime import datetime
 
@@ -27,7 +28,7 @@ from fastapi.responses import JSONResponse
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from apps.rtagent.backend.settings import (
+from config import (
     ACS_STREAMING_MODE,
     GREETING,
     GREETING_VOICE_TTS,
@@ -191,6 +192,7 @@ class ACSLifecycleHandler:
         target_number: str,
         redis_mgr,
         call_id: str = None,
+        browser_session_id: str = None,  # 🎯 NEW: Browser session ID for UI coordination
     ) -> Dict[str, Any]:
         """
         Initiate an outbound call with orchestrator support.
@@ -201,6 +203,8 @@ class ACSLifecycleHandler:
         :param redis_mgr: Redis manager instance for state persistence
         :param call_id: Optional call ID for tracking (auto-generated if None)
         :type call_id: str
+        :param browser_session_id: Browser session ID for UI/ACS coordination
+        :type browser_session_id: str
         :return: Call initiation result
         :rtype: Dict[str, Any]
         :raises HTTPException: When ACS caller is not initialized or call fails
@@ -247,8 +251,23 @@ class ACSLifecycleHandler:
                     {
                         "call.connection.id": call_id,
                         "call.success": True,
+                        "browser.session_id": browser_session_id,
                     },
                 )
+
+                # 🎯 CRITICAL: Store browser session ID mapping for media endpoint coordination
+                if browser_session_id and redis_mgr:
+                    try:
+                        # Store the mapping: call_connection_id -> browser_session_id
+                        # This enables the media endpoint to use the browser's session ID
+                        await redis_mgr.set(
+                            f"call_session_map:{call_id}", 
+                            browser_session_id,
+                            ex=3600  # Expire after 1 hour
+                        )
+                        logger.info(f"🔗 Stored session mapping: {call_id} -> {browser_session_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to store session mapping: {e}")
 
                 # Emit call initiated event for business logic processing
                 await self._emit_call_event(
@@ -259,6 +278,7 @@ class ACSLifecycleHandler:
                         "api_version": "v1",
                         "call_direction": "outbound",
                         "initiated_at": datetime.utcnow().isoformat() + "Z",
+                        "browser_session_id": browser_session_id,  # Include in event data
                     },
                     redis_mgr,
                 )
@@ -319,6 +339,7 @@ class ACSLifecycleHandler:
         self,
         request_body: Dict[str, Any],
         acs_caller,
+        redis_mgr=None,  # 🎯 Added for session mapping storage
     ) -> JSONResponse:
         """
         Accept and process inbound call events.
@@ -356,6 +377,8 @@ class ACSLifecycleHandler:
                             event_data, span
                         )
                     elif event_type == "Microsoft.Communication.IncomingCall":
+                        # Store redis_mgr for session mapping
+                        self._redis_mgr = redis_mgr
                         return await self._handle_incoming_call(
                             event_data, acs_caller, span
                         )
@@ -433,12 +456,18 @@ class ACSLifecycleHandler:
             span.set_status(Status(StatusCode.ERROR, "Missing incoming call context"))
             raise HTTPException(400, "Missing incoming call context")
 
+        # 🎯 CRITICAL: Generate unique session ID for inbound call UI monitoring
+        # This creates a session that dashboards can connect to for monitoring inbound calls
+        inbound_session_id = f"inbound_{str(uuid.uuid4())}"
+        logger.info(f"🆔 Generated unique session ID for inbound call: {inbound_session_id}")
+
         safe_set_span_attributes(
             span,
             {
                 "call.caller_id": caller_id,
                 "call.direction": "inbound",
                 "call.from.kind": caller_info.get("kind"),
+                "call.session_id": inbound_session_id,  # Track session ID in telemetry
             },
         )
 
@@ -465,11 +494,26 @@ class ACSLifecycleHandler:
                     "call.connection.id": call_connection_id,
                     "call.answer_latency_ms": latency * 1000,
                     "call.answered": True,
+                    "call.session_id": inbound_session_id,
                 },
             )
 
+            # 🎯 CRITICAL: Store session mapping for inbound call UI coordination
+            # This allows dashboards to monitor inbound calls by connecting to the session
+            try:
+                # Use the same Redis pattern as outbound calls but pass redis_mgr if available
+                if hasattr(self, '_redis_mgr') and self._redis_mgr:
+                    await self._redis_mgr.set(
+                        f"call_session_map:{call_connection_id}", 
+                        inbound_session_id,
+                        ex=3600  # Expire after 1 hour
+                    )
+                    logger.info(f"🔗 Stored inbound call session mapping: {call_connection_id} -> {inbound_session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store inbound call session mapping: {e}")
+
             logger.info(
-                f"✅ Call answered successfully: {call_connection_id} (latency: {latency:.3f}s)"
+                f"✅ Call answered successfully: {call_connection_id} (latency: {latency:.3f}s, session: {inbound_session_id})"
             )
         else:
             logger.warning("⚠️ Call answered but no connection ID available")
@@ -479,7 +523,9 @@ class ACSLifecycleHandler:
             {
                 "status": "call answered",
                 "call_connection_id": call_connection_id,
+                "session_id": inbound_session_id,  # 🎯 Include session ID for UI coordination
                 "caller_id": caller_id,
+                "call_direction": "inbound",
                 "answered_at": datetime.utcnow().isoformat() + "Z",
             },
             status_code=200,

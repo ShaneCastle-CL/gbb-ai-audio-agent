@@ -38,10 +38,12 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import trace
 from src.pools.async_pool import AsyncPool
-from src.pools.websocket_manager import ThreadSafeWebSocketManager
+from src.pools.connection_manager import ThreadSafeConnectionManager
 from src.pools.session_metrics import ThreadSafeSessionMetrics
 
-from apps.rtagent.backend.settings import (
+# Import clean application configuration  
+from config.app_config import AppConfig
+from config.app_settings import (
     AGENT_AUTH_CONFIG,
     AGENT_CLAIM_INTAKE_CONFIG,
     AGENT_GENERAL_INFO_CONFIG,
@@ -118,14 +120,39 @@ async def lifespan(app: FastAPI):
             }
         )
 
+        # Initialize clean application configuration
+        app_config = AppConfig()
+        logger.info(f"Configuration loaded: TTS Pool={app_config.speech_pools.tts_pool_size}, "
+                   f"STT Pool={app_config.speech_pools.stt_pool_size}, "
+                   f"Max Connections={app_config.connections.max_connections}")
+
         # ------------------------ Process-wide shared state -------------------
-        # Dashboard sockets & greeted set
-        # Thread-safe WebSocket client management
+        # Thread-safe connection management and session tracking
         from src.pools.session_manager import ThreadSafeSessionManager
 
-        app.state.websocket_manager = ThreadSafeWebSocketManager()
-        app.state.session_manager = ThreadSafeSessionManager()
+        # Initialize Redis first (needed by connection manager)
+        span.set_attribute("startup.stage", "redis")
+        try:
+            app.state.redis = AzureRedisManager()
+            await app.state.redis.initialize()
+            logger.info("✅ Redis initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Redis initialization failed: {e}")
+            raise RuntimeError(f"Redis initialization failed: {e}")
 
+        # Initialize clean connection manager with config integration
+        app.state.conn_manager = ThreadSafeConnectionManager(
+            max_connections=app_config.connections.max_connections,
+            queue_size=app_config.connections.queue_size,
+            enable_connection_limits=app_config.connections.enable_limits,
+        )
+        
+        logger.info(
+            f"✅ Connection manager initialized: max_connections={app_config.connections.max_connections}, "
+            f"queue_size={app_config.connections.queue_size}, limits_enabled={app_config.connections.enable_limits}"
+        )
+
+        app.state.session_manager = ThreadSafeSessionManager()
         app.state.greeted_call_ids = set()  # avoid double greetings
 
         # Thread-safe session metrics for visibility
@@ -133,10 +160,8 @@ async def lifespan(app: FastAPI):
 
         # ------------------------ Speech Pools (TTS / STT) -------------------
         span.set_attribute("startup.stage", "speech_pools")
-
-        # Pool sizes via env; tune to expected per-worker concurrency
-        POOL_SIZE_TTS = int(os.getenv("POOL_SIZE_TTS", "8"))
-        POOL_SIZE_STT = int(os.getenv("POOL_SIZE_STT", "8"))
+        
+        logger.info(f"Initializing speech pools: TTS={app_config.speech_pools.tts_pool_size}, STT={app_config.speech_pools.stt_pool_size}")
 
         async def make_tts() -> SpeechSynthesizer:
             """
@@ -151,7 +176,7 @@ async def lifespan(app: FastAPI):
             :raises SpeechServiceError: If TTS service initialization fails.
             """
             # If SDK benefits from a warm-up, you can synth a short phrase here.
-            return SpeechSynthesizer(voice=GREETING_VOICE_TTS, playback="always")
+            return SpeechSynthesizer(voice=app_config.voice.default_voice, playback="always")
 
         async def make_stt() -> StreamingSpeechRecognizerFromBytes:
             """
@@ -165,6 +190,13 @@ async def lifespan(app: FastAPI):
             :return: Configured StreamingSpeechRecognizerFromBytes instance ready for transcription.
             :raises SpeechServiceError: If STT service initialization fails.
             """
+            from config.app_settings import (
+                VAD_SEMANTIC_SEGMENTATION,
+                SILENCE_DURATION_MS,
+                RECOGNIZED_LANGUAGE,
+                AUDIO_FORMAT
+            )
+            
             return StreamingSpeechRecognizerFromBytes(
                 use_semantic_segmentation=VAD_SEMANTIC_SEGMENTATION,
                 vad_silence_timeout_ms=SILENCE_DURATION_MS,
@@ -172,8 +204,8 @@ async def lifespan(app: FastAPI):
                 audio_format=AUDIO_FORMAT,
             )
 
-        app.state.tts_pool = AsyncPool(make_tts, POOL_SIZE_TTS)
-        app.state.stt_pool = AsyncPool(make_stt, POOL_SIZE_STT)
+        app.state.tts_pool = AsyncPool(make_tts, app_config.speech_pools.tts_pool_size)
+        app.state.stt_pool = AsyncPool(make_stt, app_config.speech_pools.stt_pool_size)
 
         # Warm both pools concurrently
         await asyncio.gather(
@@ -182,9 +214,6 @@ async def lifespan(app: FastAPI):
         )
 
         # ------------------------ Other singletons ---------------------------
-        span.set_attribute("startup.stage", "redis")
-        app.state.redis = AzureRedisManager()
-
         span.set_attribute("startup.stage", "cosmos_db")
         app.state.cosmos = CosmosDBMongoCoreManager(
             connection_string=AZURE_COSMOS_CONNECTION_STRING,
@@ -230,6 +259,12 @@ async def lifespan(app: FastAPI):
         span.set_attributes(
             {"service.name": "rtagent-api", "shutdown.stage": "cleanup"}
         )
+        
+        # Gracefully stop the connection manager
+        if hasattr(app.state, "conn_manager"):
+            await app.state.conn_manager.stop()
+            logger.info("✅ Connection manager stopped")
+        
         span.set_attribute("shutdown.success", True)
 
 

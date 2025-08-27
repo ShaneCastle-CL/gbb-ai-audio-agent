@@ -26,7 +26,7 @@ from utils.ml_logging import get_logger
 from .types import CallEventContext, ACSEventTypes
 
 from apps.rtagent.backend.api.v1.handlers.dtmf_validation_lifecycle import DTMFValidationLifecycle
-from apps.rtagent.backend.settings import DTMF_VALIDATION_ENABLED
+from config import DTMF_VALIDATION_ENABLED
 
 logger = get_logger("v1.events.handlers")
 tracer = trace.get_tracer(__name__)
@@ -256,9 +256,12 @@ class CallEventHandlers:
                     )
             # Broadcast connection status to WebSocket clients
             try:
-                if context.clients:
+                if context.app_state:
+                    # For ACS calls, use call_connection_id as session_id for proper session isolation
+                    session_id = context.call_connection_id
+                    
                     await broadcast_message(
-                        context.clients,
+                        None,  # clients ignored when using ConnectionManager
                         json.dumps(
                             {
                                 "type": "call_connected",
@@ -269,6 +272,8 @@ class CallEventHandlers:
                                 "validation_flow": "aws_connect_simulation",
                             }
                         ),
+                        app_state=context.app_state,
+                        session_id=session_id,  # 🔒 SESSION-SAFE: Include session_id for proper isolation
                     )
             except Exception as e:
                 logger.error(f"Failed to broadcast call connected: {e}")
@@ -466,7 +471,7 @@ class CallEventHandlers:
             if not context.acs_caller or not context.memo_manager:
                 return
 
-            from apps.rtagent.backend.settings import GREETING, GREETING_VOICE_TTS
+            from config import GREETING, GREETING_VOICE_TTS
             from azure.communication.callautomation import TextSource
 
             # Create greeting source
@@ -497,6 +502,19 @@ class CallEventHandlers:
         try:
             # Basic cleanup - delegate DTMF cleanup to lifecycle handler
             logger.info(f"🧹 Cleaning up call state: {context.call_connection_id}")
+            
+            # 🎯 CRITICAL: Clean up session mapping when call disconnects
+            if context.redis_mgr and context.call_connection_id:
+                try:
+                    session_key = f"call_session_map:{context.call_connection_id}"
+                    session_id = await context.redis_mgr.get(session_key)
+                    if session_id:
+                        await context.redis_mgr.delete(session_key)
+                        logger.info(f"🗑️ Cleaned up session mapping: {context.call_connection_id} -> {session_id}")
+                    else:
+                        logger.debug(f"🗑️ No session mapping found for call {context.call_connection_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up session mapping for {context.call_connection_id}: {e}")
             
             # Clear memo context if available
             if context.memo_manager:

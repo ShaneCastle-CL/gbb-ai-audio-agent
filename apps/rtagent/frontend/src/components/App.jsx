@@ -16,6 +16,35 @@ const API_BASE_URL = backendPlaceholder.startsWith('__')
 const WS_URL = API_BASE_URL.replace(/^https?/, "wss");
 
 /* ------------------------------------------------------------------ *
+ *  SESSION MANAGEMENT
+ * ------------------------------------------------------------------ */
+// Generate or retrieve a persistent session ID for this browser
+const getOrCreateSessionId = () => {
+  const sessionKey = 'voice_agent_session_id';
+  let sessionId = localStorage.getItem(sessionKey);
+  
+  if (!sessionId) {
+    // Generate a new UUID4-style session ID
+    sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem(sessionKey, sessionId);
+    console.log('🆔 Created new session ID:', sessionId);
+  } else {
+    console.log('🆔 Retrieved existing session ID:', sessionId);
+  }
+  
+  return sessionId;
+};
+
+// Force create a new session ID (for session reset)
+const createNewSessionId = () => {
+  const sessionKey = 'voice_agent_session_id';
+  const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem(sessionKey, sessionId);
+  console.log('🆔 Created NEW session ID for reset:', sessionId);
+  return sessionId;
+};
+
+/* ------------------------------------------------------------------ *
  *  STYLES
  * ------------------------------------------------------------------ */
 const styles = {
@@ -2090,8 +2119,11 @@ function RealTimeVoiceApp() {
       // Initialize audio playback system on user gesture
       await initializeAudioPlayback();
 
-      // 1) open WS
-      const socket = new WebSocket(`${WS_URL}/api/v1/realtime/conversation`);
+      // Get or create persistent session ID
+      const sessionId = getOrCreateSessionId();
+
+      // 1) open WS with session ID
+      const socket = new WebSocket(`${WS_URL}/api/v1/realtime/conversation?session_id=${sessionId}`);
       socket.binaryType = "arraybuffer";
 
       socket.onopen = () => {
@@ -2265,6 +2297,60 @@ function RealTimeVoiceApp() {
         appendLog("Ignored non‑JSON frame");
         return;
       }
+
+      // --- NEW: Handle envelope format from backend ---
+      // If message is in envelope format, extract the actual payload
+      if (payload.type && payload.sender && payload.payload && payload.ts) {
+        console.log("📨 Received envelope message:", {
+          type: payload.type,
+          sender: payload.sender,
+          topic: payload.topic,
+          session_id: payload.session_id
+        });
+        
+        // Extract the actual message from the envelope
+        const envelopeType = payload.type;
+        const envelopeSender = payload.sender;
+        const actualPayload = payload.payload;
+        
+        // Transform envelope back to legacy format for compatibility
+        if (envelopeType === "event" && actualPayload.message) {
+          // Status/chat message in envelope
+          payload = {
+            type: "assistant",
+            sender: envelopeSender,
+            speaker: envelopeSender,
+            message: actualPayload.message,
+            content: actualPayload.message
+          };
+        } else if (envelopeType === "assistant_streaming" && actualPayload.content) {
+          // Streaming response in envelope
+          payload = {
+            type: "assistant_streaming",
+            sender: envelopeSender,
+            speaker: envelopeSender,
+            content: actualPayload.content
+          };
+        } else if (envelopeType === "status" && actualPayload.message) {
+          // Status message in envelope
+          payload = {
+            type: "status",
+            sender: envelopeSender,
+            speaker: envelopeSender,
+            message: actualPayload.message,
+            content: actualPayload.message
+          };
+        } else {
+          // For other envelope types, use the payload directly
+          payload = {
+            ...actualPayload,
+            sender: envelopeSender,
+            speaker: envelopeSender
+          };
+        }
+        
+        console.log("📨 Transformed envelope to legacy format:", payload);
+      }
       
       // Handle audio_data messages from backend TTS
       if (payload.type === "audio_data" && payload.data) {
@@ -2339,8 +2425,9 @@ function RealTimeVoiceApp() {
         const streamingSpeaker = speaker || "Assistant";
         setActiveSpeaker(streamingSpeaker);
         setMessages(prev => {
-          if (prev.at(-1)?.streaming) {
-            return prev.map((m,i)=> i===prev.length-1 ? {...m, text:txt} : m);
+          if (prev.at(-1)?.streaming && prev.at(-1)?.speaker === streamingSpeaker) {
+            // Accumulate streaming text chunks instead of replacing
+            return prev.map((m,i)=> i===prev.length-1 ? {...m, text: m.text + txt} : m);
           }
           return [...prev, { speaker:streamingSpeaker, text:txt, streaming:true }];
         });
@@ -2426,7 +2513,12 @@ function RealTimeVoiceApp() {
       const res = await fetch(`${API_BASE_URL}/api/v1/calls/initiate`, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ target_number: targetPhoneNumber }),
+        body: JSON.stringify({ 
+          target_number: targetPhoneNumber,
+          context: {
+            browser_session_id: sessionId  // 🎯 CRITICAL: Pass browser session ID for ACS coordination
+          }
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -2446,15 +2538,52 @@ function RealTimeVoiceApp() {
       relay.onmessage = ({data}) => {
         try {
           const obj = JSON.parse(data);
-          if (obj.type?.startsWith("tool_")) {
-            handleSocketMessage({ data: JSON.stringify(obj) });
+          
+          // Handle envelope format for relay messages
+          let processedObj = obj;
+          if (obj.type && obj.sender && obj.payload && obj.ts) {
+            console.log("📨 Relay received envelope message:", {
+              type: obj.type,
+              sender: obj.sender,
+              topic: obj.topic
+            });
+            
+            // Extract actual message from envelope
+            if (obj.payload.message) {
+              processedObj = {
+                type: obj.type,
+                sender: obj.sender,
+                message: obj.payload.message
+              };
+            } else if (obj.payload.text) {
+              processedObj = {
+                type: obj.type,
+                sender: obj.sender,
+                message: obj.payload.text
+              };
+            } else {
+              // Fallback to using the whole payload as message
+              processedObj = {
+                type: obj.type,
+                sender: obj.sender,
+                message: JSON.stringify(obj.payload)
+              };
+            }
+            console.log("📨 Transformed relay envelope:", processedObj);
+          }
+          
+          if (processedObj.type?.startsWith("tool_")) {
+            handleSocketMessage({ data: JSON.stringify(processedObj) });
             return;
           }
-          const { sender, message } = obj;
-          setMessages(m => [...m, { speaker: sender, text: message }]);
-          setActiveSpeaker(sender);
-          appendLog(`[Relay] ${sender}: ${message}`);
-        } catch {
+          const { sender, message } = processedObj;
+          if (sender && message) {
+            setMessages(m => [...m, { speaker: sender, text: message }]);
+            setActiveSpeaker(sender);
+            appendLog(`[Relay] ${sender}: ${message}`);
+          }
+        } catch (error) {
+          console.error("Relay parse error:", error);
           appendLog("Relay parse error");
         }
       };
@@ -2487,6 +2616,18 @@ function RealTimeVoiceApp() {
               <h1 style={styles.appTitle}>ARTAgent</h1>
             </div>
             <p style={styles.appSubtitle}>Transforming customer interactions with real-time, intelligent voice interactions</p>
+            <div style={{
+              fontSize: '10px',
+              color: '#94a3b8',
+              marginTop: '4px',
+              fontFamily: 'monospace',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              <span>🆔</span>
+              <span>Session: {getOrCreateSessionId().split('_')[1]}</span>
+            </div>
           </div>
           {/* Top Right Help Button */}
           <HelpButton />
@@ -2531,21 +2672,32 @@ function RealTimeVoiceApp() {
                   setResetHovered(false);
                 }}
                 onClick={() => {
-                  // Reset entire session - clear chat and restart
+                  // Reset entire session - clear chat and restart with new session ID
+                  const newSessionId = createNewSessionId();
+                  
+                  // Close existing WebSocket if connected
+                  if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+                    console.log('🔌 Closing WebSocket for session reset...');
+                    socketRef.current.close();
+                  }
+                  
+                  // Reset UI state
                   setMessages([]);
                   setActiveSpeaker(null);
                   stopRecognition();
                   setCallActive(false);
                   setShowPhoneInput(false);
-                  appendLog("🔄️ Session reset - starting fresh");
+                  appendLog(`🔄️ Session reset - new session ID: ${newSessionId.split('_')[1]}`);
                   
                   // Add welcome message
                   setTimeout(() => {
                     setMessages([{ 
                       speaker: "System", 
-                      text: "✅ Session restarted. Ready for a new conversation!" 
+                      text: "✅ Session restarted with new ID. Ready for a fresh conversation!" 
                     }]);
                   }, 500);
+                  
+                  // Note: WebSocket will be reconnected automatically when user starts recording
                 }}
               >
                 ⟲

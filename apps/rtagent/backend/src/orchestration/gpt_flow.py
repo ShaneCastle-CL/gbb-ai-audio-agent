@@ -22,7 +22,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from urllib.parse import urlparse
 
-from apps.rtagent.backend.settings import (
+from config import (
     AZURE_OPENAI_CHAT_DEPLOYMENT_ID,
     AZURE_OPENAI_ENDPOINT,
     TTS_END,
@@ -43,7 +43,7 @@ from apps.rtagent.backend.src.ws_helpers.shared_ws import (
     send_response_to_acs,
     send_tts_audio,
 )
-from apps.rtagent.backend.settings import AZURE_OPENAI_ENDPOINT
+from apps.rtagent.backend.src.ws_helpers.envelopes import make_assistant_streaming_envelope
 from utils.ml_logging import get_logger
 from utils.trace_context import create_trace_context
 from apps.rtagent.backend.src.utils.tracing import (
@@ -459,16 +459,22 @@ async def _emit_streaming_text(
                         voice_style=voice_style,
                         rate=voice_rate,
                     )
-                    speaker = _get_agent_sender_name(cm, include_autoauth=True)
-                    await ws.send_text(
-                        json.dumps(
-                            {
-                                "type": "assistant_streaming",
-                                "content": text,
-                                "speaker": speaker,
-                            }
-                        )
+                    # ✅ SAFE: Use session-aware envelope and connection manager
+                    envelope = make_assistant_streaming_envelope(
+                        content=text,
+                        session_id=session_id,
                     )
+                    if hasattr(ws.app.state, 'conn_manager') and hasattr(ws.state, 'conn_id'):
+                        await ws.app.state.conn_manager.send_to_connection(
+                            ws.state.conn_id, envelope
+                        )
+                    else:
+                        # Fallback for connections not managed by ConnectionManager
+                        await ws.send_text(json.dumps({
+                            "type": "assistant_streaming",
+                            "content": text,
+                            "speaker": _get_agent_sender_name(cm, include_autoauth=True),
+                        }))
                 span.add_event("text_emitted", {"text_length": len(text)})
             except Exception as exc:  # noqa: BLE001
                 span.record_exception(exc)
@@ -493,12 +499,23 @@ async def _emit_streaming_text(
                 voice_style=voice_style,
                 rate=voice_rate,
             )
-            speaker = _get_agent_sender_name(cm, include_autoauth=True)
-            await ws.send_text(
-                json.dumps(
-                    {"type": "assistant_streaming", "content": text, "speaker": speaker}
-                )
+            # ✅ SAFE: Use session-aware envelope and connection manager
+            envelope = make_assistant_streaming_envelope(
+                content=text,
+                session_id=session_id,
             )
+            if hasattr(ws.app.state, 'conn_manager') and hasattr(ws.state, 'conn_id'):
+                await ws.app.state.conn_manager.send_to_connection(
+                    ws.state.conn_id, envelope
+                )
+            else:
+                # Fallback for connections not managed by ConnectionManager
+                speaker = _get_agent_sender_name(cm, include_autoauth=True)
+                await ws.send_text(
+                    json.dumps(
+                        {"type": "assistant_streaming", "content": text, "speaker": speaker}
+                    )
+                )
 
 
 async def _broadcast_dashboard(
@@ -518,14 +535,25 @@ async def _broadcast_dashboard(
     """
     try:
         sender = _get_agent_sender_name(cm, include_autoauth=include_autoauth)
+        
+        # Extract session_id for session-safe broadcasting
+        session_id = (
+            getattr(ws.state, "session_id", None)
+            or getattr(cm, "session_id", None)
+            or ws.headers.get("x-session-id")
+            or "unknown"
+        )
+        
         logger.info(
-            "🎯 dashboard_broadcast: sender='%s' include_autoauth=%s msg='%s...'",
+            "🎯 dashboard_broadcast: sender='%s' include_autoauth=%s msg='%s...' session_id='%s'",
             sender,
             include_autoauth,
             message[:50],
+            session_id,
         )
-        clients = await ws.app.state.websocket_manager.get_clients_snapshot()
-        await broadcast_message(clients, message, sender)
+        
+        # 🔒 SESSION-SAFE: Use session-specific broadcasting instead of topic-based
+        await broadcast_message(None, message, sender, app_state=ws.app.state, session_id=session_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to broadcast dashboard message: %s", exc)
 
@@ -1179,7 +1207,7 @@ async def _handle_tool_call(  # noqa: PLR0913
         call_short_id = uuid.uuid4().hex[:8]
         trace_ctx.set_attribute("tool.call_id", call_short_id)
 
-        await push_tool_start(ws, call_short_id, tool_name, params, is_acs=is_acs)
+        await push_tool_start(ws, call_short_id, tool_name, params, is_acs=is_acs, session_id=session_id)
         trace_ctx.add_event("tool_start_pushed", {"call_id": call_short_id})
 
         with create_trace_context(
@@ -1254,6 +1282,7 @@ async def _handle_tool_call(  # noqa: PLR0913
             elapsed_ms,
             result=result,
             is_acs=is_acs,
+            session_id=session_id,
         )
         trace_ctx.add_event("tool_end_pushed", {"elapsed_ms": elapsed_ms})
 
