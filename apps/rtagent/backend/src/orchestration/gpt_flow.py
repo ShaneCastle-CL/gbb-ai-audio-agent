@@ -565,7 +565,138 @@ async def _broadcast_dashboard(
 # ---------------------------------------------------------------------------
 # Chat + streaming helpers – with explicit retry & header capture
 # ---------------------------------------------------------------------------
-def _build_chat_kwargs(
+def _validate_conversation_history(history: List[JSONDict], agent_name: str) -> Tuple[bool, Optional[str]]:
+    """
+    Validate conversation history for OpenAI API compliance.
+    
+    Checks for common conversation integrity issues that cause OpenAI API errors:
+    - Orphaned tool calls (assistant with tool_calls but no tool responses)
+    - Invalid message sequences
+    - Malformed tool call structures
+    
+    Args:
+        history: List of conversation messages
+        agent_name: Name of the agent for logging context
+        
+    Returns:
+        Tuple[bool, Optional[str]]: (is_valid, error_message)
+    """
+    if not history:
+        return True, None
+        
+    # Track tool calls that need responses
+    pending_tool_calls = {}
+    
+    for i, msg in enumerate(history):
+        role = msg.get("role")
+        
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                # Register tool calls that need responses
+                for tool_call in tool_calls:
+                    if isinstance(tool_call, dict) and "id" in tool_call:
+                        pending_tool_calls[tool_call["id"]] = i
+                        
+        elif role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            if tool_call_id and tool_call_id in pending_tool_calls:
+                # Mark tool call as resolved
+                del pending_tool_calls[tool_call_id]
+    
+    # Check for orphaned tool calls
+    if pending_tool_calls:
+        orphaned_ids = list(pending_tool_calls.keys())
+        error_msg = f"Orphaned tool calls detected: {orphaned_ids}"
+        logger.error(
+            "Conversation history validation failed for agent %s: %s",
+            agent_name,
+            error_msg,
+            extra={
+                "agent_name": agent_name,
+                "orphaned_tool_calls": orphaned_ids,
+                "history_length": len(history),
+                "event_type": "conversation_validation_error"
+            }
+        )
+        return False, error_msg
+    
+    logger.debug(
+        "Conversation history validation passed for agent %s: %d messages",
+        agent_name,
+        len(history),
+        extra={
+            "agent_name": agent_name,
+            "history_length": len(history),
+            "event_type": "conversation_validation_success"
+        }
+    )
+    return True, None
+
+
+def _repair_conversation_history(history: List[JSONDict], agent_name: str) -> List[JSONDict]:
+    """
+    Attempt to repair conversation history by adding missing tool responses.
+    
+    This is a recovery mechanism to prevent conversation corruption from
+    causing cascading failures.
+    
+    Args:
+        history: Original conversation history
+        agent_name: Name of the agent for logging context
+        
+    Returns:
+        List[JSONDict]: Repaired conversation history
+    """
+    repaired_history = history.copy()
+    pending_tool_calls = {}
+    
+    # Identify orphaned tool calls
+    for i, msg in enumerate(history):
+        role = msg.get("role")
+        
+        if role == "assistant":
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                for tool_call in tool_calls:
+                    if isinstance(tool_call, dict) and "id" in tool_call:
+                        pending_tool_calls[tool_call["id"]] = tool_call
+                        
+        elif role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            if tool_call_id and tool_call_id in pending_tool_calls:
+                del pending_tool_calls[tool_call_id]
+    
+    # Add synthetic tool responses for orphaned tool calls
+    if pending_tool_calls:
+        logger.warning(
+            "Repairing conversation history for agent %s: adding %d synthetic tool responses",
+            agent_name,
+            len(pending_tool_calls),
+            extra={
+                "agent_name": agent_name,
+                "orphaned_count": len(pending_tool_calls),
+                "event_type": "conversation_history_repair"
+            }
+        )
+        
+        for tool_call_id, tool_call in pending_tool_calls.items():
+            synthetic_response = {
+                "tool_call_id": tool_call_id,
+                "role": "tool",
+                "name": tool_call.get("function", {}).get("name", "unknown_tool"),
+                "content": json.dumps({
+                    "error": "Tool execution was interrupted",
+                    "message": "The previous tool execution was interrupted. Please try again.",
+                    "synthetic_response": True
+                }),
+            }
+            repaired_history.append(synthetic_response)
+    
+    return repaired_history
+
+
+def _build_completion_kwargs(
     *,
     history: List[JSONDict],
     model_id: str,
@@ -981,7 +1112,7 @@ async def process_gpt_response(  # noqa: PLR0913
     )
 
     with tracer.start_as_current_span("gpt_flow.process_response", attributes=span_attrs) as span:
-        chat_kwargs = _build_chat_kwargs(
+        chat_kwargs = _build_completion_kwargs(
             history=agent_history,
             model_id=model_id,
             temperature=temperature,
@@ -1175,7 +1306,10 @@ async def _handle_tool_call(  # noqa: PLR0913
     session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Execute a tool, emit telemetry events, and trigger GPT follow-up.
+    Execute a tool with conversation history integrity protection.
+    
+    This function now implements transaction-like behavior to prevent
+    conversation history corruption that leads to OpenAI API errors.
 
     :param tool_name: Name of the tool function to execute.
     :param tool_id: Unique identifier for this tool call instance.
@@ -1221,7 +1355,40 @@ async def _handle_tool_call(  # noqa: PLR0913
             "args_length": len(args) if args else 0,
         },
     ) as trace_ctx:
-        params: JSONDict = json.loads(args or "{}")
+        # Get conversation history for tool execution
+        agent_history = cm.get_history(agent_name)
+        
+        try:
+            params: JSONDict = json.loads(args or "{}")
+        except json.JSONDecodeError as json_exc:
+            # JSON parsing failure - maintain conversation integrity
+            trace_ctx.set_attribute("error", f"Invalid JSON args: {json_exc}")
+            logger.error(
+                "Invalid JSON in tool args: tool=%s, args=%s, error=%s",
+                tool_name,
+                args[:200] if args else "None",
+                json_exc,
+                extra={
+                    "tool_name": tool_name,
+                    "args_preview": args[:200] if args else "None",
+                    "error_type": "json_decode_error",
+                    "event_type": "tool_execution_error"
+                }
+            )
+            # Add error tool response to prevent OpenAI "orphaned tool call" errors
+            agent_history.append(
+                {
+                    "tool_call_id": tool_id,
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps({
+                        "error": "Invalid tool arguments format",
+                        "message": "The tool arguments could not be parsed. Please try again."
+                    }),
+                }
+            )
+            raise ValueError(f"Invalid JSON arguments for tool '{tool_name}': {json_exc}")
+        
         fn = function_mapping.get(tool_name)
         if fn is None:
             trace_ctx.set_attribute("error", f"Unknown tool '{tool_name}'")
@@ -1230,8 +1397,20 @@ async def _handle_tool_call(  # noqa: PLR0913
                 tool_name,
                 extra={
                     "tool_name": tool_name,
-                    "available_tools": list(function_mapping.keys() ),
+                    "available_tools": list(function_mapping.keys()),
                     "event_type": "tool_execution_error"
+                }
+            )
+            # Add error tool response to prevent OpenAI "orphaned tool call" errors
+            agent_history.append(
+                {
+                    "tool_call_id": tool_id,
+                    "role": "tool",
+                    "name": tool_name,
+                    "content": json.dumps({
+                        "error": "Unknown tool",
+                        "message": f"Tool '{tool_name}' is not available. Available tools: {list(function_mapping.keys())}"
+                    }),
                 }
             )
             raise ValueError(f"Unknown tool '{tool_name}'")
@@ -1250,6 +1429,9 @@ async def _handle_tool_call(  # noqa: PLR0913
             metadata={"tool_name": tool_name, "call_id": call_short_id, "parameters": params},
         ) as exec_ctx:
             t0 = time.perf_counter()
+            result = None
+            elapsed_ms = 0
+            
             try:
                 result_raw = await fn(params)
                 elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1275,6 +1457,17 @@ async def _handle_tool_call(  # noqa: PLR0913
                         "event_type": "tool_execution_success"
                     }
                 )
+                
+                # Add successful tool response to prevent conversation corruption
+                agent_history.append(
+                    {
+                        "tool_call_id": tool_id,
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": json.dumps(result),
+                    }
+                )
+                
             except Exception as tool_exc:
                 elapsed_ms = (time.perf_counter() - t0) * 1000
                 exec_ctx.set_attribute("execution.duration_ms", elapsed_ms)
@@ -1295,32 +1488,70 @@ async def _handle_tool_call(  # noqa: PLR0913
                         "event_type": "tool_execution_error"
                     }
                 )
-                raise
+                
+                # Add error tool response to prevent OpenAI "orphaned tool call" errors
+                # This is the #1 cause of conversation corruption and 400 API errors
+                error_result = {
+                    "error": type(tool_exc).__name__,
+                    "message": "Tool execution failed. Please try again or contact support.",
+                    "details": str(tool_exc)[:500]  # Truncate long error messages
+                }
+                
+                agent_history.append(
+                    {
+                        "tool_call_id": tool_id,
+                        "role": "tool",
+                        "name": tool_name,
+                        "content": json.dumps(error_result),
+                    }
+                )
+                
+                # Use error result for push_tool_end
+                result = error_result
+                
+                # Still push tool_end with error status
+                await push_tool_end(
+                    ws,
+                    call_short_id,
+                    tool_name,
+                    "error",
+                    elapsed_ms,
+                    error=str(tool_exc),
+                    is_acs=is_acs,
+                    session_id=session_id,
+                )
+                trace_ctx.add_event("tool_end_pushed", {"elapsed_ms": elapsed_ms, "status": "error"})
 
-        agent_history = cm.get_history(agent_name)
-        agent_history.append(
-            {
-                "tool_call_id": tool_id,
-                "role": "tool",
-                "name": tool_name,
-                "content": json.dumps(result),
-            }
-        )
+                if is_acs:
+                    await _broadcast_dashboard(ws, cm, f"🛠️ {tool_name} ❌", include_autoauth=False)
 
-        await push_tool_end(
-            ws,
-            call_short_id,
-            tool_name,
-            "success",
-            elapsed_ms,
-            result=result,
-            is_acs=is_acs,
-            session_id=session_id,
-        )
-        trace_ctx.add_event("tool_end_pushed", {"elapsed_ms": elapsed_ms})
+                # CRITICAL: Don't re-raise the exception to prevent conversation corruption
+                # Instead, proceed with the error result and let GPT handle the error response
+                logger.warning(
+                    "Tool execution completed with error, continuing with error result to maintain conversation integrity",
+                    extra={
+                        "tool_name": tool_name,
+                        "error_handled": True,
+                        "event_type": "tool_error_recovery"
+                    }
+                )
 
-        if is_acs:
-            await _broadcast_dashboard(ws, cm, f"🛠️ {tool_name} ✔️", include_autoauth=False)
+        # Only push success tool_end if execution was successful (no error in result)
+        if elapsed_ms > 0 and result and (not isinstance(result, dict) or not result.get("error")):
+            await push_tool_end(
+                ws,
+                call_short_id,
+                tool_name,
+                "success",
+                elapsed_ms,
+                result=result,
+                is_acs=is_acs,
+                session_id=session_id,
+            )
+            trace_ctx.add_event("tool_end_pushed", {"elapsed_ms": elapsed_ms, "status": "success"})
+
+            if is_acs:
+                await _broadcast_dashboard(ws, cm, f"🛠️ {tool_name} ✔️", include_autoauth=False)
 
         logger.info(
             "Starting tool follow-up: tool=%s",
@@ -1329,21 +1560,38 @@ async def _handle_tool_call(  # noqa: PLR0913
         )
 
         trace_ctx.add_event("starting_tool_followup")
-        await _process_tool_followup(
-            cm,
-            ws,
-            agent_name,
-            is_acs,
-            model_id,
-            temperature,
-            top_p,
-            max_tokens,
-            available_tools,
-            call_connection_id,
-            session_id,
-        )
+        
+        # Validate conversation history before follow-up
+        try:
+            await _process_tool_followup(
+                cm,
+                ws,
+                agent_name,
+                is_acs,
+                model_id,
+                temperature,
+                top_p,
+                max_tokens,
+                available_tools,
+                call_connection_id,
+                session_id,
+            )
+        except Exception as followup_exc:
+            logger.error(
+                "Tool follow-up failed: tool=%s error=%s",
+                tool_name,
+                followup_exc,
+                extra={
+                    "tool_name": tool_name,
+                    "followup_error": str(followup_exc),
+                    "event_type": "tool_followup_error"
+                },
+                exc_info=True
+            )
+            # Don't propagate follow-up errors to prevent cascading failures
+            
         trace_ctx.set_attribute("tool.execution_complete", True)
-        return result
+        return result or {}
 
 
 async def _process_tool_followup(  # noqa: PLR0913

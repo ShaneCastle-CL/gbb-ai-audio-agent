@@ -161,24 +161,83 @@ async def _semantic_search(question: str, rec: Dict[str, str | int | bool]) -> s
 async def find_information_for_policy(
     args: PolicyQueryArgs,
 ) -> PolicyQueryResult:
-    pid = args["policy_id"].strip().upper()
-    q = args["question"].strip()
+    """
+    This function is wrapped to prevent all exceptions
+    that could cause 400 errors and conversation corruption.
+    """
+    try:
+        # Input validation without raising exceptions
+        if not isinstance(args, dict):
+            logger.error("Invalid args type: %s. Expected dict.", type(args))
+            return {
+                "found": False,
+                "answer": "Invalid request format. Please try again.",
+                "policy_id": "unknown",
+                "caller_name": None,
+                "raw_data": None,
+            }
+        
+        pid = args.get("policy_id", "").strip().upper() if args.get("policy_id") else ""
+        q = args.get("question", "").strip() if args.get("question") else ""
+        
+        if not pid:
+            logger.error("policy_id is required and cannot be empty")
+            return {
+                "found": False,
+                "answer": "Policy ID is required. Please provide your policy number.",
+                "policy_id": "",
+                "caller_name": None,
+                "raw_data": None,
+            }
+        
+        if not q:
+            logger.error("question is required and cannot be empty")
+            return {
+                "found": False,
+                "answer": "Please ask a specific question about your policy.",
+                "policy_id": pid,
+                "caller_name": None,
+                "raw_data": None,
+            }
 
-    rec = policy_db.get(pid)
-    if rec is None:
-        logger.error("Policy not found: %s", pid)
-        raise KeyError(f"Policy '{pid}' not found.")
+        rec = policy_db.get(pid)
+        if rec is None:
+            logger.warning("Policy not found: %s", pid)
+            return {
+                "found": False,
+                "answer": f"Policy '{pid}' not found. Please verify your policy number.",
+                "policy_id": pid,
+                "caller_name": None,
+                "raw_data": None,
+            }
 
-    key = _best_attr(q)
-    answer = _render(rec, key) if key else None
-    if answer is None:
-        answer = await _semantic_search(q, rec)
+        key = _best_attr(q)
+        answer = _render(rec, key) if key else None
+        if answer is None:
+            answer = await _semantic_search(q, rec)
 
-    logger.info("Answer for %s: %s", pid, answer)
-    return {
-        "found": True,
-        "answer": answer,
-        "policy_id": pid,
-        "caller_name": rec["policyholder"],
-        "raw_data": rec,
-    }
+        logger.info("Answer for %s: %s", pid, answer)
+        return {
+            "found": True,
+            "answer": answer,
+            "policy_id": pid,
+            "caller_name": rec["policyholder"],
+            "raw_data": rec,
+        }
+        
+    except Exception as exc:
+        # Catch all exceptions to prevent 400 errors
+        logger.error(
+            "Policy query failed: policy_id=%s, question=%s, error=%s",
+            args.get("policy_id", "unknown") if isinstance(args, dict) else "invalid_args",
+            args.get("question", "unknown")[:100] if isinstance(args, dict) else "invalid_args",
+            exc,
+            exc_info=True
+        )
+        return {
+            "found": False,
+            "answer": "I'm experiencing technical difficulties. Please try again or contact customer service for assistance.",
+            "policy_id": args.get("policy_id", "unknown") if isinstance(args, dict) else "unknown",
+            "caller_name": None,
+            "raw_data": None,
+        }

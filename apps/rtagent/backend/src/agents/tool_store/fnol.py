@@ -136,22 +136,38 @@ def _validate(data: ClaimIntakeFull) -> tuple[bool, str]:
 
 async def record_fnol(args: ClaimIntakeFull) -> Dict[str, Any]:
     """Store the claim if validation passes; else enumerate missing fields."""
-    args.setdefault("date_reported", datetime.now(timezone.utc).date().isoformat())
-
-    ok, msg = _validate(args)
-    if not ok:
+    # Input type validation to prevent 400 errors
+    if not isinstance(args, dict):
+        log.error("Invalid args type: %s. Expected dict.", type(args))
         return {
             "claim_success": False,
-            "missing_data": f"{msg}.",
+            "missing_data": "Invalid request format. Please provide claim details as a structured object.",
         }
+    
+    try:
+        args.setdefault("date_reported", datetime.now(timezone.utc).date().isoformat())
 
-    claim_id = _new_claim_id()
-    claims_db.append({**args, "claim_id": claim_id, "status": "OPEN"})
-    log.info("📄 FNOL recorded (%s) for %s", claim_id, args["caller_name"])
+        ok, msg = _validate(args)
+        if not ok:
+            return {
+                "claim_success": False,
+                "missing_data": f"{msg}.",
+            }
 
-    # Return all collected parameters in the response
-    return {
-        "claim_success": True,
-        "claim_id": claim_id,
-        "claim_data": {**args},
-    }
+        claim_id = _new_claim_id()
+        claims_db.append({**args, "claim_id": claim_id, "status": "OPEN"})
+        log.info("📄 FNOL recorded (%s) for %s", claim_id, args.get("caller_name", "unknown"))
+
+        # Return all collected parameters in the response
+        return {
+            "claim_success": True,
+            "claim_id": claim_id,
+            "claim_data": {**args},
+        }
+    except Exception as exc:
+        # Catch all exceptions to prevent 400 errors
+        log.error("FNOL recording failed: %s", exc, exc_info=True)
+        return {
+            "claim_success": False,
+            "missing_data": "Technical error occurred. Please try again or contact support.",
+        }
