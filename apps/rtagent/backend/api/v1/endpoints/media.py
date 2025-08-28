@@ -29,6 +29,7 @@ WebSocket Flow:
 6. Clean up resources on disconnect/error
 """
 
+import os
 from typing import Optional
 from fastapi import (
     APIRouter,
@@ -56,7 +57,7 @@ from apps.rtagent.backend.api.v1.schemas.media import (
 
 # Import from config system
 from config import ACS_STREAMING_MODE
-from config.app_settings import ENABLE_AUTH_VALIDATION
+from config.app_settings import ENABLE_AUTH_VALIDATION, AZURE_VOICE_LIVE_ENDPOINT, AZURE_VOICE_LIVE_MODEL
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from src.enums.stream_modes import StreamMode
 from src.stateful.state_managment import MemoManager
@@ -68,6 +69,8 @@ from azure.communication.callautomation import PhoneNumberIdentifier
 
 # Import V1 components
 from ..handlers.acs_media_lifecycle import ACSMediaHandler
+from ..handlers.voice_live_handler import VoiceLiveHandler
+
 from ..dependencies.orchestrator import get_orchestrator
 
 logger = get_logger("api.v1.endpoints.media")
@@ -171,8 +174,8 @@ async def acs_media_stream(
         logger.debug(f"🔍 Query params: {query_params}")
 
         # If not in query params, check headers
+        headers_dict = dict(websocket.headers)
         if not call_connection_id:
-            headers_dict = dict(websocket.headers)
             call_connection_id = headers_dict.get("x-ms-call-connection-id")
             logger.debug(f"🔍 Headers: {headers_dict}")
 
@@ -418,6 +421,29 @@ async def _create_media_handler(
         logger.info("Created V1 ACS media handler for MEDIA mode")
         return handler
 
+    elif ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
+        # TODO: Wire up the orchestrator to voice live
+        handler = VoiceLiveHandler(
+            azure_endpoint=AZURE_VOICE_LIVE_ENDPOINT,
+            model_name=AZURE_VOICE_LIVE_MODEL,
+            session_id=session_id,
+            websocket=websocket,
+            orchestrator=orchestrator
+        )
+
+        # from src.speech.voice_live import AzureVoiceLiveClient, create_voice_live_client
+        # voice_live_client = await create_voice_live_client()
+        # handler = VoiceLiveHandler(
+        #     session_id=session_id,
+        #     websocket=websocket,
+        #     # orchestrator_func=orchestrator,
+        #     voice_live_client=voice_live_client,
+        #     azure_endpoint="https://aifoundry825233136833-resource.cognitiveservices.azure.com/",
+        # )
+        # Handler lifecycle managed by ConnectionManager - no separate registry needed
+        logger.info("Created V1 ACS voice live handler for VOICE_LIVE mode")
+        return handler
+
     # elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
     #     # Import and use transcription handler for non-media mode
     #     from apps.rtagent.backend.src.handlers import TranscriptionHandler
@@ -470,12 +496,14 @@ async def _process_media_stream(
                 msg = await websocket.receive_text()
                 message_count += 1
                
-                # logger.info(f"📨 Received message #{message_count} ({len(msg)} chars)")
+                logger.info(f"📨 Received message #{message_count} ({len(msg)} chars) - {msg[:100]}...")
                 # Handle message based on streaming mode
                 if ACS_STREAMING_MODE == StreamMode.MEDIA:
                     await handler.handle_media_message(msg)
                 elif ACS_STREAMING_MODE == StreamMode.TRANSCRIPTION:
                     await handler.handle_transcription_message(msg)
+                elif ACS_STREAMING_MODE == StreamMode.VOICE_LIVE:
+                    await handler.handle_audio_data(msg)
 
         except WebSocketDisconnect as e:
             # Handle WebSocket disconnects gracefully - this is normal when calls end

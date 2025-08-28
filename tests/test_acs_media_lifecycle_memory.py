@@ -211,3 +211,44 @@ async def test_aggressive_leak_detection_gc_counts():
 
     assert diffs.get("threading.Thread", 0) <= 2, f"Thread count increased unexpectedly by {diffs.get('threading.Thread',0)}"
     assert diffs.get("asyncio.Task", 0) <= 3, f"Asyncio tasks increased unexpectedly by {diffs.get('asyncio.Task',0)}"
+
+
+@pytest.mark.asyncio
+async def test_p0_registry_and_threadpool_no_leak():
+    """P0-focused checks: ensure no RLock instances or handler-cleanup threads leak and recognizers don't accumulate."""
+    # baseline counts
+    gc.collect()
+
+    def count_rlocks():
+        # Some Python builds expose RLock in a way that makes isinstance checks fragile.
+        # Count by class name instead to be robust across environments.
+        return sum(1 for o in gc.get_objects() if getattr(o.__class__, "__name__", "") == "RLock")
+
+    def count_cleanup_threads():
+        return sum(1 for t in threading.enumerate() if "handler-cleanup" in (t.name or ""))
+
+    def count_fake_recognizers():
+        return sum(1 for o in gc.get_objects() if o.__class__.__name__ == "FakeRecognizer")
+
+    before_rlocks = count_rlocks()
+    before_cleanup = count_cleanup_threads()
+    before_recogs = count_fake_recognizers()
+
+    cycles = 12
+    for _ in range(cycles):
+        handler, ws, recog = await _create_start_stop_handler(asyncio.get_running_loop())
+        await asyncio.sleep(0)
+        gc.collect()
+
+    after_rlocks = count_rlocks()
+    after_cleanup = count_cleanup_threads()
+    after_recogs = count_fake_recognizers()
+
+    # RLock count should not increase notably (allow +1 tolerance)
+    assert after_rlocks - before_rlocks <= 1, f"RLock instances increased: {before_rlocks} -> {after_rlocks}"
+
+    # handler-cleanup thread count should remain stable (<=1 extra thread tolerated)
+    assert after_cleanup - before_cleanup <= 1, f"handler-cleanup threads increased: {before_cleanup} -> {after_cleanup}"
+
+    # Fake recognizers should be cleaned up
+    assert after_recogs - before_recogs <= 2, f"FakeRecognizer instances increased unexpectedly: {before_recogs} -> {after_recogs}"

@@ -257,11 +257,11 @@ class AcsCaller:
                 transcription = self.transcription_opts
                 cognitive_services_endpoint = self.cognitive_services_endpoint
 
-            if stream_mode == StreamMode.MEDIA:
+            if stream_mode == StreamMode.MEDIA or stream_mode == StreamMode.VOICE_LIVE:
                 media_streaming = self.media_streaming_options
 
             # Default to transcription if no valid mode specified
-            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA]:
+            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA, StreamMode.VOICE_LIVE]:
                 logger.warning(
                     f"Invalid stream_mode '{stream_mode}', defaulting to transcription"
                 )
@@ -318,11 +318,12 @@ class AcsCaller:
                 transcription = self.transcription_opts
                 cognitive_services_endpoint = self.cognitive_services_endpoint
 
-            if stream_mode == StreamMode.MEDIA:
+            if stream_mode == StreamMode.MEDIA or stream_mode == StreamMode.VOICE_LIVE:
                 media_streaming = self.media_streaming_options
 
+
             # Default to transcription if no valid mode specified
-            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA]:
+            if stream_mode not in [StreamMode.TRANSCRIPTION, StreamMode.MEDIA, StreamMode.VOICE_LIVE]:
                 logger.warning(
                     f"Invalid stream_mode '{stream_mode}', defaulting to transcription"
                 )

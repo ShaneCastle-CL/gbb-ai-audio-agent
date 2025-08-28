@@ -52,6 +52,16 @@ from .webhook import (
     ACSWebhookEvent,
     MediaWebhookEvent,
 )
+from .voice_live import (
+    VoiceLiveStatusResponse,
+    VoiceLiveSessionResponse,
+    VoiceLiveConfigRequest,
+    VoiceLiveStatusMessage,
+    VoiceLiveErrorMessage,
+    VoiceLiveTextMessage,
+    VoiceLiveMetricsMessage,
+    VoiceLiveControlMessage
+)
 
 __all__ = [
     # Call schemas
@@ -93,4 +103,14 @@ __all__ = [
     "WebhookResponse",
     "ACSWebhookEvent",
     "MediaWebhookEvent",
+
+    # Voice Live schemas
+    "VoiceLiveStatusResponse",
+    "VoiceLiveSessionResponse",
+    "VoiceLiveConfigRequest",
+    "VoiceLiveStatusMessage",
+    "VoiceLiveErrorMessage",
+    "VoiceLiveTextMessage",
+    "VoiceLiveMetricsMessage",
+    "VoiceLiveControlMessage"
 ]

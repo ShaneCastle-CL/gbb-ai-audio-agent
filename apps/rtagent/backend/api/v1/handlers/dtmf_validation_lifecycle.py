@@ -212,7 +212,7 @@ class DTMFValidationLifecycle:
                 context.memo_manager.set_context("dtmf_tone", updated_tones)
                 logger.info(f"🔢 DTMF tone sequence updated: {updated_tones}")
 
-                context.memo_manager.persist_to_redis_async(context.redis_mgr)
+                await context.memo_manager.persist_to_redis_async(context.redis_mgr)
 
         except Exception as e:
             logger.error(f"❌ Error handling DTMF tone: {e}")
