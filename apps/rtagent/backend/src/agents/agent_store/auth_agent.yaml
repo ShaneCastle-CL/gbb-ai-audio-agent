@@ -10,10 +10,11 @@ agent:
     agent—or a live human—based on intent and context.
 
 model:
-  deployment_id: gpt-4o
+  deployment_id: o3-mini
   temperature: 1 # Temperature setting for response variability
   top_p: 0.9 # Top-p setting for response variability
-  max_tokens: 2040 # Maximum number of tokens in response
+  # max_tokens: 2040 # Maximum number of tokens in response
+  max_completion_tokens: 2040
 
 voice:
   name: en-US-Ava:DragonHDLatestNeural # Voice for TTS output

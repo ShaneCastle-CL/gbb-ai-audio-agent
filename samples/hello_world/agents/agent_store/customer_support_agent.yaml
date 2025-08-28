@@ -6,7 +6,7 @@ agent:
   name: CustomerSupportAgent
   organization: Demo Corp
 model:
-  deployment_id: gpt-4o-mini
+  deployment_id: o3-mini
   max_tokens: 2048
   temperature: 0.7
   top_p: 0.9

@@ -12,10 +12,11 @@ agent:
     Strictly uses tool-calling—never provides claim advice or answers outside its function scope.
 
 model:
-  deployment_id: gpt-4o
+  deployment_id: o3-mini
   temperature: 0.60
   top_p: 0.9
-  max_tokens: 2024
+  # max_tokens: 2024
+  max_completion_tokens: 2040
 
 voice:
   name: en-US-Andrew2:DragonHDLatestNeural # Voice for TTS output
