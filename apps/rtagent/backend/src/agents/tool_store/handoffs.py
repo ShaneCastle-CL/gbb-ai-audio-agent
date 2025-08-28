@@ -41,22 +41,32 @@ async def handoff_general_agent(args: HandoffGeneralArgs) -> Dict[str, Any]:
     """
     Transfer the caller to the **General Insurance Questions** AI agent.
     """
-    topic = args.get("topic", "").strip()
-    caller_name = args.get("caller_name", "").strip()
+    # Input type validation to prevent 400 errors
+    if not isinstance(args, dict):
+        logger.error("Invalid args type: %s. Expected dict.", type(args))
+        return _json(False, "Invalid request format. Please provide handoff details.")
+    
+    try:
+        topic = args.get("topic", "").strip()
+        caller_name = args.get("caller_name", "").strip()
 
-    if not topic or not caller_name:
-        return _json(False, "Both 'topic' and 'caller_name' must be provided.")
+        if not topic or not caller_name:
+            return _json(False, "Both 'topic' and 'caller_name' must be provided.")
 
-    logger.info(
-        "🤖 Hand-off to General-Info agent – topic=%s caller=%s", topic, caller_name
-    )
-    return _json(
-        True,
-        "Caller transferred to General Insurance Questions agent.",
-        handoff="ai_agent",
-        target_agent="General Insurance Questions",
-        topic=topic,
-    )
+        logger.info(
+            "🤖 Hand-off to General-Info agent – topic=%s caller=%s", topic, caller_name
+        )
+        return _json(
+            True,
+            "Caller transferred to General Insurance Questions agent.",
+            handoff="ai_agent",
+            target_agent="General Insurance Questions",
+            topic=topic,
+        )
+    except Exception as exc:
+        # Catch all exceptions to prevent 400 errors
+        logger.error("General handoff failed: %s", exc, exc_info=True)
+        return _json(False, "Technical error during handoff. Please try again.")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -80,30 +90,40 @@ async def handoff_claim_agent(args: HandoffClaimArgs) -> Dict[str, Any]:
     policy_id   : str
     claim_intent: str   (free-text hint such as "new_claim")
     """
-    caller_name = args.get("caller_name", "").strip()
-    policy_id = args.get("policy_id", "").strip()
-    intent = args.get("claim_intent", "").strip()
+    # Input type validation to prevent 400 errors
+    if not isinstance(args, dict):
+        logger.error("Invalid args type: %s. Expected dict.", type(args))
+        return _json(False, "Invalid request format. Please provide claim handoff details.")
+    
+    try:
+        caller_name = args.get("caller_name", "").strip()
+        policy_id = args.get("policy_id", "").strip()
+        intent = args.get("claim_intent", "").strip()
 
-    if not caller_name or not policy_id:
-        return _json(
-            False, "'caller_name' and 'policy_id' are required for claim hand-off."
+        if not caller_name or not policy_id:
+            return _json(
+                False, "'caller_name' and 'policy_id' are required for claim hand-off."
+            )
+
+        logger.info(
+            "📂 Hand-off to Claims agent – %s (%s) intent=%s",
+            caller_name,
+            policy_id,
+            intent or "n/a",
         )
 
-    logger.info(
-        "📂 Hand-off to Claims agent – %s (%s) intent=%s",
-        caller_name,
-        policy_id,
-        intent or "n/a",
-    )
-
-    return _json(
-        True,
-        "Caller transferred to Claims Intake agent.",
-        handoff="ai_agent",
-        target_agent="Claims Intake",
-        claim_intent=intent or "unspecified",
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+        return _json(
+            True,
+            "Caller transferred to Claims Intake agent.",
+            handoff="ai_agent",
+            target_agent="Claims Intake",
+            claim_intent=intent or "unspecified",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as exc:
+        # Catch all exceptions to prevent 400 errors
+        logger.error("Claim handoff failed: %s", exc, exc_info=True)
+        return _json(False, "Technical error during claim handoff. Please try again.")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -121,23 +141,35 @@ async def escalate_human(args: EscalateHumanArgs) -> Dict[str, Any]:
     """
     Escalate *non-emergency* scenarios to a human insurance adjuster.
     """
+    # Input type validation to prevent 400 errors
+    if not isinstance(args, dict):
+        logger.error("Invalid args type: %s. Expected dict.", type(args))
+        return _json(False, "Invalid request format. Please provide escalation details.")
+    
     try:
-        route_reason = args["route_reason"].strip()
-        caller_name = args["caller_name"].strip()
-        policy_id = args["policy_id"].strip()
-    except KeyError as exc:  # pragma: no cover – schema validation should catch
-        return _json(False, f"Missing required field: {exc.args[0]}.")
+        route_reason = args.get("route_reason", "").strip()
+        caller_name = args.get("caller_name", "").strip()
+        policy_id = args.get("policy_id", "").strip()
+        
+        # Check for missing required fields
+        if not route_reason:
+            return _json(False, "'route_reason' is required for human escalation.")
+        if not caller_name:
+            return _json(False, "'caller_name' is required for human escalation.")
+        if not policy_id:
+            return _json(False, "'policy_id' is required for human escalation.")
 
-    if not route_reason:
-        return _json(False, "'route_reason' must be provided.")
-
-    logger.info(
-        "🤝 Human hand-off – %s (%s) reason=%s", caller_name, policy_id, route_reason
-    )
-    return _json(
-        True,
-        "Caller transferred to human insurance agent.",
-        handoff="human_agent",
-        route_reason=route_reason,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+        logger.info(
+            "🤝 Human hand-off – %s (%s) reason=%s", caller_name, policy_id, route_reason
+        )
+        return _json(
+            True,
+            "Caller transferred to human insurance agent.",
+            handoff="human_agent",
+            route_reason=route_reason,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as exc:
+        # Catch all exceptions to prevent 400 errors
+        logger.error("Human escalation failed: %s", exc, exc_info=True)
+        return _json(False, "Technical error during human escalation. Please try again.")

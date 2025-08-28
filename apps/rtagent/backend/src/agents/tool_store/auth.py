@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 """
-Caller‑authentication helper for XYMZ Insurance’s ARTAgent.
+Caller authentication helper for XYMZ Insurance's ARTAgent.
 
-Validates the caller using *(full_name, ZIP, last‑4 of SSN / policy / claim / phone)*.
+Validates the caller using *(full_name, ZIP, last-4 of SSN / policy / claim / phone)*.
 
 ### Invocation contract
 The LLM must call **`authenticate_caller`** exactly **once** per conversation, passing a
-five‑field payload **plus** an optional ``attempt`` counter if the backend is tracking
+five-field payload **plus** an optional ``attempt`` counter if the backend is tracking
 retries:
 
 ```jsonc
 {
   "full_name": "Chris Lee",
-  "zip_code": "60601",            // Empty string allowed if caller gave last‑4
+  "zip_code": "60601",            // Empty string allowed if caller gave last-4
   "last4_id": "",                 // Empty string allowed if caller gave ZIP
   "intent": "claims",            // "claims" | "general"
   "claim_intent": "new_claim",   // "new_claim" | "existing_claim" | "unknown" | null
@@ -24,12 +24,12 @@ retries:
 ### Return value
 `authenticate_caller` *always* echoes the ``attempt`` count.  On **success** it also
 echoes back ``intent`` and ``claim_intent`` so the caller can continue routing without
-extra look‑ups.  On **failure** these two keys are returned as ``null``.
+extra look-ups.  On **failure** these two keys are returned as ``null``.
 
 ```jsonc
 {
   "authenticated": false,
-  "message": "Authentication failed – ZIP and last‑4 did not match.",
+  "message": "Authentication failed - ZIP and last-4 did not match.",
   "policy_id": null,
   "caller_name": null,
   "attempt": 2,
@@ -113,40 +113,79 @@ async def authenticate_caller(
     Returns
     -------
     AuthenticateResult
-        Outcome of the authentication attempt.  On success the caller’s
+        Outcome of the authentication attempt.  On success the caller's
         *intent* and *claim_intent* are echoed back; on failure they are
-        ``None`` so the orchestrator can decide next steps.
-
-    Raises
-    ------
-    ValueError
-        If both *zip_code* **and** *last4_id* are missing.
+        ``None`` so the orchestrator can decide next steps. Always returns
+        a valid result dictionary - never raises exceptions to prevent 
+        conversation corruption.
     """
+    # Input type validation to prevent 400 errors
+    if not isinstance(args, dict):
+        logger.error("Invalid args type: %s. Expected dict.", type(args))
+        return {
+            "authenticated": False,
+            "message": "Invalid request format. Please provide authentication details.",
+            "policy_id": None,
+            "caller_name": None,
+            "attempt": 1,
+            "intent": None,
+            "claim_intent": None,
+        }
 
     # ------------------------------------------------------------------
-    # Sanity‑check input – ensure at least one verification factor given
+    # Sanity-check input – ensure at least one verification factor given
     # ------------------------------------------------------------------
-    if not args["zip_code"].strip() and not args["last4_id"].strip():
+    zip_code = args.get("zip_code", "").strip() if args.get("zip_code") else ""
+    last4_id = args.get("last4_id", "").strip() if args.get("last4_id") else ""
+    
+    if not zip_code and not last4_id:
         msg = "zip_code or last4_id must be provided"
         logger.error("❌ %s", msg)
-        raise ValueError(msg)
+        # Never raise exceptions from tool functions - return error result instead
+        # This prevents 400 errors and conversation corruption in OpenAI API
+        attempt = int(args.get("attempt", 1))
+        return {
+            "authenticated": False,
+            "message": msg,
+            "policy_id": None,
+            "caller_name": None,
+            "attempt": attempt,
+            "intent": None,
+            "claim_intent": None,
+        }
 
     # ------------------------------------------------------------------
     # Normalise inputs
     # ------------------------------------------------------------------
-    full_name = args["full_name"].strip().title()
-    zip_code = args["zip_code"].strip()
-    last4 = args["last4_id"].strip()
+    full_name = args.get("full_name", "").strip().title() if args.get("full_name") else ""
+    # Use the already safely extracted zip_code and last4_id from above
+    last4 = last4_id  # Alias for consistency with existing code
     attempt = int(args.get("attempt", 1))
 
+    # Additional input validation
+    if not full_name:
+        logger.error("❌ full_name is required")
+        return {
+            "authenticated": False,
+            "message": "Full name is required for authentication.",
+            "policy_id": None,
+            "caller_name": None,
+            "attempt": attempt,
+            "intent": None,
+            "claim_intent": None,
+        }
+
+    intent = args.get("intent", "general")
+    claim_intent = args.get("claim_intent")
+
     logger.info(
-        "🔎 Attempt %d – Authenticating %s | ZIP=%s | last‑4=%s | intent=%s | claim_intent=%s",
+        "🔎 Attempt %d – Authenticating %s | ZIP=%s | last-4=%s | intent=%s | claim_intent=%s",
         attempt,
         full_name,
         zip_code or "<none>",
         last4 or "<none>",
-        args["intent"],
-        args["claim_intent"],
+        intent,
+        claim_intent,
     )
 
     rec = policyholders_db.get(full_name)
@@ -177,18 +216,18 @@ async def authenticate_caller(
             "policy_id": rec["policy_id"],
             "caller_name": full_name,
             "attempt": attempt,
-            "intent": args["intent"],
-            "claim_intent": args["claim_intent"],
+            "intent": intent,
+            "claim_intent": claim_intent,
         }
 
     # ------------------------------------------------------------------
     # Authentication failed
     # ------------------------------------------------------------------
-    logger.warning("❌ ZIP and last‑4 both mismatched for %s", full_name)
+    logger.warning("❌ ZIP and last-4 both mismatched for %s", full_name)
 
     return {
         "authenticated": False,
-        "message": "Authentication failed – ZIP and last‑4 did not match.",
+        "message": "Authentication failed - ZIP and last-4 did not match.",
         "policy_id": None,
         "caller_name": None,
         "attempt": attempt,

@@ -496,7 +496,7 @@ async def _process_media_stream(
                 msg = await websocket.receive_text()
                 message_count += 1
                
-                logger.info(f"📨 Received message #{message_count} ({len(msg)} chars) - {msg[:100]}...")
+                # logger.info(f"📨 Received message #{message_count} ({len(msg)} chars) - {msg[:100]}...")
                 # Handle message based on streaming mode
                 if ACS_STREAMING_MODE == StreamMode.MEDIA:
                     await handler.handle_media_message(msg)
