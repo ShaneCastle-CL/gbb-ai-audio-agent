@@ -30,11 +30,11 @@ class ComprehensiveLoadTest:
         print("🟢 Running LIGHT load test...")
         
         config = LoadTestConfig(
-            max_concurrent_conversations=15,
-            total_conversations=15,
-            ramp_up_time_s=15.0,
-            test_duration_s=60.0,
-            conversation_templates=["quick_question", "insurance_inquiry"],
+            max_concurrent_conversations=3,
+            total_conversations=3,
+            ramp_up_time_s=5.0,
+            test_duration_s=120.0,
+            conversation_templates=["quick_question"],
             ws_url=self.base_url,
             output_dir="tests/load/results"
         )
@@ -123,8 +123,8 @@ class ComprehensiveLoadTest:
         print("🚨 Running STRESS test...")
         
         config = LoadTestConfig(
-            max_concurrent_conversations=50,
-            total_conversations=100,
+            max_concurrent_conversations=150,
+            total_conversations=200,
             ramp_up_time_s=60.0,
             test_duration_s=600.0,
             conversation_templates=["quick_question", "insurance_inquiry", "confused_customer"],

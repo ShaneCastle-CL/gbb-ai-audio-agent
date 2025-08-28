@@ -15,9 +15,11 @@ import struct
 import math
 import time
 import random
+import ssl
 from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
+# No longer need audio generator - using pre-cached PCM files
 
 class ConversationPhase(Enum):
     GREETING = "greeting"
@@ -73,99 +75,48 @@ class ConversationMetrics:
     audio_chunks_received: int = 0
     errors: List[str] = field(default_factory=list)
 
-class RealisticSpeechGenerator:
-    """Generates realistic speech audio patterns that trigger Azure Speech Recognition."""
+class ProductionSpeechGenerator:
+    """Streams pre-cached PCM audio files for load testing."""
     
-    @staticmethod
-    def create_speech_audio(text: str, rate: int = 16000, style: str = "conversational") -> bytes:
-        """Generate speech audio optimized for Azure Speech Recognition."""
-        # Calculate duration - make longer for better recognition
-        words = len(text.split())
-        chars = len(text)
+    def __init__(self, cache_dir: str = "tests/load/audio_cache"):
+        """Initialize with cached PCM files directory."""
+        from pathlib import Path
+        import os
         
-        # Longer duration helps with speech recognition
-        duration_s = max(2.0, words * 0.6 + chars * 0.08)  # ~100 WPM, longer syllables
+        # Handle relative paths by making them relative to the script location
+        if not os.path.isabs(cache_dir):
+            script_dir = Path(__file__).parent
+            self.cache_dir = script_dir / cache_dir.replace("tests/load/", "")
+        else:
+            self.cache_dir = Path(cache_dir)
         
-        samples = int(duration_s * rate)
-        pcm = bytearray()
+        # Load all available PCM files
+        self.pcm_files = list(self.cache_dir.glob("*.pcm"))
+        self.current_file_index = 0
         
-        # Use standard speech frequency ranges that Azure recognizes well
-        base_freq = 150  # Standard adult male fundamental
+        print(f"📁 Found {len(self.pcm_files)} cached PCM files")
+        if not self.pcm_files:
+            print("⚠️  Warning: No PCM files found in audio cache directory")
+    
+    def get_next_audio(self) -> bytes:
+        """Get the next available PCM audio file, cycling through available files."""
+        if not self.pcm_files:
+            print("❌ No PCM files available")
+            return b""
         
-        # Create vowel-consonant patterns for each word
-        word_list = text.split()
-        samples_per_word = samples // max(1, len(word_list))
+        # Get current file and advance index (cycle through files)
+        pcm_file = self.pcm_files[self.current_file_index]
+        self.current_file_index = (self.current_file_index + 1) % len(self.pcm_files)
         
-        for word_idx, word in enumerate(word_list):
-            word_start = word_idx * samples_per_word
-            word_end = min(samples, (word_idx + 1) * samples_per_word)
-            
-            for i in range(word_start, word_end):
-                t = i / rate
-                word_progress = (i - word_start) / max(1, word_end - word_start)
-                
-                # Strong speech envelope for each word
-                if word_progress < 0.1:  # Sharp attack
-                    envelope = word_progress * 10
-                elif word_progress > 0.9:  # Gradual decay
-                    envelope = 1.0 - (word_progress - 0.9) * 5
-                else:  # Sustained vowel portion
-                    envelope = 0.8 + 0.2 * math.sin(2 * math.pi * 5 * t)  # Slight vibrato
-                
-                envelope = max(0, min(1.0, envelope))
-                
-                # Create strong harmonic structure (key for speech recognition)
-                fundamental = base_freq * (1.0 + 0.1 * math.sin(2 * math.pi * 3 * t))  # Natural pitch variation
-                
-                signal = 0.0
-                
-                # Strong fundamental and harmonics (essential for speech detection)
-                signal += 0.6 * math.sin(2 * math.pi * fundamental * t) * envelope
-                signal += 0.4 * math.sin(2 * math.pi * fundamental * 2 * t) * envelope * 0.8
-                signal += 0.3 * math.sin(2 * math.pi * fundamental * 3 * t) * envelope * 0.6
-                signal += 0.2 * math.sin(2 * math.pi * fundamental * 4 * t) * envelope * 0.4
-                
-                # Add formant frequencies (vowel characteristics)
-                # First formant (300-800 Hz)
-                f1 = 500 + 200 * math.sin(2 * math.pi * 0.5 * word_progress)
-                signal += 0.5 * math.sin(2 * math.pi * f1 * t) * envelope
-                
-                # Second formant (900-2200 Hz) - most important for intelligibility
-                f2 = 1200 + 400 * math.sin(2 * math.pi * 0.7 * word_progress)
-                signal += 0.4 * math.sin(2 * math.pi * f2 * t) * envelope * 0.9
-                
-                # Add some broadband energy (fricatives, etc.)
-                if word_progress > 0.3 and word_progress < 0.7:  # Consonant-like sounds
-                    fricative = 0.15 * (2 * random.random() - 1.0) * envelope
-                    signal += fricative
-                
-                # Ensure good signal-to-noise ratio for recognition
-                signal = signal * envelope
-                
-                # Apply realistic vocal tract filtering
-                if signal > 0:
-                    signal = math.tanh(signal * 2.0) * 0.8
-                else:
-                    signal = -math.tanh(-signal * 2.0) * 0.8
-                
-                # Convert to 16-bit PCM with strong signal level
-                # Azure needs sufficient amplitude to detect speech
-                sample = int(max(-32767, min(32767, signal * 25000)))  # Higher amplitude
-                pcm += struct.pack('<h', sample)
-            
-            # Add brief pause between words (helps with recognition)
-            if word_idx < len(word_list) - 1:
-                pause_samples = int(0.1 * rate)  # 100ms pause
-                for _ in range(pause_samples):
-                    # Very quiet background noise during pause
-                    noise_sample = int((2 * random.random() - 1.0) * 200)
-                    pcm += struct.pack('<h', noise_sample)
-        
-        # Ensure minimum duration for recognition
-        while len(pcm) < int(2.0 * rate * 2):  # At least 2 seconds
-            pcm += struct.pack('<h', 0)
-        
-        return bytes(pcm)
+        try:
+            audio_bytes = pcm_file.read_bytes()
+            duration_s = len(audio_bytes) / (16000 * 2)  # 16kHz, 16-bit
+            print(f"📄 Using cached audio: {pcm_file.name} ({len(audio_bytes)} bytes, {duration_s:.2f}s)")
+            return audio_bytes
+        except Exception as e:
+            print(f"❌ Failed to read PCM file {pcm_file}: {e}")
+            return b""
+    
 
 class ConversationTemplates:
     """Pre-defined conversation templates for different scenarios."""
@@ -232,14 +183,19 @@ class ConversationSimulator:
     
     def __init__(self, ws_url: str = "ws://localhost:8010/api/v1/media/stream"):
         self.ws_url = ws_url
-        self.speech_generator = RealisticSpeechGenerator()
+        self.speech_generator = ProductionSpeechGenerator()
+    
+    def preload_conversation_audio(self, template: ConversationTemplate):
+        """No-op since we're using pre-cached files."""
+        print(f"ℹ️  Using pre-cached PCM files, no preloading needed")
     
     async def simulate_conversation(
         self, 
         template: ConversationTemplate,
         session_id: Optional[str] = None,
         on_turn_complete: Optional[Callable[[ConversationTurn, List[Dict]], None]] = None,
-        on_agent_response: Optional[Callable[[str, List[Dict]], None]] = None
+        on_agent_response: Optional[Callable[[str, List[Dict]], None]] = None,
+        preload_audio: bool = True
     ) -> ConversationMetrics:
         """Simulate a complete conversation using the given template."""
         
@@ -257,15 +213,36 @@ class ConversationSimulator:
         print(f"🎭 Starting conversation simulation: {template.name}")
         print(f"📞 Session ID: {session_id}")
         
+        # Preload audio for better performance and recognition quality
+        if preload_audio:
+            print(f"🔄 Preloading production audio...")
+            self.preload_conversation_audio(template)
+        
         try:
             # Connect to WebSocket
             connect_start = time.time()
-            async with websockets.connect(
-                f"{self.ws_url}?call_connection_id={session_id}",
-                additional_headers={
-                    "x-ms-call-connection-id": session_id,
+            # Configure connection parameters based on URL scheme
+            connect_kwargs = {
+                "additional_headers": {
+                    "x-call-connection-id": session_id,
                     "x-session-id": session_id
                 }
+            }
+            
+            # Explicitly handle SSL based on URL scheme
+            if self.ws_url.startswith("ws://"):
+                # For plain WebSocket, explicitly disable SSL
+                connect_kwargs["ssl"] = None
+            elif self.ws_url.startswith("wss://"):
+                # For secure WebSocket, create SSL context
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                connect_kwargs["ssl"] = ssl_context
+            
+            async with websockets.connect(
+                f"{self.ws_url}?call_connection_id={session_id}",
+                **connect_kwargs
             ) as websocket:
                 metrics.connection_time_ms = (time.time() - connect_start) * 1000
                 print(f"✅ Connected in {metrics.connection_time_ms:.1f}ms")
@@ -285,25 +262,27 @@ class ConversationSimulator:
                     if turn.speaker == "user":
                         print(f"\n👤 User turn {turn_idx + 1}: '{turn.text}' ({turn.phase.value})")
                         
-                        # Wait before speaking (natural pause) - longer pause to let previous response finish
-                        pause_time = max(turn.delay_before_ms / 1000.0, 3.0)  # At least 3 seconds
+                        # Wait before speaking (natural pause) - let previous response finish
+                        pause_time = max(turn.delay_before_ms / 1000.0, 2.0)  # At least 2 seconds
                         print(f"    ⏸️  Waiting {pause_time:.1f}s for agent to finish speaking...")
                         await asyncio.sleep(pause_time)
                         
-                        # Generate and send speech audio in a more natural way
-                        turn_start = time.time()
+                        # Get next cached PCM audio file
+                        audio_send_start = time.time()
                         
-                        # Create shorter, more natural speech burst
-                        speech_audio = self.speech_generator.create_speech_audio(
-                            turn.text, 
-                            style="conversational"
-                        )
+                        # Use next available cached PCM file
+                        speech_audio = self.speech_generator.get_next_audio()
+                        
+                        if not speech_audio:
+                            print(f"    ❌ No audio available, skipping turn")
+                            metrics.failed_turns += 1
+                            continue
                         
                         # Send audio more quickly to simulate natural speech timing
                         chunk_size = int(16000 * 0.1 * 2)  # Back to 100ms chunks for natural flow
                         audio_chunks_sent = 0
                         
-                        print(f"    🎤 Speaking: '{turn.text}'")
+                        print(f"    🎤 Streaming cached audio for turn: '{turn.text}'")
                         
                         for i in range(0, len(speech_audio), chunk_size):
                             chunk = speech_audio[i:i + chunk_size]
@@ -324,56 +303,121 @@ class ConversationSimulator:
                             # Natural speech timing
                             await asyncio.sleep(0.08)  # 80ms between chunks - more natural
                         
+                        audio_send_complete = time.time()
                         print(f"    📤 Sent {audio_chunks_sent} audio chunks ({len(speech_audio)} bytes total)")
                         print(f"    🎵 Audio duration: {len(speech_audio)/(16000*2):.2f}s")
-                        
-                        # Small pause after speaking (like real conversation)
-                        await asyncio.sleep(0.5)
+                        print(f"    ⏱️  Audio send time: {(audio_send_complete - audio_send_start)*1000:.1f}ms")
                         
                         metrics.user_turns += 1
-                        metrics.total_speech_recognition_time_ms += (time.time() - turn_start) * 1000
                         
-                        # Listen for agent responses
+                        # Wait for complete agent response with proper timeout and latency measurement
+                        response_start = time.time()
                         responses = []
-                        agent_start = time.time()
+                        agent_audio_chunks_this_turn = 0
+                        last_audio_chunk_time = None
+                        response_complete = False
+                        turn_failed = False
                         
-                        # Give extra time after sending audio for speech recognition to process
-                        print(f"    ⏳ Waiting for speech recognition and agent response...")
-                        await asyncio.sleep(2.0)  # Allow time for speech processing
+                        # print(f"    ⏳ Waiting for complete agent response (max 10s timeout)...")
                         
                         try:
-                            # Listen for responses for longer time to catch speech recognition
-                            listen_duration = max(8.0, len(turn.text.split()) * 1.0)  # More time for recognition
-                            responses_received = 0
+                            # Listen for the complete agent response with 20-second timeout
+                            timeout_deadline = response_start + 20.0  # 20 second absolute timeout
+                            audio_silence_timeout = 2.0  # Consider response complete after 2s of no audio chunks
                             
-                            while time.time() - agent_start < listen_duration:
+                            while time.time() < timeout_deadline and not response_complete:
                                 try:
-                                    response = await asyncio.wait_for(websocket.recv(), timeout=3.0)  # Longer timeout
+                                    # Dynamic timeout: shorter if we've received audio, longer initially
+                                    if last_audio_chunk_time:
+                                        # If we've been getting audio, use shorter timeout to detect end
+                                        remaining_silence_time = audio_silence_timeout - (time.time() - last_audio_chunk_time)
+                                        current_timeout = max(0.5, remaining_silence_time)
+                                    else:
+                                        # Initially, wait longer for first response
+                                        current_timeout = min(3.0, timeout_deadline - time.time())
+                                    
+                                    if current_timeout <= 0:
+                                        # We've waited long enough since last audio chunk
+                                        if agent_audio_chunks_this_turn > 0:
+                                            response_complete = True
+                                            break
+                                        else:
+                                            # No audio received at all
+                                            current_timeout = 0.5
+                                    
+                                    response = await asyncio.wait_for(websocket.recv(), timeout=current_timeout)
                                     response_data = json.loads(response)
                                     responses.append(response_data)
                                     metrics.server_responses.append(response_data)
-                                    responses_received += 1
                                     
-                                    # Count audio responses (agent speech)
+                                    # Track audio responses (agent speech)
                                     if response_data.get('kind') == 'AudioData':
                                         metrics.audio_chunks_received += 1
+                                        agent_audio_chunks_this_turn += 1
+                                        last_audio_chunk_time = time.time()
                                         
-                                    # Print first few responses for debugging
-                                    if responses_received <= 3:
+                                        # Print progress for first few chunks
+                                        if agent_audio_chunks_this_turn <= 3:
+                                            print(f"      📨 Audio chunk {agent_audio_chunks_this_turn} received")
+                                        elif agent_audio_chunks_this_turn == 10:
+                                            print(f"      📨 {agent_audio_chunks_this_turn} audio chunks received...")
+                                        elif agent_audio_chunks_this_turn % 50 == 0:
+                                            print(f"      📨 {agent_audio_chunks_this_turn} audio chunks received...")
+                                    
+                                    # Also track other response types for debugging
+                                    elif len(responses) <= 5:  # Only log first few non-audio responses
                                         resp_type = response_data.get('kind', response_data.get('type', 'unknown'))
-                                        print(f"      📨 Response {responses_received}: {resp_type}")
+                                        print(f"      📨 {resp_type} response received")
                                         
                                 except asyncio.TimeoutError:
-                                    break  # No more immediate responses
-                        
+                                    if last_audio_chunk_time and (time.time() - last_audio_chunk_time) >= audio_silence_timeout:
+                                        # We've had enough silence after receiving audio - response is complete
+                                        if agent_audio_chunks_this_turn > 0:
+                                            response_complete = True
+                                            break
+                                    elif time.time() >= timeout_deadline:
+                                        # Absolute timeout reached
+                                        break
+                                    # Otherwise continue waiting
+                            
+                            # Check if we got a complete response or if it failed
+                            response_end = time.time()
+                            total_response_time_ms = (response_end - response_start) * 1000
+                            end_to_end_latency_ms = (response_end - audio_send_start) * 1000
+                            
+                            if agent_audio_chunks_this_turn == 0:
+                                # No audio received - mark as failure
+                                turn_failed = True
+                                error_msg = f"Turn {turn_idx + 1}: No audio response received within {audio_silence_timeout}s timeout"
+                                metrics.errors.append(error_msg)
+                                print(f"      ❌ {error_msg}")
+                                metrics.failed_turns += 1
+                            else:
+                                # Success - we got audio response
+                                metrics.agent_turns += 1
+                                metrics.successful_turns += 1
+                                response_complete = True
+                                print(f"      ✅ Complete audio response received: {agent_audio_chunks_this_turn} chunks")
+                            
+                            # Record timing metrics
+                            metrics.total_agent_processing_time_ms += total_response_time_ms
+                            speech_recognition_time = (response_start - audio_send_complete) * 1000 if agent_audio_chunks_this_turn > 0 else 0
+                            metrics.total_speech_recognition_time_ms += speech_recognition_time
+                            
+                            print(f"      ⏱️  Response time: {total_response_time_ms:.1f}ms")
+                            print(f"      ⏱️  End-to-end latency: {end_to_end_latency_ms:.1f}ms")
+                            if speech_recognition_time > 0:
+                                print(f"      ⏱️  Speech recognition: {speech_recognition_time:.1f}ms")
+                            
                         except Exception as e:
-                            metrics.errors.append(f"Turn {turn_idx + 1}: {str(e)}")
+                            turn_failed = True
+                            error_msg = f"Turn {turn_idx + 1}: {str(e)}"
+                            metrics.errors.append(error_msg)
+                            print(f"      ❌ Turn error: {error_msg}")
+                            metrics.failed_turns += 1
                         
-                        agent_processing_time = (time.time() - agent_start) * 1000
-                        metrics.total_agent_processing_time_ms += agent_processing_time
-                        
-                        print(f"  🤖 Agent responded with {len(responses)} messages in {agent_processing_time:.1f}ms")
-                        print(f"  📊 Audio chunks received: {len([r for r in responses if r.get('kind') == 'AudioData'])}")
+                        print(f"  🤖 Turn completed: {'✅ Success' if not turn_failed else '❌ Failed'}")
+                        print(f"  📊 Audio chunks: {agent_audio_chunks_this_turn}, Total responses: {len(responses)}")
                         
                         # Callback for turn completion
                         if on_turn_complete:
@@ -389,8 +433,9 @@ class ConversationSimulator:
                             except Exception as e:
                                 print(f"  ⚠️ Agent callback error: {e}")
                         
-                        # Brief pause before next turn
-                        await asyncio.sleep(0.5)
+                        # Brief pause before next turn (only if not failed)
+                        if not turn_failed:
+                            await asyncio.sleep(1.0)  # Slightly longer pause for more realistic conversation
                 
                 print(f"\n✅ Conversation completed successfully")
                 metrics.end_time = time.time()
@@ -425,6 +470,7 @@ class ConversationSimulator:
             
             # Quality metrics
             "error_count": len(metrics.errors),
+            "failed_turns": metrics.failed_turns,
             "errors": metrics.errors,
             
             # Response analysis
@@ -454,11 +500,12 @@ async def main():
         audio_responses = len([r for r in responses if r.get('kind') == 'AudioData'])
         print(f"  🎤 Agent generated {audio_responses} audio responses to: '{user_text[:30]}...'")
     
-    # Run simulation
+    # Run simulation with production audio
     metrics = await simulator.simulate_conversation(
         template,
         on_turn_complete=on_turn_complete,
-        on_agent_response=on_agent_response
+        on_agent_response=on_agent_response,
+        preload_audio=True  # Use production TTS for better recognition
     )
     
     # Analyze results
@@ -470,6 +517,7 @@ async def main():
     print(f"Duration: {analysis['duration_s']:.2f}s")
     print(f"Connection: {analysis['connection_time_ms']:.1f}ms")
     print(f"User turns: {analysis['user_turns']}")
+    print(f"Failed turns: {analysis['failed_turns']}")
     print(f"Agent responses: {analysis['audio_chunks_received']}")
     print(f"Avg recognition time: {analysis['avg_speech_recognition_ms']:.1f}ms")
     print(f"Avg agent processing: {analysis['avg_agent_processing_ms']:.1f}ms")

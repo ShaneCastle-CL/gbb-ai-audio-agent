@@ -331,7 +331,7 @@ class ConversationLoadTester:
         
         print(f"\n📊 CONVERSATION LOAD TEST SUMMARY")
         print(f"=" * 70)
-        
+        print(summary)
         # Overall results
         print(f"🎯 Overall Results:")
         print(f"   Success Rate: {summary['success_rate_percent']:.1f}%")

@@ -292,9 +292,9 @@ def _build_chat_kwargs(
         "stream": True,
         "messages": history,
         "model": model_id,
-        "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
         "temperature": temperature,
-        "top_p": top_p,
+        # "top_p": top_p,
         "tools": tools or [],
         "tool_choice": "auto" if (tools or []) else "none",
     }
