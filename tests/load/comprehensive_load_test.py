@@ -30,9 +30,9 @@ class ComprehensiveLoadTest:
         print("🟢 Running LIGHT load test...")
         
         config = LoadTestConfig(
-            max_concurrent_conversations=5,
+            max_concurrent_conversations=15,
             total_conversations=15,
-            ramp_up_time_s=10.0,
+            ramp_up_time_s=15.0,
             test_duration_s=60.0,
             conversation_templates=["quick_question", "insurance_inquiry"],
             ws_url=self.base_url,

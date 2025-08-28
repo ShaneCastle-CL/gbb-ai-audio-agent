@@ -118,6 +118,10 @@ TTS_SAMPLE_RATE_UI = int(os.getenv("TTS_SAMPLE_RATE_UI", "48000"))
 TTS_SAMPLE_RATE_ACS = int(os.getenv("TTS_SAMPLE_RATE_ACS", "16000"))
 TTS_CHUNK_SIZE = int(os.getenv("TTS_CHUNK_SIZE", "1024"))
 
+# Voice Live settings
+AZURE_VOICE_LIVE_ENDPOINT = os.getenv("AZURE_VOICE_LIVE_ENDPOINT", "")
+AZURE_VOICE_API_KEY = os.getenv("AZURE_VOICE_API_KEY", "")
+AZURE_VOICE_LIVE_MODEL = os.getenv("AZURE_VOICE_LIVE_MODEL", "gpt-4o")
 # ==============================================================================
 # WEBSOCKET CONNECTION MANAGEMENT
 # ==============================================================================

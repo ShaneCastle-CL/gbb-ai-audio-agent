@@ -11,6 +11,7 @@ import asyncio
 import json
 import time
 import random
+import uuid
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 import statistics
@@ -138,7 +139,7 @@ class ConversationLoadTester:
             self.max_active_conversations = max(self.max_active_conversations, self.active_conversations)
             
             simulator = ConversationSimulator(self.config.ws_url)
-            session_id = f"load-test-{conversation_id}-{int(time.time())}"
+            session_id = f"load-test-{uuid.uuid4().hex}"
             
             try:
                 print(f"🎭 Starting conversation {conversation_id} ({template.name})")

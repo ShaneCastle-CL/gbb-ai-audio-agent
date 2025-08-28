@@ -1,1161 +1,947 @@
 """
-Live Voice Handler
-==================
+ Voice Live Handler
+========================
 
-Business logic handler for Azure AI Speech Live Voice API integration.
+A simplified handler for Azure AI Speech Live Voice API integration that follows
+the media.py expected interface pattern with start() and stop() methods.
 
-This handler manages:
-- Azure AI Speech Live Voice client connections
-- Real-time audio streaming and processing  
-- WebSocket communication with clients
-- Session state management and persistence
-- Error handling and recovery
-- Performance monitoring and metrics
-
-The handler follows the Azure Voice Live API patterns and integrates
-with the application's orchestration system using simplified, maintainable code.
+This implementation is based on the official Azure Voice Live quickstart pattern
+and integrates with the existing media pipeline.
 """
 
-import asyncio
-import json
+import os
 import uuid
+import json
+import asyncio
 import base64
+import logging
+import threading
 import time
-import websockets
-from datetime import datetime
-from typing import Optional, Dict, Any, Callable
-from opentelemetry import trace
-from opentelemetry.trace import SpanKind, Status, StatusCode
-
-from src.speech.voice_live import AzureVoiceLiveClient
+import numpy as np
+from datetime import datetime, timezone
+from typing import Dict, Union, Literal, Optional, Set, Callable, Awaitable
+from typing_extensions import AsyncIterator, TypedDict, Required
+from websockets.asyncio.client import connect as ws_connect
+from websockets.asyncio.client import ClientConnection as AsyncWebsocket
+from websockets.asyncio.client import HeadersLike
+from websockets.typing import Data
+from websockets.exceptions import WebSocketException
+from azure.core.credentials_async import AsyncTokenCredential
+from utils.azure_auth import get_credential
 from utils.ml_logging import get_logger
-from ..models import (
-    VoiceLiveSession,
-    VoiceLiveConnectionState,
-    VoiceLiveMetrics,
-    VoiceLiveSessionStatus,
-    VoiceLiveAudioConfig,
-    VoiceLiveModelConfig,
-)
-from ..schemas import (
-    VoiceLiveStatusMessage,
-    VoiceLiveErrorMessage,
-    VoiceLiveTextMessage,
-    VoiceLiveMetricsMessage,
-    VoiceLiveControlMessage,
-)
 
 logger = get_logger("api.v1.handlers.voice_live_handler")
-tracer = trace.get_tracer(__name__)
 
+AUDIO_SAMPLE_RATE = 24000
+AudioTimestampTypes = Literal["word"]
 
-# class VoiceLiveClient:
-#     """
-#     Simplified Azure Voice Live API client based on the quickstart pattern.
-    
-#     This client handles WebSocket connections to Azure Voice Live API using
-#     the same patterns as the official quickstart example.
-#     """
-    
-#     def __init__(
-#         self,
-#         *,
-#         azure_endpoint: str,
-#         api_version: str = "2025-05-01-preview", 
-#         token: Optional[str] = None,
-#         api_key: Optional[str] = None,
-#     ):
-#         self.azure_endpoint = azure_endpoint
-#         self.api_version = api_version
-#         self.token = token
-#         self.api_key = api_key
-#         self.websocket = None
-#         self.message_queue = asyncio.Queue()
-#         self.connected = False
-        
-#     async def connect(self, model: str, session_id: str) -> bool:
-#         """Connect to Azure Voice Live API via WebSocket."""
-#         try:
-#             import websockets
-            
-#             # Build WebSocket URL following Azure Voice Live API pattern
-#             azure_ws_endpoint = self.azure_endpoint.rstrip('/').replace("https://", "wss://")
-#             url = f"{azure_ws_endpoint}/voice-live/realtime?api-version={self.api_version}&model={model}"
-            
-#             # Set up authentication headers
-#             extra_headers = {}
-#             if self.token:
-#                 extra_headers["Authorization"] = f"Bearer {self.token}"
-#             elif self.api_key:
-#                 extra_headers["api-key"] = self.api_key
-            
-#             # Add request ID
-#             request_id = str(uuid.uuid4())
-#             extra_headers["x-ms-client-request-id"] = request_id
-            
-#             # Connect to WebSocket TODO: investigate further, make it work with ACS
-#             self.websocket = await websockets.connect(url, extra_headers=extra_headers)
-#             self.connected = True
-            
-#             # Start message handler
-#             asyncio.create_task(self._message_handler())
-            
-#             logger.info(f"Connected to Azure Voice Live API for session {session_id}")
-#             return True
-            
-#         except Exception as e:
-#             logger.error(f"Failed to connect to Azure Voice Live API: {e}")
-#             self.connected = False
-#             return False
-    
-#     async def _message_handler(self):
-#         """Handle incoming WebSocket messages."""
-#         try:
-#             async for message in self.websocket:
-#                 await self.message_queue.put(message)
-#         except Exception as e:
-#             logger.error(f"Message handler error: {e}")
-#             self.connected = False
-    
-#     async def send_message(self, message: dict) -> None:
-#         """Send a message to the Voice Live API."""
-#         if self.websocket and self.connected:
-#             try:
-#                 await self.websocket.send(json.dumps(message))
-#             except Exception as e:
-#                 logger.error(f"Failed to send message: {e}")
-#                 self.connected = False
-#                 raise
-    
-#     async def receive_message(self, timeout: float = 1.0) -> Optional[dict]:
-#         """Receive a message from the Voice Live API."""
-#         try:
-#             message = await asyncio.wait_for(self.message_queue.get(), timeout=timeout)
-#             return json.loads(message)
-#         except asyncio.TimeoutError:
-#             return None
-#         except json.JSONDecodeError as e:
-#             logger.error(f"Failed to decode message: {e}")
-#             return None
-    
-#     async def close(self):
-#         """Close the WebSocket connection."""
-#         if self.websocket:
-#             await self.websocket.close()
-#             self.connected = False
+class AzureDeepNoiseSuppression(TypedDict, total=False):
+    type: Literal["azure_deep_noise_suppression"]
 
+class ServerEchoCancellation(TypedDict, total=False):
+    type: Literal["server_echo_cancellation"]
+
+class AzureSemanticDetection(TypedDict, total=False):
+    model: Literal["semantic_detection_v1"]
+    threshold: float
+    timeout: float
+
+EOUDetection = AzureSemanticDetection
+
+class AzureSemanticVAD(TypedDict, total=False):
+    type: Literal["azure_semantic_vad"]
+    end_of_utterance_detection: EOUDetection
+    threshold: float
+    silence_duration_ms: int
+    prefix_padding_ms: int
+
+class Animation(TypedDict, total=False):
+    outputs: Set[Literal["blendshapes", "viseme_id", "emotion"]]
+
+class Session(TypedDict, total=False):
+    voice: Dict[str, Union[str, float]]
+    turn_detection: Union[AzureSemanticVAD]
+    input_audio_noise_reduction: AzureDeepNoiseSuppression
+    input_audio_echo_cancellation: ServerEchoCancellation
+    animation: Animation
+    output_audio_timestamp_types: Set[AudioTimestampTypes]
+
+class SessionUpdateEventParam(TypedDict, total=False):
+    type: Literal["session.update"]
+    session: Required[Session]
+    event_id: str
+
+class AsyncVoiceLiveSessionResource:
+    def __init__(self, connection: "AsyncVoiceLiveConnection") -> None:
+        self._connection = connection
+
+    async def update(
+        self,
+        *,
+        session: Session,
+        event_id: str | None = None,
+    ) -> None:
+        param: SessionUpdateEventParam = {
+            "type": "session.update", "session": session, "event_id": event_id or str(uuid.uuid4())
+        }
+        data = json.dumps(param)
+        await self._connection.send(data)
+
+class AsyncVoiceLiveConnection:
+    session: AsyncVoiceLiveSessionResource
+    _connection: AsyncWebsocket
+
+    def __init__(self, url: str, additional_headers: HeadersLike) -> None:
+        self._url = url
+        self._additional_headers = additional_headers
+        self._connection = None
+        self.session = AsyncVoiceLiveSessionResource(self)
+
+    async def __aenter__(self) -> "AsyncVoiceLiveConnection":
+        try:
+            self._connection = await ws_connect(self._url, additional_headers=self._additional_headers)
+        except WebSocketException as e:
+            raise ValueError(f"Failed to establish a WebSocket connection: {e}")
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        if self._connection:
+            await self._connection.close()
+            self._connection = None
+    
+    async def __aiter__(self) -> AsyncIterator[Data]:
+        async for data in self._connection:
+            yield data
+
+    async def recv(self) -> Data:
+        return await self._connection.recv()
+    
+    async def send(self, message: Data) -> None:
+        await self._connection.send(message)
+
+class AsyncAzureVoiceLive:
+    def __init__(
+        self,
+        *,
+        azure_endpoint: str | None = None,
+        api_version: str | None = "2025-05-01-preview",
+        api_key: str | None = None,
+        azure_ad_token_credential: AsyncTokenCredential | None = None,
+    ) -> None:
+        if azure_endpoint is None:
+            azure_endpoint = os.environ.get("AZURE_VOICE_LIVE_ENDPOINT")
+
+        if azure_endpoint is None:
+            raise ValueError(
+                "Must provide the 'azure_endpoint' argument, or the 'AZURE_VOICE_LIVE_ENDPOINT' environment variable"
+            )
+
+        if api_key is None and azure_ad_token_credential is None:
+            api_key = os.environ.get("AZURE_VOICE_LIVE_API_KEY")
+
+        if api_key is None and azure_ad_token_credential is None:
+            azure_ad_token_credential = get_credential()
+
+        if api_key and azure_ad_token_credential:
+            raise ValueError(
+                "Duplicating credentials. Please pass one of 'api_key' and 'azure_ad_token_credential'"
+            )
+
+        self._api_key = api_key
+        self._azure_endpoint = azure_endpoint
+        self._api_version = api_version
+        self._azure_ad_token_credential = azure_ad_token_credential
+        self._connection = None
+
+    def get_token(self) -> str:
+        if self._azure_ad_token_credential:
+            scopes = "https://cognitiveservices.azure.com/.default"
+            token = self._azure_ad_token_credential.get_token(scopes)
+            return token.token
+        else:
+            return None
+
+    async def connect(self, model: str) -> AsyncVoiceLiveConnection:
+        if self._connection is not None:
+            raise ValueError("Already connected to the Azure Voice Agent service.")
+        if not model:
+            raise ValueError("Model name is required.")
+        if not isinstance(model, str):
+            raise TypeError(f"The 'model' parameter must be of type 'str', but got {type(model).__name__}.")
+
+        url = f"{self._azure_endpoint.rstrip('/')}/voice-agent/realtime?api-version={self._api_version}&model={model}"
+        url = url.replace("https://", "wss://")
+
+        auth_header = {}
+        if self._azure_ad_token_credential:
+            token = self.get_token()
+            auth_header = {"Authorization": f"Bearer {token}"}
+        elif self._api_key:
+            auth_header = {"api-key": self._api_key}
+
+        request_id = uuid.uuid4()
+        headers = {"x-ms-client-request-id": str(request_id), **auth_header}
+
+        self._connection = AsyncVoiceLiveConnection(
+            url,
+            additional_headers=headers,
+        )
+        return self._connection
 
 class VoiceLiveHandler:
     """
-    Handler for Live Voice sessions with Azure AI Speech integration.
+    Simplified Voice Live handler following the media.py interface pattern.
     
-    Manages the complete lifecycle of a Live Voice session including:
-    - Azure AI Speech client setup and teardown
-    - Audio streaming and processing
-    - WebSocket communication
-    - Session state persistence
-    - Error handling and recovery
+    Provides start() and stop() methods as expected by the media pipeline,
+    and manages Azure Voice Live API connections using the quickstart pattern.
     """
     
     def __init__(
         self,
         session_id: str,
-        voice_live_client: AzureVoiceLiveClient,
         websocket,
         azure_endpoint: str,
-        token: Optional[str] = None,
-        api_key: Optional[str] = None,
-        redis_client=None,
+        model_name: str = "gpt-4o-mini",
         orchestrator: Optional[Callable] = None
     ):
-        """
-        Initialize Live Voice handler.
-        
-        :param session_id: Unique session identifier
-        :param websocket: WebSocket connection for client communication
-        :param azure_endpoint: Azure Voice Live API endpoint
-        :param token: Azure authentication token (recommended)
-        :param api_key: Azure API key (alternative auth)
-        :param redis_client: Redis client for session persistence
-        :param orchestrator: Optional orchestrator for conversation routing
-        """
         self.session_id = session_id
         self.websocket = websocket
         self.azure_endpoint = azure_endpoint
-        self.token = token
-        self.api_key = api_key
-        self.redis_client = redis_client
+        self.model_name = model_name
         self.orchestrator = orchestrator
         
-        # Session state
-        self.session: Optional[VoiceLiveSession] = None
-        self.connection_state: Optional[VoiceLiveConnectionState] = None
-        self.metrics: Optional[VoiceLiveMetrics] = None
+        # Connection state
+        self.voice_live_client = None
+        self.voice_live_connection = None
+        self.is_running = False
         
-        # Azure Voice Live client
-        self.voice_live_client = voice_live_client
-        self.is_connected = False
-        self.is_streaming = False
+        # Audio format configuration from metadata
+        self.audio_format = "pcm"  # Default
+        self.sample_rate = 16000   # Default
+        self.channels = 1          # Default
         
-        # Task management
-        self.message_processing_task: Optional[asyncio.Task] = None
-        self.metrics_reporting_task: Optional[asyncio.Task] = None
-        
-        # Configuration
-        self.audio_config = VoiceLiveAudioConfig()
-        self.model_configuration = VoiceLiveModelConfig(
-            model_name="gpt-4o",
-            deployment_name="gpt-4o",
-            temperature=0.7,
-            max_tokens=2000,
-
-            voice_name="en-US-Ava:DragonHDLatestNeural",
-            voice_type="azure-standard",
-            voice_style=None,
-            speaking_rate=1.0,
-            voice_temperature=0.8,
-
-            system_instructions="You are a helpful AI assistant responding in natural, engaging language.",
-            context_window=4000,
-            api_version="2025-05-01-preview",
-
-            turn_detection_type="azure_semantic_vad",
-            vad_threshold=0.3,
-            prefix_padding_ms=200,
-            silence_duration_ms=200,
-            remove_filler_words=False,
-            
-            end_of_utterance_model="semantic_detection_v1",
-        )
+        # Background tasks  
+        self.receive_task = None
         
         logger.info(f"VoiceLiveHandler initialized for session {session_id}")
     
-    async def initialize(self) -> None:
+    async def start(self) -> None:
         """
-        Initialize the Live Voice session.
+        Start the voice live handler.
         
-        Sets up session state, Azure AI Speech connection, and starts
-        background processing tasks.
-        
-        :raises Exception: If initialization fails
+        Expected by media.py - initializes Azure Voice Live connection and starts processing tasks.
         """
-        with tracer.start_as_current_span(
-            "voice_live_handler.initialize",
-            kind=SpanKind.INTERNAL,
-            attributes={"session_id": self.session_id}
-        ) as span:
+        try:
+            logger.info(f"Starting voice live handler for session {self.session_id}")
+            
+            # Create Azure Voice Live client
+            self.voice_live_client = AsyncAzureVoiceLive(
+                azure_endpoint=self.azure_endpoint,
+                azure_ad_token_credential=get_credential()
+            )
+            
+            # Connect to Azure Voice Live API
+            self.voice_live_connection = await self.voice_live_client.connect(model=self.model_name)
+            
+            # Start connection
+            logger.info(f"Establishing Azure Voice Live WebSocket connection for session {self.session_id}")
             try:
-                # Initialize session models
-                await self._initialize_session_state()
+                await self.voice_live_connection.__aenter__()
+                logger.info(f"Azure Voice Live WebSocket connection established for session {self.session_id}")
                 
-                # Connect to Azure AI Speech Live Voice API
-                await self._connect_azure_speech()
-                
-                # Send session configuration
-                await self._configure_session()
-                
-                # Start background processing tasks
-                await self._start_background_tasks()
-                
-                # Send initial status message
-                await self._send_status_message("connected", "Live Voice session initialized successfully")
-                
-                span.set_status(Status(StatusCode.OK))
-                logger.info(f"Live Voice session initialized successfully: {self.session_id}")
-                
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, f"Initialization failed: {e}"))
-                logger.error(f"Failed to initialize Live Voice session {self.session_id}: {e}")
-                await self._handle_error("INITIALIZATION_ERROR", str(e), "session_error")
+                # Verify connection state
+                if hasattr(self.voice_live_connection, '_connection') and self.voice_live_connection._connection:
+                    logger.info(f"WebSocket connection object verified for session {self.session_id}")
+                else:
+                    logger.warning(f"WebSocket connection object not properly initialized for session {self.session_id}")
+                    
+            except Exception as conn_error:
+                logger.error(f"Failed to establish Azure Voice Live connection for session {self.session_id}: {conn_error}")
                 raise
+            
+            # Configure session
+            await self._configure_session()
+            
+            # Start background tasks
+            self.is_running = True
+            # Only start receive task - sending is handled by media.py loop calling handle_audio_data
+            logger.info(f"Starting receive task for session {self.session_id}")
+            self.receive_task = asyncio.create_task(self._receive_audio_loop())
+            logger.info(f"Receive task started for session {self.session_id}")
+            
+            # Give the receive task a moment to start
+            await asyncio.sleep(0.1)
+            
+            logger.info(f"Voice live handler started successfully for session {self.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to start voice live handler for session {self.session_id}: {e}")
+            await self.stop()
+            raise
     
-    async def handle_audio_data(self, audio_data: bytes) -> None:
+    async def stop(self) -> None:
         """
-        Handle incoming audio data from the client.
+        Stop the voice live handler.
         
-        :param audio_data: Raw audio bytes from the client
+        Expected by media.py - cleans up connections and stops processing tasks.
         """
-        if not self.is_connected or not self.is_streaming:
-            logger.warning(f"Received audio data while not streaming in session {self.session_id}")
+        try:
+            logger.info(f"Stopping voice live handler for session {self.session_id}")
+            
+            # Stop processing
+            self.is_running = False
+            
+            # Cancel background tasks
+            if self.receive_task and not self.receive_task.done():
+                self.receive_task.cancel()
+                try:
+                    await self.receive_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Close Azure Voice Live connection
+            if self.voice_live_connection:
+                await self.voice_live_connection.__aexit__(None, None, None)
+                self.voice_live_connection = None
+            
+            self.voice_live_client = None
+            
+            logger.info(f"Voice live handler stopped successfully for session {self.session_id}")
+            
+        except Exception as e:
+            logger.error(f"Error stopping voice live handler for session {self.session_id}: {e}")
+    
+    async def handle_audio_data(self, message_data) -> None:
+        """
+        Handle incoming messages from the client.
+        
+        This method can be called by the media pipeline to send various message types to Azure Voice Live.
+        Supports AudioData, AudioMetadata, and DTMF messages.
+        
+        IMPORTANT: This method must never block to avoid blocking the media processing loop.
+        """
+        # Basic communication tracking
+        # if isinstance(message_data, str) and len(message_data) > 50:
+        #     logger.info(f"📨 Session {self.session_id}: Received {len(message_data)} char message")
+        
+        if not self.is_running:
+            logger.warning(f"Received message while handler not running in session {self.session_id}")
+            return
+            
+        if not self.voice_live_connection:
+            logger.warning(f"Received message while voice live connection not available in session {self.session_id}")
             return
         
         try:
-            # Add to metrics
-            if self.session:
-                self.session.add_audio_bytes(len(audio_data))
+            # Handle different input formats
+            if isinstance(message_data, str):
+                # Parse JSON message structure
+                try:
+                    message = json.loads(message_data)
+                    message_kind = message.get("kind", "unknown")
+                    
+                    # Track message types
+                    if message_kind == "AudioData":
+                        logger.info(f"🎤 Session {self.session_id}: Processing audio data")
+                    elif message_kind == "AudioMetadata":
+                        logger.info(f"📋 Session {self.session_id}: Processing audio metadata")
+                    
+                    # Use asyncio.create_task to ensure these don't block the main processing loop
+                    if message_kind == "AudioData" and "audioData" in message:
+                        asyncio.create_task(self._handle_audio_data_message(message))
+                    elif message_kind == "AudioMetadata":
+                        asyncio.create_task(self._handle_audio_metadata_message(message))
+                    elif message_kind == "DtmfTone" and "dtmfTone" in message:
+                        asyncio.create_task(self._handle_dtmf_message(message))
+                    else:
+                        logger.warning(f"Unknown message kind '{message_kind}' in session {self.session_id}")
+                        return
+                    
+                        
+                except json.JSONDecodeError:
+                    # If it's not JSON, treat as raw text/data
+                    logger.warning(f"Failed to parse JSON message in session {self.session_id}")
+                    return
+                    
+            elif isinstance(message_data, bytes):
+                # Handle raw audio bytes
+                asyncio.create_task(self._handle_raw_audio_bytes(message_data))
+            else:
+                logger.warning(f"Unsupported message_data type: {type(message_data)} in session {self.session_id}")
+                return
             
-            if self.connection_state:
-                self.connection_state.record_message_received(len(audio_data))
+        except Exception as e:
+            logger.error(f"Error handling message in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _handle_audio_data_message(self, message: dict) -> None:
+        """Handle AudioData messages."""
+        try:
+            # Check connection state first
+            if not self.voice_live_connection or not self.voice_live_connection._connection:
+                logger.warning(f"Voice Live connection not available for session {self.session_id}")
+                return
+                
+            # Check if connection is already closed
+            if hasattr(self.voice_live_connection._connection, 'closed') and self.voice_live_connection._connection.closed:
+                logger.info(f"Voice Live connection already closed for session {self.session_id}")
+                self.is_running = False
+                return
+                
+            audio_data = message["audioData"]["data"]
+            # The data is already base64 encoded
+            audio_b64 = audio_data
             
-            # Convert audio to base64 for Azure Voice Live API
-            audio_b64 = base64.b64encode(audio_data).decode("utf-8")
+            # DEBUG: Log audio data details
+            try:
+                audio_bytes = base64.b64decode(audio_b64)
+                # Simple audio tracking
+                logger.info(f"🔊 Session {self.session_id}: Sending {len(audio_bytes)} byte audio chunk to Azure")
+            except Exception as decode_error:
+                logger.warning(f"[AUDIO DEBUG] Session {self.session_id}: Could not decode audio data for size calculation: {decode_error}")
             
-            # Send to Azure Voice Live API using the standard event format
+            # Send to Azure Voice Live API with better error handling
             audio_event = {
                 "type": "input_audio_buffer.append",
                 "audio": audio_b64,
                 "event_id": str(uuid.uuid4())
             }
             
-            await self.voice_live_client.send_message(audio_event)
-            
-        except Exception as e:
-            logger.error(f"Error handling audio data in session {self.session_id}: {e}")
-            await self._handle_error("AUDIO_PROCESSING_ERROR", str(e), "audio_error")
-    
-    async def handle_text_message(self, text_data: str) -> None:
-        """
-        Handle incoming text messages from the client.
-        
-        :param text_data: JSON text message from the client
-        """
-        try:
-            message = json.loads(text_data)
-            message_type = message.get("type", "unknown")
-            
-            if message_type == "control":
-                await self._handle_control_message(message)
-            elif message_type == "configuration":
-                await self._handle_configuration_message(message)
-            elif message_type == "text":
-                await self._handle_text_input(message)
-            else:
-                logger.warning(f"Unknown message type '{message_type}' in session {self.session_id}")
-            
-            if self.connection_state:
-                self.connection_state.record_message_received(len(text_data))
-                
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON message in session {self.session_id}: {text_data}")
-            await self._handle_error("INVALID_MESSAGE", "Invalid JSON message format", "validation_error")
-        except Exception as e:
-            logger.error(f"Error handling text message in session {self.session_id}: {e}")
-            await self._handle_error("MESSAGE_PROCESSING_ERROR", str(e), "unknown_error")
-    
-    async def cleanup(self) -> None:
-        """
-        Clean up the Live Voice session resources.
-        
-        Stops all background tasks, disconnects from Azure AI Speech,
-        and persists session state to Redis.
-        """
-        with tracer.start_as_current_span(
-            "voice_live_handler.cleanup",
-            attributes={"session_id": self.session_id}
-        ) as span:
             try:
-                logger.info(f"Starting cleanup for Live Voice session {self.session_id}")
+                await self.voice_live_connection.send(json.dumps(audio_event))
+                logger.debug(f"[AUDIO SEND] Session {self.session_id}: Successfully sent audio chunk to Azure Voice Live")
+            except Exception as send_error:
+                error_msg = str(send_error).lower()
                 
-                # Stop background tasks
-                await self._stop_background_tasks()
-                
-                # Disconnect from Azure AI Speech
-                await self._disconnect_azure_speech()
-                
-                # Update session status
-                if self.session:
-                    self.session.set_status(VoiceLiveSessionStatus.DISCONNECTED, "Session ended")
-                    self.session.disconnected_at = datetime.utcnow()
-                
-                # Persist final state to Redis
-                await self._persist_session_state()
-                
-                # Send final status message
-                await self._send_status_message("disconnected", "Live Voice session ended")
-                
-                span.set_status(Status(StatusCode.OK))
-                logger.info(f"Live Voice session cleanup completed: {self.session_id}")
-                
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, f"Cleanup failed: {e}"))
-                logger.error(f"Error during Live Voice session cleanup {self.session_id}: {e}")
-    
-    # ============================================================================
-    # Private Methods
-    # ============================================================================
-    
-    async def _initialize_session_state(self) -> None:
-        """Initialize session state models."""
-        self.session = VoiceLiveSession(
-            session_id=self.session_id,
-            status=VoiceLiveSessionStatus.INITIALIZING,
-            audio_config=self.audio_config,
-            model_configuration=self.model_configuration,
-            websocket_connected=True,
-            connection_established_at=datetime.utcnow()
-        )
-        
-        self.connection_state = VoiceLiveConnectionState(
-            session_id=self.session_id,
-            websocket_id=str(uuid.uuid4()),
-            connected_at=datetime.utcnow()
-        )
-        
-        self.metrics = VoiceLiveMetrics(
-            session_id=self.session_id,
-            measurement_start=datetime.utcnow()
-        )
-        
-        logger.info(f"Session state initialized for {self.session_id}")
-    
-    async def _connect_azure_speech(self) -> None:
-        """Connect to Azure AI Speech Live Voice API."""
-        try:
-            # Create Voice Live client
-            self.voice_live_client = VoiceLiveClient(
-                azure_endpoint=self.azure_endpoint,
-                token=self.token,
-                api_key=self.api_key
-            )
+                # Handle normal WebSocket closure gracefully
+                if "received 1000 (ok)" in error_msg or "connectionclosedok" in error_msg:
+                    logger.info(f"Azure Voice Live connection closed normally for session {self.session_id}")
+                    self.is_running = False
+                    return  # Don't raise exception for normal closure
+                elif "close frame" in error_msg or "connectionclosed" in error_msg:
+                    logger.warning(f"Azure Voice Live connection closed unexpectedly for session {self.session_id}: {send_error}")
+                    self.is_running = False
+                    return  # Don't raise exception, just stop processing
+                else:
+                    logger.error(f"WebSocket send error for session {self.session_id}: {send_error}")
+                    raise send_error
             
-            # Connect to Azure Voice Live API
-            model_name = self.model_configuration.model_name
-            success = await self.voice_live_client.connect(model_name, self.session_id)
-            
-            if success:
-                self.is_connected = True
-                self.is_streaming = True
-                
-                if self.session:
-                    self.session.azure_speech_connected = True
-                    self.session.status = VoiceLiveSessionStatus.CONNECTED
-                    
-                logger.info(f"Connected to Azure Voice Live API for session {self.session_id}")
-            else:
-                raise Exception("Failed to establish connection to Azure Voice Live API")
-                
+        except KeyError as e:
+            logger.error(f"Missing audio data in message for session {self.session_id}: {e}")
         except Exception as e:
-            logger.error(f"Failed to connect to Azure Voice Live API for session {self.session_id}: {e}")
-            raise
+            logger.error(f"Error handling audio data message in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _configure_session(self) -> None:
-        """Send session configuration to Azure Voice Live API."""
+    async def _handle_audio_metadata_message(self, message: dict) -> None:
+        """Handle AudioMetadata messages and extract audio format configuration."""
         try:
-            # Build session configuration following Azure Voice Live API format
-            session_config = {
-                "type": "session.update",
-                "session": {
-                    "instructions": (
-                        self.model_configuration.system_instructions or 
-                        "You are a helpful AI assistant responding in natural, engaging language."
-                    ),
-                    "turn_detection": {
-                        "type": "azure_semantic_vad",
-                        "threshold": self.audio_config.vad_sensitivity,
-                        "prefix_padding_ms": 200,
-                        "silence_duration_ms": 200,
-                        "remove_filler_words": False,
-                        "end_of_utterance_detection": {
-                            "model": "semantic_detection_v1",
-                            "threshold": 0.01,
-                            "timeout": 2,
-                        },
-                    },
-                    "input_audio_noise_reduction": {
-                        "type": "azure_deep_noise_suppression"
-                    } if self.audio_config.noise_reduction else None,
-                    "input_audio_echo_cancellation": {
-                        "type": "server_echo_cancellation"
-                    } if self.audio_config.echo_cancellation else None,
-                    "voice": {
-                        "name": self.model_configuration.voice_name,
-                        "type": "azure-standard",
-                        "temperature": self.model_configuration.temperature,
-                    },
+            start_time = asyncio.get_event_loop().time()
+            logger.info(f"Received audio metadata in session {self.session_id}: {message}")
+            
+            # Extract audio configuration from metadata payload
+            payload = message.get("payload", {})
+            if payload:
+                self.audio_format = payload.get("format", "pcm")
+                self.sample_rate = payload.get("rate", 16000)
+                self.channels = payload.get("channels", 1)
+                
+                logger.info(f"Updated audio config for session {self.session_id}: format={self.audio_format}, rate={self.sample_rate}, channels={self.channels}")
+            
+            # Trigger greeting when call starts (metadata received)
+            await self._send_greeting()
+
+            end_time = asyncio.get_event_loop().time()
+            processing_time = (end_time - start_time) * 1000  # Convert to milliseconds
+            logger.info(f"Processed audio metadata for session {self.session_id} in {processing_time:.2f}ms")
+            
+        except Exception as e:
+            logger.error(f"Error handling audio metadata message in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _send_greeting(self) -> None:
+        """Send greeting message to Azure Voice Live to have the agent speak."""
+        try:
+            if not self.voice_live_connection or not self.voice_live_connection._connection:
+                logger.warning(f"Cannot send greeting - Voice Live connection not available for session {self.session_id}")
+                return
+                
+            # Check if connection is already closed
+            if hasattr(self.voice_live_connection._connection, 'closed') and self.voice_live_connection._connection.closed:
+                logger.warning(f"Cannot send greeting - Voice Live connection already closed for session {self.session_id}")
+                return
+            
+            # Get greeting from orchestrator if available
+            greeting_text = "Hello! I'm your AI assistant. How can I help you today?"
+            # if self.orchestrator:
+            #     try:
+
+            #         if greeting_response:
+            #             greeting_text = greeting_response
+            #     except Exception as e:
+            #         logger.warning(f"Failed to get greeting from orchestrator for session {self.session_id}: {e}")
+            
+            # logger.info(f"[GREETING SEND] Session {self.session_id}: Sending greeting message to Azure Voice Live")
+            
+            # Send greeting message to Azure Voice Live
+            greeting_event = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": greeting_text
+                        }
+                    ]
                 },
                 "event_id": str(uuid.uuid4())
             }
             
-            # Remove None values
-            if not session_config["session"]["input_audio_noise_reduction"]:
-                del session_config["session"]["input_audio_noise_reduction"]
-            if not session_config["session"]["input_audio_echo_cancellation"]:
-                del session_config["session"]["input_audio_echo_cancellation"]
+            await self.voice_live_connection.send(json.dumps(greeting_event))
+            logger.info(f"[GREETING SENT] Session {self.session_id}: Successfully sent greeting: '{greeting_text}'")
             
-            # Send configuration
-            await self.voice_live_client.send_message(session_config)
-            logger.info(f"Session configuration sent for {self.session_id}")
+        except Exception as e:
+            logger.error(f"Error sending greeting for session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _handle_dtmf_message(self, message: dict) -> None:
+        """Handle DTMF tone messages."""
+        try:
+            dtmf_data = message["dtmfTone"]
+            tone = dtmf_data.get("tone")
+            duration = dtmf_data.get("duration")
+            
+            logger.info(f"Received DTMF tone '{tone}' (duration: {duration}ms) in session {self.session_id}")
+            
+            # Send DTMF information to Azure Voice Live API
+            # This could be used for interactive voice response scenarios
+            dtmf_event = {
+                "type": "input_dtmf.append",
+                "tone": tone,
+                "duration": duration,
+                "event_id": str(uuid.uuid4())
+            }
+            
+            await self.voice_live_connection.send(json.dumps(dtmf_event))
+            
+            # Also send to client via WebSocket for potential UI updates
+            if self.websocket:
+                client_message = {
+                    "type": "dtmf",
+                    "tone": tone,
+                    "duration": duration,
+                    "session_id": self.session_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                await self.websocket.send_text(json.dumps(client_message))
+            
+        except Exception as e:
+            logger.error(f"Error handling DTMF message in session {self.session_id}: {e}")
+    
+    async def _handle_raw_audio_bytes(self, audio_bytes: bytes) -> None:
+        """Handle raw audio bytes."""
+        try:
+            # Check connection state first
+            if not self.voice_live_connection or not self.voice_live_connection._connection:
+                logger.warning(f"Voice Live connection not available for raw audio in session {self.session_id}")
+                return
+                
+            # Check if connection is already closed
+            if hasattr(self.voice_live_connection._connection, 'closed') and self.voice_live_connection._connection.closed:
+                logger.info(f"Voice Live connection already closed for raw audio in session {self.session_id}")
+                self.is_running = False
+                return
+                
+            # DEBUG: Log raw audio details
+            logger.debug(f"[RAW AUDIO DEBUG] Session {self.session_id}: Received raw audio of {len(audio_bytes)} bytes")
+            
+            # Calculate approximate duration for PCM audio
+            bytes_per_sample = 2  # 16-bit PCM
+            samples = len(audio_bytes) // bytes_per_sample
+            duration_ms = (samples / self.sample_rate) * 1000
+            logger.debug(f"[RAW AUDIO DEBUG] Session {self.session_id}: Raw audio duration ~{duration_ms:.1f}ms at {self.sample_rate}Hz")
+                
+            # Convert raw audio bytes to base64
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            
+            # Send to Azure Voice Live API
+            audio_event = {
+                "type": "input_audio_buffer.append",
+                "audio": audio_b64,
+                "event_id": str(uuid.uuid4())
+            }
+            
+            try:
+                await self.voice_live_connection.send(json.dumps(audio_event))
+                logger.debug(f"[RAW AUDIO SEND] Session {self.session_id}: Successfully sent raw audio to Azure Voice Live")
+            except Exception as send_error:
+                error_msg = str(send_error).lower()
+                
+                # Handle normal WebSocket closure gracefully
+                if "received 1000 (ok)" in error_msg or "connectionclosedok" in error_msg:
+                    logger.info(f"Azure Voice Live connection closed normally for raw audio in session {self.session_id}")
+                    self.is_running = False
+                    return  # Don't raise exception for normal closure
+                elif "close frame" in error_msg or "connectionclosed" in error_msg:
+                    logger.warning(f"Azure Voice Live connection closed unexpectedly for raw audio in session {self.session_id}: {send_error}")
+                    self.is_running = False
+                    return  # Don't raise exception, just stop processing
+                else:
+                    logger.error(f"WebSocket send error for raw audio in session {self.session_id}: {send_error}")
+                    raise send_error
+            
+        except Exception as e:
+            logger.error(f"Error handling raw audio bytes in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    async def _configure_session(self) -> None:
+        """Configure the Azure Voice Live session."""
+        try:
+            self.system_prompt = "Greet the user warmly and ask how you can assist them today."
+            session_config = {
+                "modalities": ["text", "audio"],
+                "instructions": self.system_prompt,
+                "turn_detection": {
+                    "type": "azure_semantic_vad",
+                    "threshold": 0.3,
+                    "prefix_padding_ms": 200,
+                    "silence_duration_ms": 500,
+                    "end_of_utterance_detection": {
+                        "model": "semantic_detection_v1",
+                        "threshold": 0.01,
+                        "timeout": 2,
+                    },
+                },
+                "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+                "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
+                "voice": {
+                    "name": "en-US-Ava:DragonHDLatestNeural",
+                    "type": "azure-standard",
+                    "temperature": 0.8,
+                },
+                # Enable transcription to receive transcription.completed events
+                "input_audio_transcription": {
+                    "model": "whisper-1"
+                }
+            }
+            
+            logger.info(f"Sending session configuration for {self.session_id}: {session_config}")
+            await self.voice_live_connection.session.update(session=session_config)
+            logger.info(f"Session configuration sent successfully for {self.session_id}")
             
         except Exception as e:
             logger.error(f"Failed to configure session {self.session_id}: {e}")
             raise
     
-    async def _disconnect_azure_speech(self) -> None:
-        """Disconnect from Azure AI Speech Live Voice API."""
+    
+    async def _receive_audio_loop(self) -> None:
+        """Background task to receive audio responses from Azure Voice Live."""
+        logger.info(f"Starting receive audio loop for session {self.session_id}")
         try:
-            if self.voice_live_client:
-                await self.voice_live_client.close()
-                logger.info(f"Disconnected from Azure Voice Live API for session {self.session_id}")
-                self.voice_live_client = None
-            
-            self.is_connected = False
-            self.is_streaming = False
-            
-            if self.session:
-                self.session.azure_speech_connected = False
-            
-        except Exception as e:
-            logger.error(f"Error disconnecting from Azure Voice Live API for session {self.session_id}: {e}")
-    
-    async def _start_background_tasks(self) -> None:
-        """Start background processing tasks."""
-        self.message_processing_task = asyncio.create_task(self._process_voice_live_messages())
-        self.metrics_reporting_task = asyncio.create_task(self._report_metrics())
-        
-        logger.info(f"Background tasks started for session {self.session_id}")
-    
-    async def _stop_background_tasks(self) -> None:
-        """Stop background processing tasks."""
-        tasks = [
-            self.message_processing_task,
-            self.metrics_reporting_task
-        ]
-        
-        for task in tasks:
-            if task and not task.done():
-                task.cancel()
+            async for raw_event in self.voice_live_connection:
+                if not self.is_running:
+                    logger.info(f"Receive loop stopping - handler not running for session {self.session_id}")
+                    break
+                
+                logger.debug(f"Received event from Azure Voice Live for session {self.session_id}: {raw_event[:100]}...")
+                
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    event = json.loads(raw_event)
+                    await self._handle_voice_live_event(event)
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode event: {e}")
+                except Exception as e:
+                    logger.error(f"Error handling voice live event: {e}")
+                    
+        except WebSocketException as e:
+            logger.error(f"WebSocket error in receive loop for session {self.session_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in receive audio loop for session {self.session_id}: {e}")
+        finally:
+            logger.info(f"Receive audio loop ended for session {self.session_id}")
+    
+    async def _handle_voice_live_event(self, event: dict) -> None:
+        """Handle events from Azure Voice Live API."""
+        event_type = event.get("type", "")
+        event_id = event.get("event_id", "unknown")
         
-        logger.info(f"Background tasks stopped for session {self.session_id}")
-    
-    async def _process_voice_live_messages(self) -> None:
-        """Process messages from Azure Voice Live API."""
-        while self.is_connected:
-            try:
-                # Receive message from Azure Voice Live API
-                message = await self.voice_live_client.receive_message(timeout=1.0)
-                if not message:
-                    continue
-                
-                message_type = message.get("type", "")
-                
-                if message_type == "session.created":
-                    await self._handle_session_created(message)
-                elif message_type == "response.audio.delta":
-                    await self._handle_audio_response(message)
-                elif message_type == "input_audio_buffer.speech_started":
-                    await self._handle_speech_started(message)
-                elif message_type == "input_audio_buffer.speech_stopped":
-                    await self._handle_speech_stopped(message)
-                elif message_type == "response.text.delta":
-                    await self._handle_text_response(message)
-                elif message_type == "error":
-                    await self._handle_voice_live_error(message)
-                else:
-                    logger.debug(f"Unhandled message type: {message_type}")
-                
-            except Exception as e:
-                logger.error(f"Error processing Voice Live message in session {self.session_id}: {e}")
-                await asyncio.sleep(0.1)  # Prevent tight loop on errors
-    
-    async def _handle_session_created(self, message: dict) -> None:
-        """Handle session.created event from Azure Voice Live API."""
-        session_data = message.get("session", {})
-        session_id = session_data.get("id", "unknown")
-        logger.info(f"Azure Voice Live session created: {session_id}")
+        logger.debug(f"[EVENT CALLBACK] Session {self.session_id}: Received '{event_type}' event (ID: {event_id})")
         
-        # Send status update to client
-        await self._send_status_message("processing", "Ready to process audio")
+        if event_type == "response.audio.delta":
+            logger.debug(f"[AUDIO RESPONSE CALLBACK] Session {self.session_id}: Processing audio delta")
+            await self._handle_audio_response(event)
+        elif event_type == "response.text.delta":
+            text_delta = event.get("delta", "")
+            logger.debug(f"[TEXT RESPONSE CALLBACK] Session {self.session_id}: Processing text delta: '{text_delta}'")
+            await self._handle_text_response(event)
+        elif event_type == "input_audio_buffer.speech_started":
+            logger.info(f"[SPEECH DETECTION] Session {self.session_id}: Speech started - user began speaking")
+        elif event_type == "input_audio_buffer.speech_stopped":
+            logger.info(f"[SPEECH DETECTION] Session {self.session_id}: Speech stopped - user finished speaking")
+        elif event_type == "conversation.item.input_audio_transcription.completed":
+            logger.debug(f"[TRANSCRIPTION CALLBACK] Session {self.session_id}: Processing transcription completion")
+            await self._handle_transcription_completed(event)
+        elif event_type == "response.done":
+            logger.info(f"[RESPONSE COMPLETE] Session {self.session_id}: Full response completed")
+        elif event_type == "session.created":
+            logger.info(f"[SESSION EVENT] Session {self.session_id}: Session created successfully")
+        elif event_type == "session.updated":
+            logger.info(f"[SESSION EVENT] Session {self.session_id}: Session configuration updated")
+        elif event_type == "conversation.item.created":
+            logger.debug(f"[CONVERSATION EVENT] Session {self.session_id}: Conversation item created")
+        elif event_type == "input_audio_buffer.committed":
+            logger.debug(f"[AUDIO BUFFER] Session {self.session_id}: Audio buffer committed")
+        elif event_type == "input_audio_buffer.cleared":
+            logger.debug(f"[AUDIO BUFFER] Session {self.session_id}: Audio buffer cleared")
+        elif event_type == "response.created":
+            logger.debug(f"[RESPONSE EVENT] Session {self.session_id}: Response generation started")
+        elif event_type == "response.output_item.added":
+            logger.debug(f"[RESPONSE EVENT] Session {self.session_id}: Output item added to response")
+        elif event_type == "response.output_item.done":
+            logger.debug(f"[RESPONSE EVENT] Session {self.session_id}: Output item completed")
+        elif event_type == "response.content_part.added":
+            logger.debug(f"[RESPONSE EVENT] Session {self.session_id}: Content part added")
+        elif event_type == "response.content_part.done":
+            logger.debug(f"[RESPONSE EVENT] Session {self.session_id}: Content part completed")
+        elif event_type == "response.audio_transcript.delta":
+            transcript = event.get("delta", "")
+            logger.debug(f"[AUDIO TRANSCRIPT] Session {self.session_id}: AI is saying: '{transcript}'")
+        elif event_type == "response.audio_transcript.done":
+            logger.debug(f"[AUDIO TRANSCRIPT] Session {self.session_id}: AI transcript completed")
+        elif event_type == "error":
+            logger.error(f"[ERROR EVENT] Session {self.session_id}: Processing error event")
+            await self._handle_error_event(event)
+        else:
+            logger.debug(f"[UNHANDLED EVENT] Session {self.session_id}: '{event_type}' - {json.dumps(event, indent=2) if logger.isEnabledFor(logging.DEBUG) else 'Enable DEBUG logging for full event details'}")
     
-    async def _handle_audio_response(self, message: dict) -> None:
-        """Handle response.audio.delta event from Azure Voice Live API."""
+    async def _handle_audio_response(self, event: dict) -> None:
+        """Handle audio response from Azure Voice Live and format for ACS WebSocket."""
         try:
-            # Extract audio data
-            audio_delta = message.get("delta", "")
-            if audio_delta:
-                # Decode base64 audio and send to client
-                audio_bytes = base64.b64decode(audio_delta)
+            audio_delta = event.get("delta", "")
+            if audio_delta and self.websocket:
+                # DEBUG: Log outgoing audio details
+                try:
+                    original_bytes = base64.b64decode(audio_delta)
+                    logger.debug(f"[AUDIO OUT] Session {self.session_id}: Received {len(original_bytes)} bytes from Azure Voice Live (24kHz)")
+                except Exception:
+                    logger.debug(f"[AUDIO OUT] Session {self.session_id}: Received audio delta (decode failed for size calc)")
                 
-                # Send audio to client via WebSocket
-                audio_message = {
-                    "type": "audio",
-                    "data": audio_delta,  # Keep as base64 for client
-                    "format": "pcm",
-                    "sample_rate": self.audio_config.sample_rate,
-                    "channels": self.audio_config.channels,
-                    "session_id": self.session_id,
-                    "timestamp": datetime.utcnow().isoformat()
+                # Resample audio from 24kHz (Azure Voice Live) to match ACS expected rate
+                resampled_audio = await self._resample_audio_for_acs(audio_delta)
+                
+                # Format audio response in ACS-expected format
+                acs_audio_message = {
+                    "kind": "AudioData",
+                    "audioData": {
+                        "data": resampled_audio,  # Base64 encoded resampled audio data
+                        "silent": False,          # Audio contains actual speech
+                        "timestamp": time.time()  # Unix timestamp
+                    }
                 }
                 
-                await self._send_websocket_message(audio_message)
-                
-                # Update metrics
-                if self.session:
-                    self.session.add_audio_bytes(len(audio_bytes))
+                logger.debug(f"[AUDIO OUT] Session {self.session_id}: Sending resampled audio to client WebSocket")
+                await self.websocket.send_text(json.dumps(acs_audio_message))
                 
         except Exception as e:
             logger.error(f"Error handling audio response in session {self.session_id}: {e}")
     
-    async def _handle_speech_started(self, message: dict) -> None:
-        """Handle input_audio_buffer.speech_started event."""
-        logger.info(f"Speech started in session {self.session_id}")
-        await self._send_status_message("processing", "User speaking")
-    
-    async def _handle_speech_stopped(self, message: dict) -> None:
-        """Handle input_audio_buffer.speech_stopped event."""
-        logger.info(f"Speech stopped in session {self.session_id}")
-        await self._send_status_message("processing", "Processing speech")
-    
-    async def _handle_text_response(self, message: dict) -> None:
-        """Handle response.text.delta event from Azure Voice Live API."""
+    async def _resample_audio_for_acs(self, audio_b64: str) -> str:
+        """Resample audio from Azure Voice Live (24kHz) to ACS expected rate (16kHz)."""
         try:
-            text_delta = message.get("delta", "")
-            if text_delta:
-                # Send text response to client
-                text_message = VoiceLiveTextMessage(
-                    session_id=self.session_id,
-                    content=text_delta,
-                    role="assistant",
-                    is_partial=True,
-                    timestamp=datetime.utcnow()
-                )
+            # Decode base64 audio data
+            audio_bytes = base64.b64decode(audio_b64)
+            
+            # Azure Voice Live outputs 24kHz 16-bit PCM, ACS expects 16kHz
+            source_rate = 24000
+            target_rate = self.sample_rate  # From ACS metadata (16000)
+            
+            if source_rate == target_rate:
+                # No resampling needed
+                return audio_b64
+            
+            # Convert bytes to numpy array (16-bit PCM)
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+            
+            #  resampling using numpy interpolation
+            # Calculate the resampling ratio
+            resample_ratio = target_rate / source_rate  # 16000/24000 = 0.667
+            
+            # Create new sample indices
+            original_length = len(audio_np)
+            new_length = int(original_length * resample_ratio)
+            
+            # Use linear interpolation to resample
+            original_indices = np.arange(original_length)
+            new_indices = np.linspace(0, original_length - 1, new_length)
+            resampled_audio = np.interp(new_indices, original_indices, audio_np.astype(np.float32))
+            
+            # Convert back to int16 and then to bytes
+            resampled_int16 = resampled_audio.astype(np.int16)
+            resampled_bytes = resampled_int16.tobytes()
+            
+            # Encode back to base64
+            resampled_b64 = base64.b64encode(resampled_bytes).decode("utf-8")
+            
+            logger.debug(f"Resampled audio from {source_rate}Hz to {target_rate}Hz for session {self.session_id} "
+                        f"(original: {len(audio_bytes)} bytes, resampled: {len(resampled_bytes)} bytes)")
+            
+            return resampled_b64
+            
+        except Exception as e:
+            logger.error(f"Error resampling audio for session {self.session_id}: {e}")
+            # Return original audio if resampling fails
+            return audio_b64
+    
+    async def _handle_text_response(self, event: dict) -> None:
+        """Handle text response from Azure Voice Live."""
+        try:
+            text_delta = event.get("delta", "")
+            if text_delta and self.websocket:
+                logger.info(f"[AI TEXT RESPONSE] Session {self.session_id}: AI responding with text: '{text_delta}'")
                 
-                await self._send_websocket_message(text_message.dict())
+                # Format text response - could be used for transcription display
+                # ACS might not expect this format, but useful for debugging
+                text_message = {
+                    "kind": "TextData", 
+                    "textData": {
+                        "text": text_delta,
+                        "role": "assistant",
+                        "timestamp": time.time()
+                    }
+                }
                 
-                # Add to conversation history
-                if self.session:
-                    self.session.add_conversation_message("assistant", text_delta)
+                logger.debug(f"[TEXT OUT] Session {self.session_id}: Sending text response to client WebSocket")
+                await self.websocket.send_text(json.dumps(text_message))
                 
         except Exception as e:
             logger.error(f"Error handling text response in session {self.session_id}: {e}")
     
-    async def _handle_voice_live_error(self, message: dict) -> None:
-        """Handle error events from Azure Voice Live API."""
-        error_details = message.get("error", {})
+    async def _handle_error_event(self, event: dict) -> None:
+        """Handle error events from Azure Voice Live."""
+        error_details = event.get("error", {})
         error_type = error_details.get("type", "Unknown")
-        error_code = error_details.get("code", "Unknown")
         error_message = error_details.get("message", "No message provided")
         
-        logger.error(f"Azure Voice Live API error: {error_type} - {error_code} - {error_message}")
-        await self._handle_error("AZURE_VOICE_LIVE_ERROR", error_message, "service_error")
-    
-    async def _report_metrics(self) -> None:
-        """Report performance metrics periodically."""
-        while self.is_connected:
-            try:
-                await asyncio.sleep(30)  # Report every 30 seconds
-                
-                if self.session and self.metrics:
-                    # Calculate basic metrics
-                    duration = self.session.get_session_duration_seconds()
-                    
-                    metrics_message = VoiceLiveMetricsMessage(
-                        session_id=self.session_id,
-                        session_stats={
-                            "total_messages": self.session.total_messages,
-                            "audio_bytes_processed": self.session.audio_bytes_processed,
-                            "session_duration_seconds": duration,
-                            "error_count": self.session.error_count,
-                        },
-                        timestamp=datetime.utcnow()
-                    )
-                    
-                    await self._send_websocket_message(metrics_message.dict())
-                
-            except Exception as e:
-                logger.error(f"Error reporting metrics for session {self.session_id}: {e}")
-                await asyncio.sleep(5)  # Wait before retrying
-    
-    async def handle_text_message(self, text_data: str) -> None:
-        """
-        Handle incoming text messages from the client.
+        logger.error(f"Azure Voice Live error: {error_type} - {error_message}")
         
-        :param text_data: JSON text message from the client
-        """
-        try:
-            message = json.loads(text_data)
-            message_type = message.get("type", "unknown")
-            
-            if message_type == "control":
-                await self._handle_control_message(message)
-            elif message_type == "configuration":
-                await self._handle_configuration_message(message)
-            elif message_type == "text":
-                await self._handle_text_input(message)
-            else:
-                logger.warning(f"Unknown message type '{message_type}' in session {self.session_id}")
-            
-            if self.connection_state:
-                self.connection_state.record_message_received(len(text_data))
-                
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON message in session {self.session_id}: {text_data}")
-            await self._handle_error("INVALID_MESSAGE", "Invalid JSON message format", "validation_error")
-        except Exception as e:
-            logger.error(f"Error handling text message in session {self.session_id}: {e}")
-            await self._handle_error("MESSAGE_PROCESSING_ERROR", str(e), "unknown_error")
-    
-    async def cleanup(self) -> None:
-        """
-        Clean up the Live Voice session resources.
-        
-        Stops all background tasks, disconnects from Azure AI Speech,
-        and persists session state to Redis.
-        """
-        with tracer.start_as_current_span(
-            "voice_live_handler.cleanup",
-            attributes={"session_id": self.session_id}
-        ) as span:
-            try:
-                logger.info(f"Starting cleanup for Live Voice session {self.session_id}")
-                
-                # Stop background tasks
-                await self._stop_background_tasks()
-                
-                # Disconnect from Azure AI Speech
-                await self._disconnect_azure_speech()
-                
-                # Update session status
-                if self.session:
-                    self.session.status = VoiceLiveSessionStatus.DISCONNECTED
-                    self.session.update_activity()
-                
-                # Persist final state to Redis
-                await self._persist_session_state()
-                
-                # Send final status message
-                await self._send_status_message("disconnected", "Live Voice session ended")
-                
-                span.set_status(Status(StatusCode.OK))
-                logger.info(f"Live Voice session cleanup completed: {self.session_id}")
-                
-            except Exception as e:
-                span.set_status(Status(StatusCode.ERROR, f"Cleanup failed: {e}"))
-                logger.error(f"Error during Live Voice session cleanup {self.session_id}: {e}")
-    
-    # ============================================================================
-    # Private Methods
-    # ============================================================================
-    
-    async def _initialize_session_state(self) -> None:
-        """Initialize session state models."""
-        self.session = VoiceLiveSession(
-            session_id=self.session_id,
-            status=VoiceLiveSessionStatus.INITIALIZING,
-            audio_config=self.audio_config,
-            model_configuration=self.model_configuration,
-            websocket_connected=True,
-            connection_established_at=datetime.utcnow()
-        )
-        
-        self.connection_state = VoiceLiveConnectionState(
-            session_id=self.session_id,
-            websocket_id=str(uuid.uuid4()),
-            connected_at=datetime.utcnow()
-        )
-        
-        self.metrics = VoiceLiveMetrics(
-            session_id=self.session_id,
-            measurement_start=datetime.utcnow()
-        )
-        
-        logger.info(f"Session state initialized for {self.session_id}")
-    
-    async def _connect_azure_speech(self) -> None:
-        """Connect to Azure AI Speech Live Voice API using pool."""
-        try:
-            # Acquire Live Voice client from pool
-            self.voice_live_client = await self.voice_live_pool.acquire()
-            logger.info(f"Acquired Live Voice client from pool for session {self.session_id}")
-
-            # Connect to Azure AI Speech Live Voice API
-            result = await self.voice_live_client.connect(
-                session_id=self.session_id
-            )
-
-            # For now, simulate a successful connection
-            if result:
-                self.is_connected = True
-                self.is_streaming = True
-
-                if self.session:
-                    self.session.azure_speech_connected = True
-                self.session.status = VoiceLiveSessionStatus.CONNECTED
-                logger.info(f"Connected to Azure AI Speech for session {self.session_id}")
-            else:
-                logger.warning(f"Failed to connect to Azure AI Speech for session {self.session_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to connect to Azure AI Speech for session {self.session_id}: {e}")
-            raise
-    
-    async def _disconnect_azure_speech(self) -> None:
-        """Disconnect from Azure AI Speech Live Voice API and return client to pool."""
-        try:
-            if self.voice_live_client:
-                # Close the Live Voice connection if needed
-                # await self.voice_live_client.close()
-                
-                # Return client to pool
-                await self.voice_live_pool.release(self.voice_live_client)
-                logger.info(f"Released Live Voice client back to pool for session {self.session_id}")
-                self.voice_live_client = None
-            
-            self.is_connected = False
-            self.is_streaming = False
-            
-            if self.session:
-                self.session.azure_speech_connected = False
-            
-            logger.info(f"Disconnected from Azure AI Speech for session {self.session_id}")
-            
-        except Exception as e:
-            logger.error(f"Error disconnecting from Azure AI Speech for session {self.session_id}: {e}")
-    
-    async def _start_background_tasks(self) -> None:
-        """Start background processing tasks."""
-        self.audio_processing_task = asyncio.create_task(self._process_audio_queue())
-        self.response_processing_task = asyncio.create_task(self._process_response_queue())
-        self.metrics_reporting_task = asyncio.create_task(self._report_metrics())
-        
-        logger.info(f"Background tasks started for session {self.session_id}")
-    
-    async def _stop_background_tasks(self) -> None:
-        """Stop background processing tasks."""
-        tasks = [
-            self.audio_processing_task,
-            self.response_processing_task,
-            self.metrics_reporting_task
-        ]
-        
-        for task in tasks:
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        
-        logger.info(f"Background tasks stopped for session {self.session_id}")
-    
-    async def _process_audio_queue(self) -> None:
-        """Process audio data from the queue."""
-        while self.is_streaming:
-            try:
-                audio_data = await asyncio.wait_for(self.audio_queue.get(), timeout=1.0)
-                
-                # Process audio through Azure AI Speech
-                # In a real implementation, you would send the audio to Azure AI Speech
-                # and handle the response
-                
-                # Simulate processing delay
-                await asyncio.sleep(0.01)
-                
-                # Queue a simulated response
-                await self.response_queue.put({
-                    "type": "transcription",
-                    "text": "Simulated transcription",
-                    "confidence": 0.95
-                })
-                
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error processing audio in session {self.session_id}: {e}")
-                await self._handle_error("AUDIO_PROCESSING_ERROR", str(e), "audio_error")
-    
-    async def _process_response_queue(self) -> None:
-        """Process responses from Azure AI Speech."""
-        while self.is_connected:
-            try:
-                response = await asyncio.wait_for(self.response_queue.get(), timeout=1.0)
-                
-                if response.get("type") == "transcription":
-                    # Send transcription to client
-                    text_message = VoiceLiveTextMessage(
-                        session_id=self.session_id,
-                        content=response.get("text", ""),
-                        role="user",
-                        confidence=response.get("confidence"),
-                        timestamp=datetime.utcnow()
-                    )
-                    
-                    await self._send_websocket_message(text_message.dict())
-                    
-                    # Add to session history
-                    if self.session:
-                        self.session.add_conversation_message(
-                            "user",
-                            response.get("text", ""),
-                            {"confidence": response.get("confidence")}
-                        )
-                
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error processing response in session {self.session_id}: {e}")
-                await self._handle_error("RESPONSE_PROCESSING_ERROR", str(e), "unknown_error")
-    
-    async def _report_metrics(self) -> None:
-        """Report performance metrics periodically."""
-        while self.is_connected:
-            try:
-                await asyncio.sleep(30)  # Report every 30 seconds
-                
-                if self.metrics and self.session:
-                    metrics_message = VoiceLiveMetricsMessage(
-                        session_id=self.session_id,
-                        session_stats={
-                            "total_messages": self.session.total_messages,
-                            "audio_bytes_processed": self.session.audio_bytes_processed,
-                            "error_count": self.session.error_count,
-                            "average_response_time_ms": self.session.average_response_time_ms
-                        },
-                        timestamp=datetime.utcnow()
-                    )
-                    
-                    await self._send_websocket_message(metrics_message.dict())
-                
-            except Exception as e:
-                logger.error(f"Error reporting metrics for session {self.session_id}: {e}")
-    
-    async def _handle_control_message(self, message: Dict[str, Any]) -> None:
-        """Handle control messages from the client."""
-        command = message.get("command", "")
-        
-        if command == "start":
-            self.is_streaming = True
-            await self._send_status_message("processing", "Audio streaming started")
-        elif command == "stop":
-            self.is_streaming = False
-            await self._send_status_message("idle", "Audio streaming stopped")
-        elif command == "pause":
-            self.is_streaming = False
-            await self._send_status_message("paused", "Session paused")
-        elif command == "resume":
-            self.is_streaming = True
-            await self._send_status_message("processing", "Session resumed")
-        elif command == "status":
-            status = "connected" if self.is_connected else "disconnected"
-            await self._send_status_message(status, f"Session is {status}")
-        else:
-            await self._handle_error("UNKNOWN_COMMAND", f"Unknown control command: {command}", "validation_error")
-    
-    async def _handle_configuration_message(self, message: Dict[str, Any]) -> None:
-        """Handle configuration update messages."""
-        config_type = message.get("configuration_type", "")
-        config_data = message.get("configuration_data", {})
-        
-        try:
-            if config_type == "audio":
-                # Update audio configuration
-                for key, value in config_data.items():
-                    if hasattr(self.audio_config, key):
-                        setattr(self.audio_config, key, value)
-                
-                # Send updated configuration to Azure Voice Live API if needed
-                await self._configure_session()
-            
-            elif config_type == "model":
-                # Update model configuration
-                for key, value in config_data.items():
-                    if hasattr(self.model_configuration, key):
-                        setattr(self.model_configuration, key, value)
-                
-                # Send updated configuration to Azure Voice Live API if needed
-                await self._configure_session()
-            
-            else:
-                await self._handle_error("UNKNOWN_CONFIG_TYPE", f"Unknown configuration type: {config_type}", "validation_error")
-        
-        except Exception as e:
-            await self._handle_error("CONFIGURATION_ERROR", str(e), "unknown_error")
-    
-    async def _handle_text_input(self, message: Dict[str, Any]) -> None:
-        """Handle direct text input from the client."""
-        text_content = message.get("content", "")
-        
-        if text_content and self.session:
-            # Add to conversation history
-            self.session.add_conversation_message("user", text_content)
-            
-            # Process through orchestrator if available
-            if self.orchestrator:
-                try:
-                    response = await self.orchestrator.process_text(text_content, self.session_id)
-                    # Handle orchestrator response if needed
-                except Exception as e:
-                    logger.error(f"Orchestrator error for session {self.session_id}: {e}")
-    
-    async def _send_status_message(self, status: str, message: str, level: str = "info") -> None:
-        """Send a status message to the client."""
-        status_message = VoiceLiveStatusMessage(
-            session_id=self.session_id,
-            status=status,
-            message=message,
-            level=level,
-            timestamp=datetime.utcnow()
-        )
-        
-        await self._send_websocket_message(status_message.dict())
-    
-    async def _handle_error(self, error_code: str, error_message: str, error_type: str) -> None:
-        """Handle errors and send error messages to the client."""
-        if self.session:
-            self.session.record_error(error_message)
-        
-        if self.connection_state:
-            if error_type in ["network_error", "service_error"]:
-                self.connection_state.record_connection_error()
-            elif error_type == "validation_error":
-                self.connection_state.record_protocol_error()
-        
-        error_msg = VoiceLiveErrorMessage(
-            session_id=self.session_id,
-            error_code=error_code,
-            error_message=error_message,
-            error_type=error_type,
-            timestamp=datetime.utcnow()
-        )
-        
-        await self._send_websocket_message(error_msg.dict())
-    
-    async def _send_websocket_message(self, message: Dict[str, Any]) -> None:
-        """Send a message to the WebSocket client."""
-        try:
-            await self.websocket.send_text(json.dumps(message, default=str))
-            
-            if self.connection_state:
-                self.connection_state.record_message_sent(len(json.dumps(message, default=str)))
-        
-        except Exception as e:
-            logger.error(f"Error sending WebSocket message in session {self.session_id}: {e}")
-    
-    async def _persist_session_state(self) -> None:
-        """Persist session state to Redis."""
-        try:
-            if self.session and self.redis_client:
-                # Serialize session state
-                session_data = {
-                    "session_id": self.session.session_id,
-                    "status": self.session.status.value,
-                    "created_at": self.session.created_at.isoformat(),
-                    "conversation_summary": self.session.get_conversation_summary(),
-                    "total_messages": self.session.total_messages,
-                    "audio_bytes_processed": self.session.audio_bytes_processed,
-                    "error_count": self.session.error_count,
+        if self.websocket:
+            # Format error in ACS-style structure
+            error_msg = {
+                "kind": "ErrorData",
+                "errorData": {
+                    "code": error_type,
+                    "message": error_message,
+                    "timestamp": time.time()
                 }
-                
-                # Store in Redis with expiration
-                key = f"voice_live_session:{self.session_id}"
-                await self.redis_client.setex(key, 3600, json.dumps(session_data, default=str))
-                
-                logger.info(f"Session state persisted for {self.session_id}")
-        
-        except Exception as e:
-            logger.error(f"Error persisting session state for {self.session_id}: {e}")
+            }
+            
+            try:
+                await self.websocket.send_text(json.dumps(error_msg))
+            except Exception as e:
+                logger.error(f"Failed to send error message to client: {e}")
     
-    async def _handle_configuration_message(self, message: Dict[str, Any]) -> None:
-        """Handle configuration update messages."""
-        config_type = message.get("configuration_type", "")
-        config_data = message.get("configuration_data", {})
-        
+    async def _handle_transcription_completed(self, event: dict) -> None:
+        """Handle transcription completed events and route through orchestrator if available."""
         try:
-            if config_type == "audio":
-                # Update audio configuration
-                for key, value in config_data.items():
-                    if hasattr(self.audio_config, key):
-                        setattr(self.audio_config, key, value)
+            transcript_text = event.get("transcript", "")
+            if not transcript_text:
+                logger.warning(f"[TRANSCRIPTION] Session {self.session_id}: Received transcription event with no text")
+                return
                 
-                await self._send_status_message("configured", f"Audio configuration updated")
+            # logger.info(f"[TRANSCRIPTION RECEIVED] Session {self.session_id}: User said: '{transcript_text}'")
             
-            elif config_type == "model":
-                # Update model configuration
-                for key, value in config_data.items():
-                    if hasattr(self.model_configuration, key):
-                        setattr(self.model_configuration, key, value)
+            # DEBUG: Log full transcription event details
+            logger.debug(f"[TRANSCRIPTION DEBUG] Session {self.session_id}: Full event data: {json.dumps(event, indent=2)}")
+            
+            # # If orchestrator is available, route conversation through it
+            # if self.orchestrator:
+            #     await self._process_with_orchestrator(transcript_text)
+            # else:
+            #     # Log that we're using Azure Voice Live's built-in conversation handling
+            #     logger.info(f"No orchestrator configured, using Azure Voice Live built-in conversation handling for session {self.session_id}")
                 
-                await self._send_status_message("configured", f"Model configuration updated")
-            
-            else:
-                await self._handle_error("UNKNOWN_CONFIG_TYPE", f"Unknown configuration type: {config_type}", "validation_error")
-        
         except Exception as e:
-            await self._handle_error("CONFIGURATION_ERROR", str(e), "unknown_error")
+            logger.error(f"Error handling transcription completion in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _handle_text_input(self, message: Dict[str, Any]) -> None:
-        """Handle direct text input from the client."""
-        text_content = message.get("content", "")
-        
-        if text_content and self.session:
-            # Add to conversation history
-            self.session.add_conversation_message("user", text_content)
-            
-            # Process through orchestrator if available
-            if self.orchestrator:
-                # This would integrate with your existing orchestration system
-                # For now, just echo back a response
-                response = f"Processed: {text_content}"
-                
-                response_message = VoiceLiveTextMessage(
-                    session_id=self.session_id,
-                    content=response,
-                    role="assistant",
-                    timestamp=datetime.utcnow()
-                )
-                
-                await self._send_websocket_message(response_message.dict())
-                self.session.add_conversation_message("assistant", response)
-    
-    async def _send_status_message(self, status: str, message: str, level: str = "info") -> None:
-        """Send a status message to the client."""
-        status_message = VoiceLiveStatusMessage(
-            session_id=self.session_id,
-            status=status,
-            message=message,
-            level=level,
-            timestamp=datetime.utcnow()
-        )
-        
-        await self._send_websocket_message(status_message.dict())
-    
-    async def _handle_error(self, error_code: str, error_message: str, error_type: str) -> None:
-        """Handle errors and send error messages to the client."""
-        if self.session:
-            self.session.record_error(error_message)
-        
-        if self.connection_state:
-            if error_type in ["network_error", "service_error"]:
-                self.connection_state.record_connection_error()
-            elif error_type == "validation_error":
-                self.connection_state.record_protocol_error()
-        
-        error_msg = VoiceLiveErrorMessage(
-            session_id=self.session_id,
-            error_code=error_code,
-            error_message=error_message,
-            error_type=error_type,
-            timestamp=datetime.utcnow()
-        )
-        
-        await self._send_websocket_message(error_msg.dict())
-    
-    async def _send_websocket_message(self, message: Dict[str, Any]) -> None:
-        """Send a message to the WebSocket client."""
+    async def _process_with_orchestrator(self, user_message: str) -> None:
+        """Process user message through the orchestrator and send response to Azure Voice Live."""
         try:
-            await self.websocket.send_text(json.dumps(message, default=str))
+            logger.info(f"Processing message through orchestrator for session {self.session_id}: '{user_message}'")
             
-            if self.connection_state:
-                self.connection_state.record_message_sent(len(json.dumps(message, default=str)))
-        
+            # Get response from orchestrator
+            try:
+                # This depends on your orchestrator's interface - adjust as needed
+                response = await self.orchestrator.process_message(user_message, session_id=self.session_id)
+                if not response:
+                    logger.warning(f"Orchestrator returned empty response for session {self.session_id}")
+                    return
+                    
+            except Exception as e:
+                logger.error(f"Error getting response from orchestrator for session {self.session_id}: {e}")
+                # Fall back to default response
+                response = "I'm sorry, I'm having trouble processing your request right now. Please try again."
+            
+            # Send orchestrator response to Azure Voice Live for TTS
+            await self._send_orchestrator_response(response)
+            
         except Exception as e:
-            logger.error(f"Error sending WebSocket message in session {self.session_id}: {e}")
+            logger.error(f"Error processing message with orchestrator in session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
-    async def _persist_session_state(self) -> None:
-        """Persist session state to Redis."""
+    async def _send_orchestrator_response(self, response_text: str) -> None:
+        """Send orchestrator response to Azure Voice Live for text-to-speech conversion."""
         try:
-            if self.session and self.redis_client:
-                session_data = self.session.dict()
-                await self.redis_client.setex(
-                    f"voice_live_session:{self.session_id}",
-                    3600,  # 1 hour TTL
-                    json.dumps(session_data, default=str)
-                )
+            if not self.voice_live_connection or not self.voice_live_connection._connection:
+                logger.warning(f"Cannot send orchestrator response - Voice Live connection not available for session {self.session_id}")
+                return
                 
-                logger.info(f"Session state persisted for {self.session_id}")
-        
+            # Check if connection is already closed
+            if hasattr(self.voice_live_connection._connection, 'closed') and self.voice_live_connection._connection.closed:
+                logger.warning(f"Cannot send orchestrator response - Voice Live connection already closed for session {self.session_id}")
+                return
+            
+            # Send response message to Azure Voice Live for TTS
+            response_event = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": response_text
+                        }
+                    ]
+                },
+                "event_id": str(uuid.uuid4())
+            }
+            
+            await self.voice_live_connection.send(json.dumps(response_event))
+            logger.info(f"Sent orchestrator response to Azure Voice Live for session {self.session_id}: '{response_text}'")
+            
+            # Also trigger response generation
+            generate_event = {
+                "type": "response.create",
+                "response": {
+                    "modalities": ["audio"],
+                    "instructions": "Please provide a natural, conversational response based on the assistant message."
+                },
+                "event_id": str(uuid.uuid4())
+            }
+            
+            await self.voice_live_connection.send(json.dumps(generate_event))
+            logger.info(f"Triggered response generation for orchestrator response in session {self.session_id}")
+            
         except Exception as e:
-            logger.error(f"Error persisting session state for {self.session_id}: {e}")
+            logger.error(f"Error sending orchestrator response for session {self.session_id}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")

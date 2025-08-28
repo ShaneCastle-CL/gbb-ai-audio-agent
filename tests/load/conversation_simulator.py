@@ -177,7 +177,7 @@ class ConversationTemplates:
             name="insurance_inquiry",
             description="Customer calling to ask about insurance coverage",
             turns=[
-                ConversationTurn("user", "Hello, what's up?", ConversationPhase.GREETING, delay_before_ms=1000),
+                ConversationTurn("user", "Hello, my name is Alice Brown, my social is 1234, and my zip code is 60610", ConversationPhase.GREETING, delay_before_ms=1000),
                 ConversationTurn("user", "I'm looking to learn about Madrid.", ConversationPhase.INQUIRY, delay_before_ms=2000),
                 ConversationTurn("user", "Actually, I need help with my car insurance.", ConversationPhase.CLARIFICATION, delay_before_ms=1500),
                 ConversationTurn("user", "What does my policy cover?", ConversationPhase.INQUIRY, delay_before_ms=800),
@@ -262,7 +262,10 @@ class ConversationSimulator:
             connect_start = time.time()
             async with websockets.connect(
                 f"{self.ws_url}?call_connection_id={session_id}",
-                additional_headers={"x-ms-call-connection-id": session_id}
+                additional_headers={
+                    "x-ms-call-connection-id": session_id,
+                    "x-session-id": session_id
+                }
             ) as websocket:
                 metrics.connection_time_ms = (time.time() - connect_start) * 1000
                 print(f"✅ Connected in {metrics.connection_time_ms:.1f}ms")
