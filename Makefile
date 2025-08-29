@@ -114,14 +114,14 @@ generate_audio:
 	python $(SCRIPTS_LOAD_DIR)/audio_generator.py --max-turns 5
 
 # WebSocket endpoint load testing (current approach)
-DEPLOYED_URL = rtaudioagent-backend-1wzjoyj7.victoriousgrass-aaa9e3d8.eastus.azurecontainerapps.io
-LOCAL_URL = localhost:8010
+DEPLOYED_URL = wss://rtaudioagent-backend-1wzjoyj7.victoriousgrass-aaa9e3d8.eastus.azurecontainerapps.io
+LOCAL_URL = ws://localhost:8010
 run_load_test:
 	python $(SCRIPTS_LOAD_DIR)/detailed_statistics_analyzer.py \
-		--url ws://$(LOCAL_URL)/api/v1/media/stream \
+		--url $(DEPLOYED_URL)/api/v1/media/stream \
 		--turns 5 \
-		--conversations 5 \
-		--concurrent 3 \
+		--conversations 150 \
+		--concurrent 100 \
 		--record \
 		--record-rate 0.2
 
