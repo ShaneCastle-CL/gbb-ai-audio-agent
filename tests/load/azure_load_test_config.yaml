@@ -1,0 +1,189 @@
+# Azure Load Test Configuration
+# This YAML file defines the test configuration for Azure Load Testing service
+
+testName: "AI Audio Agent Comprehensive Load Test"
+description: "Comprehensive conversation-based load testing for AI Audio Agent with WebSocket connections"
+
+# Test execution parameters
+testPlan:
+  testType: "Python"
+  testScript: "azure_comprehensive_load_test.py"
+  
+# Engine instances configuration  
+engineInstances: 5
+
+# Load pattern configuration
+loadTestConfiguration:
+  # Duration in ISO 8601 format (PT5M = 5 minutes)
+  duration: "PT10M"
+  
+  # Ramp up configuration
+  rampUpTime: "PT2M"
+  
+  # Virtual users configuration
+  virtualUsers: 50
+  
+  # Target requests per second
+  targetRPS: 10.0
+
+# Environment variables for the test
+environmentVariables:
+  # Test configuration
+  TEST_DURATION_MINUTES: "10"
+  RAMP_UP_DURATION_MINUTES: "2"
+  TARGET_RPS: "10.0"
+  MAX_CONCURRENT_USERS: "50"
+  
+  # Test scenarios to run (comma-separated)
+  TEST_SCENARIOS: "light,medium,heavy"
+  
+  # Target service configuration
+  WEBSOCKET_URL: "ws://your-service-url:8010/api/v1/media/stream"
+  
+  # Azure configuration
+  AZURE_RESOURCE_GROUP: "audio-agent-load-test-rg"
+  AZURE_LOCATION: "eastus"
+  
+  # Monitoring and logging
+  ENABLE_APP_INSIGHTS: "true"
+  ENABLE_DETAILED_METRICS: "true"
+
+# Secrets (these should be configured in Azure Key Vault)
+secrets:
+  # Add any secrets needed for authentication
+  - name: "API_KEY"
+    value: "#{API_KEY}#"  # Reference to Key Vault secret
+  
+  - name: "SERVICE_CONNECTION_STRING" 
+    value: "#{SERVICE_CONNECTION_STRING}#"
+
+# Monitoring configuration
+monitoring:
+  # Application Insights resource
+  appInsights:
+    enabled: true
+    resourceId: "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.Insights/components/{app-insights-name}"
+    
+  # Azure Monitor metrics to collect
+  metrics:
+    - name: "CPU Utilization"
+      namespace: "Microsoft.Compute/virtualMachines"
+      metric: "Percentage CPU"
+      
+    - name: "Memory Usage"
+      namespace: "Microsoft.Compute/virtualMachines" 
+      metric: "Available Memory Bytes"
+      
+    - name: "Network In"
+      namespace: "Microsoft.Compute/virtualMachines"
+      metric: "Network In"
+      
+    - name: "Network Out"
+      namespace: "Microsoft.Compute/virtualMachines"
+      metric: "Network Out"
+
+# Custom metrics configuration
+customMetrics:
+  - name: "conversation_completed"
+    displayName: "Conversations Completed"
+    unit: "Count"
+    aggregation: "Total"
+    
+  - name: "conversation_failed"
+    displayName: "Conversations Failed"
+    unit: "Count"
+    aggregation: "Total"
+    
+  - name: "agent_response_time_ms"
+    displayName: "Agent Response Time"
+    unit: "Milliseconds"
+    aggregation: "Average"
+    
+  - name: "speech_recognition_time_ms"
+    displayName: "Speech Recognition Time"
+    unit: "Milliseconds"
+    aggregation: "Average"
+    
+  - name: "active_users"
+    displayName: "Active Concurrent Users"
+    unit: "Count"
+    aggregation: "Maximum"
+
+# Pass/fail criteria
+passCriteria:
+  - metric: "response_time_ms"
+    aggregate: "p95"
+    condition: ">"
+    value: 5000
+    action: "continue"  # or "stop"
+    
+  - metric: "error_rate"
+    aggregate: "percentage"
+    condition: ">"
+    value: 5
+    action: "stop"
+    
+  - metric: "conversation_completion_rate"
+    aggregate: "percentage" 
+    condition: "<"
+    value: 95
+    action: "continue"
+
+# Auto-stop configuration
+autoStop:
+  errorRate:
+    enabled: true
+    threshold: 10  # Stop if error rate exceeds 10%
+    timeWindow: "PT2M"  # Within 2 minute window
+    
+  responseTime:
+    enabled: true
+    threshold: 10000  # Stop if p95 response time exceeds 10 seconds
+    timeWindow: "PT3M"
+
+# Network configuration
+networking:
+  # If testing against private endpoints
+  subnetId: "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.Network/virtualNetworks/{vnet-name}/subnets/{subnet-name}"
+  
+  # DNS configuration for private endpoints
+  dnsServers:
+    - "168.63.129.16"  # Azure DNS
+
+# Data and file configuration  
+dataConfiguration:
+  # Input data files
+  inputData:
+    - name: "conversation_templates.json"
+      path: "./conversation_templates.json"
+      
+  # Output data collection
+  outputData:
+    enabled: true
+    path: "load-test-results/"
+    
+# JMeter specific configuration (if using JMX)
+jmeterConfiguration:
+  # JMX file (alternative to Python script)
+  # jmxFile: "azure_load_test.jmx"
+  
+  # JMeter properties
+  jmeterProperties:
+    jmeter.reportgenerator.overall_granularity: "60000"
+    jmeter.reportgenerator.graph.responseTimeOverTime.granularity: "60000"
+
+# Advanced settings
+advancedSettings:
+  # Java heap size for JMeter (if applicable)
+  javaHeapSize: "4g"
+  
+  # Additional JVM arguments
+  jvmArgs: "-Xms2g -Xmx4g -XX:+UseG1GC"
+  
+  # Test timeout
+  testTimeout: "PT30M"  # 30 minutes max
+  
+  # Result storage
+  resultStorage:
+    storageAccount: "loadtestresultsstorage"
+    containerName: "results"
