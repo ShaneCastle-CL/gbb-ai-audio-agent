@@ -21,6 +21,19 @@ from dataclasses import dataclass, field
 from enum import Enum
 # No longer need audio generator - using pre-cached PCM files
 
+def generate_silence_chunk(duration_ms: float = 100.0, sample_rate: int = 16000) -> bytes:
+    """Generate a silent audio chunk with very low-level noise for VAD continuity."""
+    samples = int((duration_ms / 1000.0) * sample_rate)
+    # Generate very quiet background noise instead of pure silence
+    # This is more realistic and helps trigger final speech recognition
+    import struct
+    audio_data = bytearray()
+    for _ in range(samples):
+        # Add very quiet random noise (-10 to +10 amplitude in 16-bit range)
+        noise = random.randint(-10, 10)
+        audio_data.extend(struct.pack('<h', noise))
+    return bytes(audio_data)
+
 class ConversationPhase(Enum):
     GREETING = "greeting"
     AUTHENTICATION = "authentication"  
@@ -303,6 +316,22 @@ class ConversationSimulator:
                             # Natural speech timing
                             await asyncio.sleep(0.08)  # 80ms between chunks - more natural
                         
+                        # Add a short pause after speech (critical for speech recognition finalization)
+                        print(f"    🤫 Adding end-of-utterance silence...")
+                        
+                        for _ in range(5):  # Send 5 chunks of 100ms silence each
+                            silence_msg = {
+                                "kind": "AudioData", 
+                                "audioData": {
+                                    "data": base64.b64encode(generate_silence_chunk(100)).decode('utf-8'),
+                                    "silent": False,  # Mark as non-silent to ensure VAD processes it
+                                    "timestamp": time.time()
+                                }
+                            }
+                            await websocket.send(json.dumps(silence_msg))
+                            audio_chunks_sent += 1
+                            await asyncio.sleep(0.1)  # 100ms between silence chunks
+                        
                         audio_send_complete = time.time()
                         print(f"    📤 Sent {audio_chunks_sent} audio chunks ({len(speech_audio)} bytes total)")
                         print(f"    🎵 Audio duration: {len(speech_audio)/(16000*2):.2f}s")
@@ -317,6 +346,34 @@ class ConversationSimulator:
                         last_audio_chunk_time = None
                         response_complete = False
                         turn_failed = False
+                        
+                        # Start streaming silence to maintain VAD continuity
+                        silence_streaming_active = True
+                        
+                        async def stream_silence():
+                            """Stream silent audio chunks during response wait to maintain VAD."""
+                            silence_chunk = generate_silence_chunk(100)  # 100ms silence chunks
+                            silence_chunk_b64 = base64.b64encode(silence_chunk).decode('utf-8')
+                            
+                            while silence_streaming_active:
+                                try:
+                                    # Send silence as non-silent to ensure VAD processes it
+                                    # This mimics ambient/background noise during conversation pauses
+                                    silence_msg = {
+                                        "kind": "AudioData",
+                                        "audioData": {
+                                            "data": silence_chunk_b64,
+                                            "silent": False,  # Mark as non-silent to keep VAD active
+                                            "timestamp": time.time()
+                                        }
+                                    }
+                                    await websocket.send(json.dumps(silence_msg))
+                                    await asyncio.sleep(0.1)  # Send every 100ms
+                                except Exception:
+                                    break  # Exit if websocket is closed
+                        
+                        # Start background silence streaming task
+                        silence_task = asyncio.create_task(stream_silence())
                         
                         # print(f"    ⏳ Waiting for complete agent response (max 10s timeout)...")
                         
@@ -415,6 +472,14 @@ class ConversationSimulator:
                             metrics.errors.append(error_msg)
                             print(f"      ❌ Turn error: {error_msg}")
                             metrics.failed_turns += 1
+                        finally:
+                            # Stop silence streaming
+                            silence_streaming_active = False
+                            silence_task.cancel()
+                            try:
+                                await silence_task
+                            except asyncio.CancelledError:
+                                pass
                         
                         print(f"  🤖 Turn completed: {'✅ Success' if not turn_failed else '❌ Failed'}")
                         print(f"  📊 Audio chunks: {agent_audio_chunks_this_turn}, Total responses: {len(responses)}")
@@ -494,7 +559,7 @@ async def main():
     
     # Define callbacks for monitoring
     def on_turn_complete(turn: ConversationTurn, responses: List[Dict]):
-        print(f"  📋 Turn completed: {len(responses)} responses")
+        print(f"  📋 Turn completed: '{turn.text}' -> {len(responses)} responses")
     
     def on_agent_response(user_text: str, responses: List[Dict]):
         audio_responses = len([r for r in responses if r.get('kind') == 'AudioData'])
