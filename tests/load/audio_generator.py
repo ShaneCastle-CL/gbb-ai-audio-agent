@@ -159,10 +159,10 @@ def main():
     # Test audio generation
     test_texts = [
         "Hello, my name is Alice Brown, my social is 1234, and my zip code is 60610",
-        # "I'm looking to learn about Madrid. Please provide in 100 words",
-        # "Actually, I need help with my car insurance.",
-        # "What does my policy cover?",
-        # "Thank you for the information."
+        "I'm looking to learn about Madrid. Please provide in 100 words",
+        "Actually, I need help with my car insurance.",
+        "What does my policy cover?",
+        "Thank you for the information."
     ]
     
     print(f"\n🧪 Testing audio generation with {len(test_texts)} samples...")
