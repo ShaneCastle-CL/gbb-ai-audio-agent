@@ -213,7 +213,7 @@ async def lifespan(app: FastAPI):
             app.state.stt_pool.prepare(),
         )
 
-        # 🚀 PHASE 1 OPTIMIZATION: Initialize dedicated TTS pool manager
+        # Initialize dedicated TTS pool manager
         span.set_attribute("startup.stage", "dedicated_tts_pool")
         from src.pools.dedicated_tts_pool import DedicatedTtsPoolManager
         
@@ -294,7 +294,7 @@ async def lifespan(app: FastAPI):
             await app.state.conn_manager.stop()
             logger.info("✅ Connection manager stopped")
         
-        # 🚀 PHASE 1 OPTIMIZATION: Shutdown dedicated TTS pool manager
+        # Shutdown dedicated TTS pool manager
         if hasattr(app.state, "dedicated_tts_manager"):
             await app.state.dedicated_tts_manager.shutdown()
             logger.info("✅ 🚀 Enhanced Dedicated TTS Pool Manager shutdown complete")

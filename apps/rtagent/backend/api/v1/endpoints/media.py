@@ -379,7 +379,7 @@ async def _create_media_handler(
             # Set up WebSocket state for orchestrator compatibility
             websocket.state.tts_client = per_conn_synthesizer
             
-            # 🚀 PHASE 1 OPTIMIZATION: Try to allocate dedicated TTS client for ACS media
+            # Try to allocate dedicated TTS client for ACS media
             if hasattr(websocket.app.state, 'dedicated_tts_manager'):
                 try:
                     dedicated_tts, client_tier = await websocket.app.state.dedicated_tts_manager.get_dedicated_client(call_connection_id)
@@ -711,7 +711,7 @@ async def _cleanup_websocket_resources(
                     except Exception as e:
                         logger.error(f"Error cleaning up latency timers: {e}")
             
-            # 🚀 PHASE 1 OPTIMIZATION: Release dedicated TTS client for ACS media
+            # Release dedicated TTS client for ACS media
             if hasattr(websocket.app.state, 'dedicated_tts_manager') and call_connection_id:
                 try:
                     released = await websocket.app.state.dedicated_tts_manager.release_session_client(call_connection_id)

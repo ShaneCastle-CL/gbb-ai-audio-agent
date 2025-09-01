@@ -63,7 +63,7 @@ def _lt_stop(latency_tool: Optional[LatencyTool], stage: str, ws: WebSocket, met
     """Stop latency tracking with error handling and duplicate protection."""
     if latency_tool:
         try:
-            # 🔧 OPTIMIZATION: Check if timer is actually running before stopping
+            #  Check if timer is actually running before stopping
             if hasattr(latency_tool, '_active_timers') and stage in latency_tool._active_timers:
                 latency_tool.stop(stage, ws.app.state.redis, meta=meta)
             else:
@@ -87,7 +87,7 @@ async def send_tts_audio(
     # Start latency tracking with duplicate protection
     if latency_tool:
         try:
-            # 🔧 OPTIMIZATION: Safe timer starts with duplicate detection
+            #  Safe timer starts with duplicate detection
             if not hasattr(latency_tool, '_active_timers'):
                 latency_tool._active_timers = set()
             
@@ -101,7 +101,7 @@ async def send_tts_audio(
         except Exception as e:
             logger.error(f"Latency start error (run={run_id}): {e}")
 
-    # 🚀 PHASE 1 OPTIMIZATION: Use dedicated TTS client per session
+    # Use dedicated TTS client per session
     synth = None
     client_tier = None
     session_id = getattr(ws.state, 'session_id', None)
@@ -128,8 +128,14 @@ async def send_tts_audio(
                 return  # Graceful degradation - don't crash the session
 
     try:
-        # Set synthesis flag
+        # Set synthesis flag and session audio state
         _set_connection_metadata(ws, "is_synthesizing", True)
+        _set_connection_metadata(ws, "audio_playing", True)  # Session-level audio state
+        # Reset any stale cancel request from prior barge-ins
+        try:
+            _set_connection_metadata(ws, "tts_cancel_requested", False)
+        except Exception:
+            pass
 
         # Use voice settings
         voice_to_use = voice_name or GREETING_VOICE_TTS
@@ -157,7 +163,7 @@ async def send_tts_audio(
         # Send frames to client with optimized latency tracking
         if latency_tool:
             try:
-                # 🔧 OPTIMIZATION: Safe start for send_frames stage
+                #  Safe start for send_frames stage
                 if "tts:send_frames" not in latency_tool._active_timers:
                     latency_tool.start("tts:send_frames")
                     latency_tool._active_timers.add("tts:send_frames")
@@ -165,6 +171,14 @@ async def send_tts_audio(
                 pass
 
         for i, frame in enumerate(frames):
+            # Barge-in: stop sending frames immediately if a cancel is requested
+            try:
+                if _get_connection_metadata(ws, "tts_cancel_requested", False):
+                    logger.info(f"🛑 UI TTS cancel detected; stopping frame send early (run={run_id})")
+                    break
+            except Exception:
+                # If metadata isn't available, proceed safely
+                pass
             if ws.client_state != WebSocketState.CONNECTED:
                 logger.warning(f"WebSocket disconnected during audio transmission (run={run_id})")
                 break
@@ -181,7 +195,7 @@ async def send_tts_audio(
                 logger.error(f"Failed to send audio frame {i} (run={run_id}): {e}")
                 break
 
-        # 🔧 OPTIMIZATION: Safe stop with timer cleanup
+        #  Safe stop with timer cleanup
         if latency_tool and "tts:send_frames" in latency_tool._active_timers:
             latency_tool._active_timers.remove("tts:send_frames")
         _lt_stop(latency_tool, "tts:send_frames", ws,
@@ -212,10 +226,16 @@ async def send_tts_audio(
         _lt_stop(latency_tool, "tts", ws, 
                  meta={"run_id": run_id, "mode": "browser", "voice": voice_to_use})
         
-        # Clear synthesis flag
+        # Clear synthesis flag (individual chunk complete)
         _set_connection_metadata(ws, "is_synthesizing", False)
+        # Keep audio_playing=True across chunks - only clear on explicit cancel or session end
+        # Clear any outstanding cancel request now that this TTS cycle ended
+        try:
+            _set_connection_metadata(ws, "tts_cancel_requested", False)
+        except Exception:
+            pass
         
-        # 🚀 PHASE 1 OPTIMIZATION: Enhanced pool management with dedicated clients
+        # Enhanced pool management with dedicated clients
         if hasattr(ws.app.state, 'dedicated_tts_manager') and session_id:
             # Dedicated clients are managed by the pool manager, no manual release needed
             logger.debug(f"[PERF] Dedicated TTS client usage complete (session={session_id}, run={run_id})")

@@ -387,6 +387,11 @@ async def _initialize_conversation_session(
     websocket.state.is_synthesizing = False
     websocket.state.user_buffer = ""
     websocket.state.orchestration_tasks = orchestration_tasks  # Track background tasks
+    # Capture event loop for thread-safe scheduling from STT callbacks
+    try:
+        websocket.state._loop = asyncio.get_running_loop()
+    except RuntimeError:
+        websocket.state._loop = None
 
     # Set up WebSocket state through connection manager metadata (for compatibility)
     conn_manager = websocket.app.state.conn_manager
@@ -401,27 +406,17 @@ async def _initialize_conversation_session(
             "user_buffer": "",
         }
 
-    # Helper function to access connection metadata with WebSocket state fallback
+    # Helper function to access connection metadata
     def get_metadata(key: str, default=None):
-        # Try connection metadata first
+        # Use connection metadata as single source of truth
         if connection and connection.meta.handler:
-            value = connection.meta.handler.get(key, None)
-            if value is not None:
-                return value
-        
-        # Fallback to WebSocket state
-        if hasattr(websocket.state, key):
-            return getattr(websocket.state, key)
-            
+            return connection.meta.handler.get(key, default)
         return default
     
     def set_metadata(key: str, value):
-        # Update both connection metadata and WebSocket state for consistency
+        # Use connection metadata as single source of truth
         if connection and connection.meta.handler:
             connection.meta.handler[key] = value
-        
-        # Also update WebSocket state
-        setattr(websocket.state, key, value)
 
     # Send greeting message using new envelope format
     greeting_envelope = make_status_envelope(
@@ -446,30 +441,45 @@ async def _initialize_conversation_session(
     await memory_manager.persist_to_redis_async(redis_mgr)
 
     # Set up STT callbacks
-    def on_partial(txt: str, lang: str):
+    def on_partial(txt: str, lang: str, speaker_id: str):
         logger.info(f"🗣️ User (partial) in {lang}: {txt}")
-        # Use consolidated state instead of direct access
-        if get_metadata("is_synthesizing"):
-            try:
-                # Stop per-connection TTS instead of global
+        try:
+            # Check both synthesis flag and session audio state for barge-in
+            is_synthesizing = get_metadata("is_synthesizing", False)
+            audio_playing = get_metadata("audio_playing", False)
+            
+            if is_synthesizing or audio_playing:
+                # Interrupt TTS synthesizer immediately
                 tts_client = get_metadata("tts_client")
                 if tts_client:
                     tts_client.stop_speaking()
+                
+                # Clear both synthesis flag and audio state
                 set_metadata("is_synthesizing", False)
-                logger.info("🛑 TTS interrupted due to user speech (server VAD)")
-            except Exception as e:
-                logger.error(f"Error stopping TTS: {e}", exc_info=True)
-        
-        # Send streaming response using new envelope format
-        envelope = make_assistant_streaming_envelope(
-            content=txt,
-            session_id=session_id,
-        )
-        asyncio.create_task(
-            websocket.app.state.conn_manager.send_to_connection(
-                conn_id, envelope
-            )
-        )
+                set_metadata("audio_playing", False)
+                set_metadata("tts_cancel_requested", True)
+
+                # Notify UI to flush any buffered audio
+                cancel_msg = {
+                    "type": "control",
+                    "action": "tts_cancelled",
+                    "reason": "barge_in",
+                    "at": "partial",
+                    "session_id": session_id,
+                }
+                loop = getattr(websocket.state, "_loop", None)
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(
+                        asyncio.create_task,
+                        websocket.app.state.conn_manager.send_to_connection(conn_id, cancel_msg)
+                    )
+                else:
+                    # Best-effort fallback
+                    asyncio.create_task(
+                        websocket.app.state.conn_manager.send_to_connection(conn_id, cancel_msg)
+                    )
+        except Exception as e:
+            logger.debug(f"Failed to dispatch UI cancel control: {e}")
 
     def on_final(txt: str, lang: str):
         logger.info(f"🧾 User (final) in {lang}: {txt}")
@@ -483,7 +493,7 @@ async def _initialize_conversation_session(
     stt_client.set_final_result_callback(on_final)
     stt_client.start()
 
-    # 🚀 PHASE 1 OPTIMIZATION: Allocate dedicated TTS client for this session
+    # Allocate dedicated TTS client for this session
     if hasattr(websocket.app.state, 'dedicated_tts_manager'):
         try:
             tts_client, client_tier = await websocket.app.state.dedicated_tts_manager.get_dedicated_client(session_id)
@@ -863,7 +873,7 @@ async def _cleanup_conversation_session(
                     except Exception as e:
                         logger.error(f"Error releasing TTS client: {e}")
                 
-                # 🚀 PHASE 1 OPTIMIZATION: Release dedicated TTS client
+                # Release dedicated TTS client
                 if hasattr(websocket.app.state, 'dedicated_tts_manager') and session_id:
                     try:
                         released = await websocket.app.state.dedicated_tts_manager.release_session_client(session_id)
@@ -872,7 +882,7 @@ async def _cleanup_conversation_session(
                     except Exception as e:
                         logger.error(f"Error releasing dedicated TTS client for session {session_id}: {e}")
                 
-                # 🚀 AOAI CLIENT POOL: Release session-specific AOAI client
+                #  Release session-specific AOAI client
                 if session_id:
                     try:
                         from src.pools.aoai_pool import release_session_client

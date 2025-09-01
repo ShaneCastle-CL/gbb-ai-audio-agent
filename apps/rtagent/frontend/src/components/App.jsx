@@ -1987,6 +1987,11 @@ function RealTimeVoiceApp() {
             // payload is Float32Array
             this.queue.push(e.data.payload);
             console.log('AudioWorklet: Received audio chunk, queue length:', this.queue.length);
+          } else if (e.data?.type === 'clear') {
+            // Clear all queued audio data for immediate interruption
+            this.queue = [];
+            this.readIndex = 0;
+            console.log('AudioWorklet: Audio queue cleared for barge-in');
           }
         };
       }
@@ -2502,6 +2507,30 @@ function RealTimeVoiceApp() {
         );
       
         appendLog(`⚙️ ${payload.tool} ${payload.status} (${payload.elapsedMs} ms)`);
+        return;
+      }
+
+      /* ---------- CONTROL MESSAGES BRANCH ---------- */
+      if (type === "control") {
+        const { action } = payload;
+        console.log("🎮 Control message received:", action);
+        
+        if (action === "tts_cancelled") {
+          console.log("🔇 TTS cancelled - clearing audio queue");
+          appendLog("🔇 Audio interrupted by user speech");
+          
+          // Clear the audio worklet queue
+          if (pcmSinkRef.current) {
+            pcmSinkRef.current.port.postMessage({ type: 'clear' });
+          }
+          
+          // Reset active speaker since TTS was interrupted
+          setActiveSpeaker(null);
+          return;
+        }
+        
+        console.log("🎮 Unknown control action:", action);
+        return;
       }
     };
   
