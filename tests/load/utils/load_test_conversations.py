@@ -17,9 +17,9 @@ from dataclasses import dataclass, field
 import statistics
 from pathlib import Path
 
-from conversation_simulator import (
-    ConversationSimulator,
-    ConversationTemplates,
+from utils.conversation_simulator import (
+    ConversationSimulator, 
+    ConversationTemplates, 
     ConversationMetrics,
     ConversationTemplate,
 )

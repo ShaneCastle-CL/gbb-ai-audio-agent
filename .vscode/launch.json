@@ -24,9 +24,12 @@
             "module": "uvicorn",
             "args": [
             "apps.rtagent.backend.main:app",
+            // Watch only the app backend directory for reloads so changes under tests/ won't trigger reloads
             "--reload",
+            "--reload-dir",
+            "${workspaceFolder}/apps/rtagent/backend",
             "--port",
-            "8010",
+            "8010"
             // "--log-level",
             // "debug"
             ],

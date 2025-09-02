@@ -71,6 +71,7 @@ resource "azurerm_container_app" "frontend" {
   // EasyAuth configs are managed outside of terraform
   lifecycle {
     ignore_changes = [
+      template[0].container[0].env,
       template[0].container[0].image,
       ingress[0].cors,
       ingress[0].client_certificate_mode,
