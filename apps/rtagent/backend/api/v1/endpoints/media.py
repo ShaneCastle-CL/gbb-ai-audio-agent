@@ -506,12 +506,22 @@ async def _process_media_stream(
                     await handler.handle_audio_data(msg)
 
         except WebSocketDisconnect as e:
-            # Handle WebSocket disconnects gracefully - this is normal when calls end
+            # Handle WebSocket disconnects gracefully - treat healthy disconnects
+            # as normal control flow (do not re-raise) so the outer tracing context
+            # does not surface a stacktrace for normal call hangups.
             if e.code == 1000:
                 logger.info(
                     f"📞 Call ended normally for {call_connection_id} (WebSocket code 1000)"
                 )
                 span.set_status(Status(StatusCode.OK))
+                # Return cleanly to avoid the exception bubbling up into tracing
+                return
+            elif e.code == 1001:
+                logger.info(
+                    f"📞 Call ended - endpoint going away for {call_connection_id} (WebSocket code 1001)"
+                )
+                span.set_status(Status(StatusCode.OK))
+                return
             else:
                 logger.warning(
                     f"📞 Call disconnected abnormally for {call_connection_id} (WebSocket code {e.code}): {e.reason}"
@@ -521,8 +531,8 @@ async def _process_media_stream(
                         StatusCode.ERROR, f"Abnormal disconnect: {e.code} - {e.reason}"
                     )
                 )
-            # Re-raise so the outer handler can log it properly
-            raise
+                # Re-raise abnormal disconnects so outer layers can handle/log them
+                raise
         except Exception as e:
             span.set_status(Status(StatusCode.ERROR, f"Stream processing error: {e}"))
             logger.error(f"❌ Error in media stream processing: {e}")

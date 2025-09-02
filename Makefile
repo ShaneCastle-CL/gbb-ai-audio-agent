@@ -111,19 +111,27 @@ start_tunnel:
 	bash $(SCRIPTS_DIR)/start_devtunnel_host.sh
 
 generate_audio:
-	python $(SCRIPTS_LOAD_DIR)/audio_generator.py --max-turns 5
+	python $(SCRIPTS_LOAD_DIR)/utils/audio_generator.py --max-turns 5
 
 # WebSocket endpoint load testing (current approach)
-DEPLOYED_URL = rtaudioagent-backend-1wzjoyj7.victoriousgrass-aaa9e3d8.eastus.azurecontainerapps.io
+# DEPLOYED_URL = 
 LOCAL_URL = localhost:8010
 run_load_test:
-	python $(SCRIPTS_LOAD_DIR)/detailed_statistics_analyzer.py \
-		--url ws://$(LOCAL_URL)/api/v1/media/stream \
-		--turns 5 \
-		--conversations 5 \
-		--concurrent 3 \
-		--record \
-		--record-rate 0.2
+	@echo "Running load test (override with e.g. make run_load_test URL=wss://host TURNS=10 CONVERSATIONS=50 CONCURRENT=5 RECORD=1 RECORD_RATE=0.1 EXTRA_ARGS='--verbose')"
+	$(eval URL ?= wss://$(LOCAL_URL)/api/v1/media/stream)
+	$(eval TURNS ?= 5)
+	$(eval CONVERSATIONS ?= 20)
+	$(eval CONCURRENT ?= 20)
+	$(eval RECORD ?= )
+	$(eval RECORD_RATE ?= 0.2)
+	@python $(SCRIPTS_LOAD_DIR)/detailed_statistics_analyzer.py \
+		--url $(URL) \
+		--turns $(TURNS) \
+		--conversations $(CONVERSATIONS) \
+		--concurrent $(CONCURRENT) \
+		$(if $(RECORD),--record) \
+		$(if $(RECORD_RATE),--record-rate $(RECORD_RATE)) \
+		$(EXTRA_ARGS)
 
 # Conversation Analysis Targets
 list-conversations:

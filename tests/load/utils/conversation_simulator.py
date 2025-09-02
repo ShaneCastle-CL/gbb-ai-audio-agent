@@ -206,7 +206,7 @@ class ConversationMetrics:
 class ProductionSpeechGenerator:
     """Streams pre-cached PCM audio files for load testing with configurable conversation depth."""
     
-    def __init__(self, cache_dir: str = "tests/load/audio_cache", conversation_turns: int = 5):
+    def __init__(self, cache_dir: str = "audio_cache", conversation_turns: int = 5):
         """Initialize with cached PCM files directory and conversation depth."""
         from pathlib import Path
         import os

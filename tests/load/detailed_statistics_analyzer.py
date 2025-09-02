@@ -16,8 +16,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from load_test_conversations import ConversationLoadTester, LoadTestConfig
-from conversation_simulator import ConversationMetrics
+from tests.load.utils.load_test_conversations import ConversationLoadTester, LoadTestConfig
+from tests.load.utils.conversation_simulator import ConversationMetrics
 
 class DetailedStatisticsAnalyzer:
     """Detailed statistics analyzer for conversation load testing with concurrency tracking."""

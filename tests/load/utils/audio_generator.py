@@ -5,11 +5,17 @@ Audio Generation Helper for Load Testing
 
 Uses the production text-to-speech module to generate proper audio files
 for conversational flows that will be recognized by the orchestrator.
+
+This version writes human-readable filenames (phrase/label + short hash)
+and a JSON sidecar per file with the original text and metadata. It also
+appends a line to `manifest.jsonl` in the cache directory for quick lookup.
 """
 
 import os
 import sys
+import json
 import hashlib
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -17,7 +23,7 @@ from typing import Dict, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 os.environ["DISABLE_CLOUD_TELEMETRY"] = "true"
 
-from speech.text_to_speech import SpeechSynthesizer
+from src.speech.text_to_speech import SpeechSynthesizer
 
 
 class LoadTestAudioGenerator:
@@ -43,14 +49,81 @@ class LoadTestAudioGenerator:
         print(f"🌍 Region: {os.getenv('AZURE_SPEECH_REGION')}")
         print(f"🔑 Using API Key: {'Yes' if os.getenv('AZURE_SPEECH_KEY') else 'No (DefaultAzureCredential)'}")
     
-    def _get_cache_filename(self, text: str, voice: str = None) -> str:
-        """Generate a cache filename based on text and voice."""
-        voice = voice or self.synthesizer.voice
-        # Create hash of text and voice for unique filename
-        content_hash = hashlib.md5(f"{text}|{voice}".encode()).hexdigest()
-        return f"audio_{content_hash}.pcm"
+    def _slugify(self, value: str, max_len: int = 60) -> str:
+        """Create a filesystem-friendly slug from arbitrary text."""
+        value = (value or "").strip().lower()
+        # Keep alnum and replace spaces/invalids with '-'
+        cleaned = []
+        prev_dash = False
+        for ch in value:
+            if ch.isalnum():
+                cleaned.append(ch)
+                prev_dash = False
+            elif ch in {" ", "-", "_"}:
+                if not prev_dash:
+                    cleaned.append("-")
+                    prev_dash = True
+            else:
+                if not prev_dash:
+                    cleaned.append("-")
+                    prev_dash = True
+        slug = "".join(cleaned).strip("-")
+        if len(slug) > max_len:
+            slug = slug[:max_len].rstrip("-")
+        return slug or "audio"
+
+    def _short_hash(self, text: str, voice: str) -> str:
+        """Deterministic short hash for content identity."""
+        return hashlib.md5(f"{text}|{voice}".encode()).hexdigest()[:10]
+
+    def _full_hash(self, text: str, voice: str) -> str:
+        """Full MD5 hash retained for legacy cache compatibility."""
+        return hashlib.md5(f"{text}|{voice}".encode()).hexdigest()
+
+    def _find_cached_by_hash(self, short_hash: str, full_hash: Optional[str] = None) -> Optional[Path]:
+        """Find an existing cached file that matches the hash regardless of prefix.
+
+        Also checks for legacy filenames of the form `audio_<fullhash>.pcm`.
+        """
+        # New-style readable filenames with suffix _<short_hash>.pcm
+        for p in self.cache_dir.glob(f"*_{short_hash}.pcm"):
+            if p.is_file():
+                return p
+        # Legacy naming: audio_<fullhash>.pcm
+        if full_hash:
+            legacy = self.cache_dir / f"audio_{full_hash}.pcm"
+            if legacy.exists() and legacy.is_file():
+                return legacy
+        return None
+
+    def _resolve_cache_path(self, text: str, voice: str, label: Optional[str]) -> Path:
+        """Resolve a readable, deterministic cache path based on text/voice and optional label.
+
+        If a file already exists for the same text+voice (matched by short hash), reuse it.
+        Otherwise, generate a slug-based filename that includes the label and a short hash.
+        """
+        shash = self._short_hash(text, voice)
+        fhash = self._full_hash(text, voice)
+        # Reuse any existing file for this hash
+        existing = self._find_cached_by_hash(shash, fhash)
+        if existing:
+            return existing
+        # Build a readable prefix from label or text snippet
+        prefix_source = label or text[:80]
+        # Prefer a short phrase-based slug to aid identification
+        prefix = self._slugify(prefix_source)
+        return self.cache_dir / f"{prefix}_{shash}.pcm"
     
-    def generate_audio(self, text: str, voice: str = None, force_regenerate: bool = False) -> bytes:
+    def generate_audio(
+        self,
+        text: str,
+        voice: str = None,
+        force_regenerate: bool = False,
+        label: Optional[str] = None,
+        scenario: Optional[str] = None,
+        turn_index: Optional[int] = None,
+        turn_count: Optional[int] = None,
+    ) -> bytes:
         """
         Generate audio for the given text using Azure TTS.
         
@@ -63,11 +136,11 @@ class LoadTestAudioGenerator:
             PCM audio data bytes suitable for streaming
         """
         voice = voice or self.synthesizer.voice
-        cache_file = self.cache_dir / self._get_cache_filename(text, voice)
+        cache_file = self._resolve_cache_path(text, voice, label)
         
         # Return cached audio if available and not forcing regeneration
         if cache_file.exists() and not force_regenerate:
-            print(f"📄 Using cached audio for: '{text[:50]}...'")
+            print(f"📄 Using cached audio: {cache_file.name}")
             return cache_file.read_bytes()
         
         print(f"🎵 Generating audio for: '{text[:50]}...'")
@@ -87,7 +160,34 @@ class LoadTestAudioGenerator:
             
             # Cache the generated audio
             cache_file.write_bytes(audio_bytes)
-            print(f"✅ Generated and cached {len(audio_bytes)} bytes of audio")
+            duration_sec = len(audio_bytes) / (16000 * 2)
+            print(f"✅ Cached {len(audio_bytes)} bytes → {cache_file.name} ({duration_sec:.2f}s)")
+            
+            # Write sidecar metadata for human readability
+            meta = {
+                "filename": cache_file.name,
+                "path": str(cache_file),
+                "text": text,
+                "voice": voice,
+                "sample_rate": 16000,
+                "style": "chat",
+                "rate": "+0%",
+                "duration_seconds": duration_sec,
+                "label": label,
+                "scenario": scenario,
+                "turn_index": turn_index,
+                "turn_count": turn_count,
+                "created_at": datetime.utcnow().isoformat() + "Z",
+                "hash": self._short_hash(text, voice),
+            }
+            try:
+                sidecar = cache_file.with_suffix(".json")
+                sidecar.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+                # Append to global manifest.jsonl for quick lookup
+                with (self.cache_dir / "manifest.jsonl").open("a", encoding="utf-8") as mf:
+                    mf.write(json.dumps(meta, ensure_ascii=False) + "\n")
+            except Exception as me:
+                print(f"⚠️  Failed to write metadata for {cache_file.name}: {me}")
             
             return audio_bytes
             
@@ -112,7 +212,8 @@ class LoadTestAudioGenerator:
         audio_cache = {}
         for i, text in enumerate(conversation_texts):
             print(f"📝 [{i+1}/{len(conversation_texts)}] Processing: '{text[:50]}...'")
-            audio_bytes = self.generate_audio(text, voice)
+            label = f"utterance-{i+1}"
+            audio_bytes = self.generate_audio(text, voice, label=label)
             audio_cache[text] = audio_bytes
         
         print(f"✅ Pre-generation complete: {len(audio_cache)} audio files ready")
@@ -191,7 +292,14 @@ class LoadTestAudioGenerator:
                 
                 for i, text in enumerate(conversation_texts):
                     turn_key = f"{scenario}_turn_{i+1}_of_{turn_count}"
-                    audio_bytes = self.generate_audio(text)
+                    label = f"{scenario}-turn-{i+1}-of-{turn_count}"
+                    audio_bytes = self.generate_audio(
+                        text,
+                        label=label,
+                        scenario=scenario,
+                        turn_index=i + 1,
+                        turn_count=turn_count,
+                    )
                     scenario_audio_cache[turn_key] = audio_bytes
                     
                     duration = len(audio_bytes) / (16000 * 2) if audio_bytes else 0
