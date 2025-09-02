@@ -224,7 +224,7 @@ class SpeechSDKThread:
             # Debug: Log ALL partial results to verify callbacks are working
             logger.info(f"[{self.thread_bridge.call_id_short}] Partial speech: '{text}' ({lang}) len={len(text.strip())}")
             if len(text.strip()) > 3:  # Only trigger on meaningful partial results
-                logger.info(f"[{self.thread_bridge.call_id_short}] Barge-in: '{text[:30]}...' ({lang})")
+                # logger.debug(f"[{self.thread_bridge.call_id_short}] Barge-in: '{text[:30]}...' ({lang})")
                 try:
                     self.thread_bridge.schedule_barge_in(self.barge_in_handler)
                 except Exception as e:
