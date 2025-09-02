@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 from fastapi import WebSocket
 
-from apps.rtagent.backend.src.agents.tool_store.tool_registry import function_mapping
+from apps.rtagent.backend.src.agents.artagent.tool_store.tool_registry import function_mapping
 from utils.ml_logging import get_logger
 
 log = get_logger("tools_helper")

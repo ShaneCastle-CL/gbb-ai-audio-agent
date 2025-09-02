@@ -68,9 +68,9 @@ from config.app_settings import (
     DEBUG_MODE,
 )
 
-from apps.rtagent.backend.src.agents.base import ARTAgent
+from apps.rtagent.backend.src.agents.artagent.base import ARTAgent
 from apps.rtagent.backend.src.utils.auth import validate_entraid_token
-from apps.rtagent.backend.src.agents.prompt_store.prompt_manager import PromptManager
+from apps.rtagent.backend.src.agents.artagent.prompt_store.prompt_manager import PromptManager
 
 # from apps.rtagent.backend.src.routers import router as api_router
 from apps.rtagent.backend.api.v1.router import v1_router

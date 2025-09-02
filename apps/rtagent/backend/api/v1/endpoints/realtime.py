@@ -56,7 +56,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from config import GREETING, ENABLE_AUTH_VALIDATION
 from apps.rtagent.backend.src.helpers import check_for_stopwords, receive_and_filter
 from src.tools.latency_tool import LatencyTool
-from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
+from apps.rtagent.backend.src.orchestration.artagent.orchestrator import route_turn
 from apps.rtagent.backend.src.ws_helpers.shared_ws import send_tts_audio
 from apps.rtagent.backend.src.ws_helpers.envelopes import (
     make_envelope,

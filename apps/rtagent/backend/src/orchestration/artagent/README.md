@@ -61,7 +61,7 @@ Create the instance during app startup so the orchestrator can find it.
 
 ```python
 # main.py (inside lifespan startup AFTER other agents are created)
-from apps.rtagent.backend.src.agents.base import ARTAgent
+from apps.rtagent.backend.src.agents.artagent.base import ARTAgent
 
 # ensure the dict exists
 app.state.agent_instances = getattr(app.state, "agent_instances", {})
@@ -79,7 +79,7 @@ app.state.agent_instances["Billing"] = ARTAgent(
 app.state.billing_agent = ARTAgent(config_path="configs/agents/billing.yaml")
 
 # If you maintain a binding table, add:
-# from apps.rtagent.backend.src.orchestration.bindings import AGENT_BINDINGS, AgentBinding
+# from apps.rtagent.backend.src.orchestration.artagent.bindings import AGENT_BINDINGS, AgentBinding
 # AGENT_BINDINGS["Billing"] = AgentBinding(name="Billing", ws_attr="billing_agent")
 ```
 
@@ -95,10 +95,10 @@ from __future__ import annotations
 from fastapi import WebSocket
 
 # Helper to read from core memory safely
-from apps.rtagent.backend.src.orchestration.cm_utils import cm_get
+from apps.rtagent.backend.src.orchestration.artagent.cm_utils import cm_get
 
 # ✅ If you split helpers into modules (recommended):
-from apps.rtagent.backend.src.orchestration.specialists import _run_specialist_base  # adjust import if needed
+from apps.rtagent.backend.src.orchestration.artagent.specialists import _run_specialist_base  # adjust import if needed
 
 # 🔁 If you're still on a single orchestrator module containing the helper:
 # from apps.rtagent.backend.src.orchestration import _run_specialist_base
@@ -135,10 +135,10 @@ from __future__ import annotations
 from typing import Any, Dict
 from fastapi import WebSocket
 
-from apps.rtagent.backend.src.orchestration.cm_utils import cm_get
-from apps.rtagent.backend.src.orchestration.voice_sync import sync_voice_from_agent
-from apps.rtagent.backend.src.orchestration.tools_post import process_tool_response
-from apps.rtagent.backend.src.orchestration.metrics import track_latency
+from apps.rtagent.backend.src.orchestration.artagent.cm_utils import cm_get
+from apps.rtagent.backend.src.orchestration.artagent.voice_sync import sync_voice_from_agent
+from apps.rtagent.backend.src.orchestration.artagent.tools_post import process_tool_response
+from apps.rtagent.backend.src.orchestration.artagent.metrics import track_latency
 
 async def run_billing_agent(cm, utterance: str, ws: WebSocket, *, is_acs: bool) -> None:
     agent = ws.app.state.agent_instances.get("Billing")
@@ -173,7 +173,7 @@ Tell the orchestrator which coroutine to call when active_agent == "Billing". Do
 ```python
 # main.py (after app = initialize_app()) or at the end of lifespan startup
 from apps.rtagent.backend.src.orchestration import register_specialist
-from apps.rtagent.backend.src.agents.billing_handler import run_billing_agent
+from apps.rtagent.backend.src.agents.artagent.billing_handler import run_billing_agent
 
 register_specialist("Billing", run_billing_agent)
 ```
@@ -284,7 +284,7 @@ app.state.agent_instances["Billing"] = ARTAgent(
 
 ```python
 from apps.rtagent.backend.src.orchestration import register_specialist
-from apps.rtagent.backend.src.agents.billing_handler import run_billing_agent
+from apps.rtagent.backend.src.agents.artagent.billing_handler import run_billing_agent
 
 register_specialist("Billing", run_billing_agent)
 ```
