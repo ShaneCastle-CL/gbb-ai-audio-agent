@@ -22,10 +22,10 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from urllib.parse import urlparse
 
 from apps.rtagent.backend.config import AZURE_OPENAI_CHAT_DEPLOYMENT_ID, TTS_END
-from apps.rtagent.backend.src.agents.tool_store.tool_registry import (
+from apps.rtagent.backend.src.agents.artagent.tool_store.tool_registry import (
     available_tools as DEFAULT_TOOLS,
 )
-from apps.rtagent.backend.src.agents.tool_store.tools_helper import (
+from apps.rtagent.backend.src.agents.artagent.tool_store.tools_helper import (
     function_mapping,
     push_tool_end,
     push_tool_start,

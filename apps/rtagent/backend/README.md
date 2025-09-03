@@ -1,125 +1,161 @@
-# Real-Time Voice Agent Backend
+# **Real-Time Voice Agent Backend**
 
-FastAPI backend for Azure Communication Services voice agent with multi-agent orchestration.
+**Real-time voice AI system** for enterprise phone calls via Azure Communication Services.
 
-## Structure
+### **Core Flow**
+
+```
+Phone Call → ACS → WebSocket → STT → Multi-Agent AI → TTS → Audio Response
+```
+
+### **Key Design Decisions**
+
+- **Multi-Agent Orchestration**: Specialized agents (Auth, Billing, Support) vs monolithic prompt. Easier debugging, better context handling.
+- **Connection Pooling**: Pre-warmed Azure client pools. Avoid cold start latency on high-concurrency calls.
+- **WebSocket Streaming**: Real-time audio requires streaming. HTTP too slow for natural conversation (<2s response time).
+- **Session State in Redis**: Agents remember conversation context. Survives WebSocket disconnects.
+
+### **Production Considerations**
+
+- **Latency Optimized**: Buffer tuning, async pools, optimized Azure service calls
+- **Resource Cleanup**: Robust WebSocket disconnect handling, no connection leaks  
+- **Horizontal Scale**: Async architecture handles hundreds of concurrent calls
+- **Observability**: OpenTelemetry traces, health endpoints, agent decision logging
+
+### **Adding Features**
+New agent: YAML config → Handler function → Register in orchestrator. Core audio/Azure integration untouched.
+
+### **Project Structure**
 
 ```
 backend/
-├── main.py              # FastAPI app entry point
-├── api/                 # HTTP REST endpoints
-├── config/              # Configuration management
-└── src/                 # Core application logic
+├── main.py              # FastAPI app with connection pooling
+├── api/v1/              # V1 API endpoints 
+├── config/              # Environment configuration
+└── src/                 # Core services and utilities
 ```
 
-## Core Components
+## **V1 API Endpoints**
 
-### **`main.py`**
-FastAPI application factory with WebSocket and HTTP endpoints. Initializes agent orchestration, connection pooling, and Azure services.
+### **WebSocket Endpoints**
+- **`/api/v1/media/stream`** - ACS media streaming with audio processing
+- **`/api/v1/realtime/conversation`** - Real-time conversation with STT/TTS
+- **`/api/v1/realtime/dashboard`** - Dashboard relay with connection tracking
 
-### **`api/`** - REST API Layer
-HTTP endpoints for call management and system health.
+### **REST Endpoints**  
+- **`/api/v1/calls/*`** - Call management (initiate, hangup, status)
+- **`/api/v1/health`** - Health checks and system status
 
+### **API Layer Structure**
 ```
-api/
-├── v1/                  # API versioning
-│   ├── calls.py         # ACS call initiation/management
-│   ├── health.py        # Health check endpoints  
-│   └── websocket.py     # WebSocket connection handler
-└── swagger_docs.py      # OpenAPI documentation
+api/v1/
+├── endpoints/           # WebSocket and REST handlers
+│   ├── calls.py         # ACS call management
+│   ├── media.py         # Media streaming WebSocket
+│   ├── realtime.py      # Real-time conversation WebSocket
+│   └── health.py        # Health monitoring
+├── handlers/            # Business logic handlers
+├── schemas/             # Pydantic models
+└── router.py            # Route registration
 ```
 
-### **`config/`** - Configuration Management
-Environment-based configuration separated by functionality for easy modification.
-
+### **Environment Configuration**
 ```
 config/
-├── infrastructure.py    # Azure services, secrets, endpoints
-├── voice_config.py      # TTS/STT and speech settings
-├── connection_config.py # WebSocket limits, session management
-├── feature_flags.py     # Feature toggles, monitoring
-├── ai_config.py         # Agent configs, model parameters
-└── security_config.py   # CORS, authentication paths
+├── app_config.py        # Main application configuration
+├── app_settings.py      # Agent and environment settings
+├── connection_config.py # WebSocket and session limits
+└── feature_flags.py     # Feature toggles
 ```
 
-### **`src/`** - Core Application Logic
+## **Core Application Architecture**
 
-#### **Agent System**
+### **Agent System (ARTAgent Framework)**
 ```
 src/agents/              # YAML-driven agent framework
 ├── base.py              # ARTAgent class for agent creation
 ├── agent_store/         # Agent YAML configurations
 ├── prompt_store/        # Jinja prompt templates
-└── tool_store/          # Agent tool registry
+├── tool_store/          # Agent tool registry
+└── README.md            # Agent creation guide
 ```
 
-#### **Orchestration Engine**
+### **Orchestration Engine**
 ```
 src/orchestration/       # Multi-agent routing and coordination
 ├── orchestrator.py      # Main routing entry point
-├── agent_registry.py    # Agent registration system
-├── agent_handlers.py    # Auth, claims, general agent handlers
-├── greeting_manager.py  # Agent handoff management
-└── gpt_flow.py          # GPT response processing
+├── registry.py          # Agent registration system
+├── auth.py              # Authentication agent handler
+├── specialists.py       # Specialist agent handlers
+├── greetings.py         # Agent handoff management
+├── gpt_flow.py          # GPT response processing
+├── tools.py             # Tool execution framework
+├── termination.py       # Session termination logic
+├── latency.py           # Performance monitoring
+└── README.md            # Orchestrator guide
 ```
 
-#### **Core Services**
+### **Azure Services Integration**
 ```
 src/services/            # External service integrations
-├── speech/              # Azure Speech STT/TTS
-├── aoai/                # Azure OpenAI integration
-├── pools/               # Connection pooling
+├── speech_services.py   # Azure Speech STT/TTS
+├── redis_services.py    # Session state management
+├── openai_services.py   # Azure OpenAI integration
+├── cosmosdb_services.py # CosmosDB document storage
 └── acs/                 # Azure Communication Services
 ```
 
-#### **Session & State Management**
+### **Session Management**
 ```
 src/sessions/            # WebSocket session lifecycle
-├── stateful/            # Memory and conversation state
-└── ws_helpers/          # WebSocket utilities
+├── session_statistics.py # Session metrics and monitoring
+└── __init__.py          # Session management utilities
 ```
 
-#### **Supporting Components**
+### **WebSocket Utilities**
 ```
-src/handlers/            # Event and message handlers
-src/utils/               # Shared utilities and helpers
-```
-
-## Key Features
-
-- **Multi-Agent Orchestration** - AuthAgent → FNOLIntakeAgent/GeneralInfoAgent routing
-- **Azure Integration** - ACS, Speech Services, OpenAI native integration
-- **Connection Pooling** - Optimized for 100-200 concurrent connections
-- **Session Management** - Persistent conversation state with Redis
-- **Real-time Audio** - Low-latency WebSocket streaming
-- **Production Ready** - Comprehensive logging, tracing, health checks
-
-## Development
-
-### **Adding an Agent**
-1. Create YAML config in `src/agents/agent_store/`
-2. Add handler in `src/orchestration/agent_handlers.py`
-3. Register in `src/orchestration/orchestrator.py`
-
-### **Modifying Voice Settings**
-Edit `config/voice_config.py` for TTS voices and speech recognition settings.
-
-### **Adjusting Connection Limits**
-Edit `config/connection_config.py` for WebSocket and session management.
-
-### **Feature Toggles**
-Edit `config/feature_flags.py` for enabling/disabling features.
-
-## Architecture Flow
-
-```
-WebSocket → API → Orchestrator → Agent → Tools → Response → TTS → Client
+src/ws_helpers/          # WebSocket session management
+├── shared_ws.py         # Shared WebSocket utilities
+└── envelopes.py         # Message envelope handling
 ```
 
-1. **WebSocket Connection** - Client connects via `/api/v1/media/stream`
-2. **Authentication** - AuthAgent validates caller identity
-3. **Intent Routing** - Based on conversation, route to specialist agent
-4. **Tool Execution** - Agent uses approved tools for responses
-5. **Response Generation** - Azure OpenAI generates contextual response
-6. **Speech Synthesis** - Azure Speech converts to audio
-7. **Real-time Streaming** - Audio streamed back to client
+### **Core Utilities**
+```
+src/utils/               # Core utilities and helpers
+├── tracing.py           # OpenTelemetry tracing
+└── auth.py              # Authentication utilities
+```
+
+### **Connection Pools (Global)**
+```
+src/pools/               # Connection pooling (shared across apps)
+├── async_pool.py        # Async connection pools
+├── connection_manager.py # Thread-safe connections
+├── session_manager.py   # Session lifecycle management
+├── session_metrics.py   # Session monitoring
+├── websocket_manager.py # WebSocket connection pooling
+├── aoai_pool.py         # Azure OpenAI connection pool
+└── dedicated_tts_pool.py # Dedicated TTS connection pool
+```
+
+## **Key Features**
+
+- **Real-time WebSocket Streaming** - Low-latency audio and conversation processing
+- **Azure Service Integration** - ACS, Speech Services, OpenAI native support
+- **Connection Pooling** - Optimized for high-concurrency connections
+- **Session Management** - Persistent state with Redis backend
+- **Production Ready** - Comprehensive logging, tracing, health monitoring
+
+## **WebSocket Flow**
+
+```
+Client → WebSocket → Handler → Azure Services → Response → Client
+```
+
+1. **WebSocket Connection** - Connect via `/api/v1/media/stream` or `/api/v1/realtime/conversation`
+2. **Audio Processing** - Real-time STT with Azure Speech
+3. **AI Response** - Azure OpenAI generates contextual responses  
+4. **Speech Synthesis** - Azure Speech TTS for voice responses
+5. **Real-time Streaming** - Audio/text streamed back to client
+
+

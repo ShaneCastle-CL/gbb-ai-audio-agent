@@ -50,7 +50,7 @@ def get_agent_voice(agent_config_path: str) -> str:
 
 # Agent configuration paths for voice extraction
 AGENT_AUTH_CONFIG = os.getenv(
-    "AGENT_AUTH_CONFIG", "apps/rtagent/backend/src/agents/agent_store/auth_agent.yaml"
+    "AGENT_AUTH_CONFIG", "apps/rtagent/backend/src/agents/artagent/agent_store/auth_agent.yaml"
 )
 
 # Primary TTS voice configuration

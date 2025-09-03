@@ -5,7 +5,7 @@ import string
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
-from apps.rtagent.backend.src.agents.tool_store.functions_helper import _json
+from apps.rtagent.backend.src.agents.artagent.tool_store.functions_helper import _json
 from utils.ml_logging import get_logger
 
 log = get_logger("fnol_tools_min")

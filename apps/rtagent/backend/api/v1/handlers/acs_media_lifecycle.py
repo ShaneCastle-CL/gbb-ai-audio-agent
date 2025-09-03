@@ -38,7 +38,7 @@ from apps.rtagent.backend.src.ws_helpers.shared_ws import (
     send_response_to_acs,
     broadcast_message,
 )
-from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
+from apps.rtagent.backend.src.orchestration.artagent.orchestrator import route_turn
 from src.enums.stream_modes import StreamMode
 from src.speech.speech_recognizer import StreamingSpeechRecognizerFromBytes
 from src.stateful.state_managment import MemoManager

@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosedError
 from opentelemetry import trace
 
 from src.stateful.state_managment import MemoManager
-from apps.rtagent.backend.src.orchestration.orchestrator import route_turn
+from apps.rtagent.backend.src.orchestration.artagent.orchestrator import route_turn
 from apps.rtagent.backend.src.utils.tracing import trace_acs_operation
 from utils.ml_logging import get_logger
 

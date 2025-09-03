@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 """
-base.py – Standalone YAML-driven agent.
-
-This is a self-contained version of ARTAgent that uses only local tools
-from the samples/hello_world/agents/tool_store directory.
+rt_agent.py – YAML-driven agents with per-agent memory, model params, tools, and
+a configurable *prompt template path*, with context-aware slot + tool output sharing.
 """
 
 from pathlib import Path
@@ -14,45 +12,15 @@ from typing import Any, Dict, Optional
 import yaml
 from fastapi import WebSocket
 
-from apps.rtagent.backend.src.agents.prompt_store.prompt_manager import PromptManager
-from apps.rtagent.backend.src.orchestration.gpt_flow import process_gpt_response
+from apps.rtagent.backend.src.agents.artagent.prompt_store.prompt_manager import PromptManager
+from apps.rtagent.backend.src.agents.artagent.tool_store import tool_registry as tool_store
+from apps.rtagent.backend.src.orchestration.artagent.gpt_flow import process_gpt_response
 from utils.ml_logging import get_logger
 
 logger = get_logger("rt_agent")
 
-# Import local tool store from this samples folder ONLY
-# This is a standalone demo version that uses only local tools
-import sys
-
-samples_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(samples_dir))
-
-try:
-    from agents.tool_store import tool_registry as tool_store
-
-    logger.info(
-        "✅ Using LOCAL tool registry from samples/hello_world/agents/tool_store"
-    )
-except ImportError as e:
-    logger.error(f"❌ Could not load local tool store: {e}")
-    logger.error(
-        "💡 Make sure you have created the tool_store directory with all required files"
-    )
-    raise ImportError(
-        "This demo ARTAgent requires the local tool store. "
-        "Please ensure samples/hello_world/agents/tool_store/ exists with all tool files."
-    ) from e
-
 
 class ARTAgent:
-    """
-    Standalone ARTAgent for tutorial/demo purposes.
-
-    This version only uses local tools from the samples directory
-    and is designed for educational and demonstration purposes.
-    It does not fall back to production tool stores.
-    """
-
     CONFIG_PATH: str | Path = "agent.yaml"
 
     def __init__(
@@ -106,20 +74,14 @@ class ARTAgent:
         for entry in self._cfg.get("tools", []):
             if isinstance(entry, str):
                 if entry not in tool_store.TOOL_REGISTRY:
-                    available_tools = list(tool_store.TOOL_REGISTRY.keys())
                     raise ValueError(
-                        f"Unknown tool name '{entry}' in YAML for {self.name}. "
-                        f"Available local tools: {available_tools}"
+                        f"Unknown tool name '{entry}' in YAML for {self.name}"
                     )
                 self.tools.append(tool_store.TOOL_REGISTRY[entry])
             elif isinstance(entry, dict):
                 self.tools.append(entry)
             else:
                 raise TypeError("Each tools entry must be a str or dict")
-
-        # Log which tools were loaded
-        tool_names = [t["function"]["name"] for t in self.tools]
-        logger.info(f"🛠️ Loaded {len(self.tools)} local tools: {tool_names}")
 
         self.pm: PromptManager = PromptManager(template_dir=template_dir)
         self._log_loaded_summary()
@@ -165,6 +127,7 @@ class ARTAgent:
             top_p=self.top_p,
             max_tokens=self.max_tokens,
             available_tools=self.tools,
+            session_id=cm.session_id,  # Pass session_id for AOAI client pooling
         )
 
         return result
