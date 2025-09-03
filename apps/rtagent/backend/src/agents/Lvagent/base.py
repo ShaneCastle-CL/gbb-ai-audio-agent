@@ -6,6 +6,8 @@ import json
 import os
 import time
 import uuid
+import queue
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 
@@ -18,19 +20,8 @@ from .audio_io import MicSource, SpeakerSink, pcm_to_base64
 
 logger = get_logger(__name__)
 
-# ── BAKED DEFAULTS (override via env if present) ──────────────────────────────
+# ── SIMPLIFIED CONFIGURATION MATCHING WORKING NOTEBOOK ──────────────────────────────
 DEFAULT_API_VERSION: str = "2025-05-01-preview"
-DEFAULT_ENDPOINT: str = "https://<your-resource>.services.ai.azure.com"
-DEFAULT_AUTH_MODE: Literal["entra", "api_key"] = "entra"
-DEFAULT_API_KEY_ENV: str = "AZURE_VOICE_LIVE_API_KEY"
-DEFAULT_TOKEN_SCOPE: str = "https://ai.azure.com/.default"
-
-ENV_ENDPOINT = "AZURE_VOICE_LIVE_ENDPOINT"      # optional override
-ENV_AUTH_MODE = "LVA_AUTH_MODE"                 # optional override: "entra" | "api_key"
-ENV_API_VERSION = "LVA_API_VERSION"             # optional override
-ENV_API_KEY_ENV = "LVA_API_KEY_ENV"             # optional override (name of the key var)
-ENV_TOKEN_SCOPE = "LVA_TOKEN_SCOPE"             # optional override
-
 DEFAULT_SAMPLE_RATE_HZ = 24_000
 DEFAULT_CHUNK_MS = 20
 
@@ -38,9 +29,9 @@ DEFAULT_CHUNK_MS = 20
 @dataclass(frozen=True)
 class LvaModel:
     """
-    Minimal model config.
-
-    :param deployment_id: Voice Live–compatible model deployment (e.g., 'gpt-4o-realtime').
+    Model configuration for Azure Voice Live API.
+    
+    :param deployment_id: Voice Live model deployment (e.g., 'gpt-4o', 'gpt-4o-realtime-preview').
     """
     deployment_id: str
 
@@ -48,61 +39,44 @@ class LvaModel:
 @dataclass(frozen=True)
 class LvaAgentBinding:
     """
-    Agent Service binding.
-
+    Agent Service binding configuration.
+    
     :param agent_id: Azure AI Agent ID to bind the session to.
-    :param project_name: Project name (use this OR connection_string).
-    :param connection_string: Hub connection string (use this OR project_name).
+    :param project_name: Project name (required for agent connections).
     """
     agent_id: str
-    project_name: Optional[str] = None
-    connection_string: Optional[str] = None
+    project_name: str
 
 
 @dataclass(frozen=True)
 class LvaSessionCfg:
     """
     Voice/VAD/noise/echo configuration applied via session.update.
-
+    
     :param voice_name: TTS voice name.
-    :param voice_type: Voice type (e.g., 'azure-standard').
-    :param voice_temperature: Voice randomness.
-    :param vad_type: Turn detection type (e.g., 'azure_semantic_vad').
-    :param vad_threshold: VAD sensitivity.
+    :param voice_temperature: Voice randomness (0.0-1.0).
+    :param vad_threshold: VAD sensitivity (0.0-1.0).
     :param vad_prefix_ms: VAD prefix padding (ms).
     :param vad_silence_ms: VAD silence duration (ms).
-    :param vad_eou_model: End-of-utterance model id.
-    :param vad_eou_threshold: EOU threshold.
-    :param vad_eou_timeout: EOU timeout (s).
-    :param noise_reduction_type: Input noise reduction type.
-    :param echo_cancellation_type: Echo cancellation type.
     """
-    voice_name: str
-    voice_type: str
-    voice_temperature: float
-    vad_type: str
-    vad_threshold: float
-    vad_prefix_ms: int
-    vad_silence_ms: int
-    vad_eou_model: str
-    vad_eou_threshold: float
-    vad_eou_timeout: int
-    noise_reduction_type: str
-    echo_cancellation_type: str
+    voice_name: str = "en-US-Ava:DragonHDLatestNeural"
+    voice_temperature: float = 0.8
+    vad_threshold: float = 0.5
+    vad_prefix_ms: int = 300
+    vad_silence_ms: int = 1000
 
 
-class LiveVoiceAgent:
+class AzureLiveVoiceAgent:
     """
-    Live Voice Agent bound to Azure AI Agent Service + Azure Voice Live API.
-
-    Endpoint, API version, and auth mode are baked into this module
-    (with optional environment overrides). Session behavior (prompts, tools)
-    comes from the bound Agent — no instructions are sent here.
-
-    :param model: Voice Live deployment id.
-    :param binding: Agent Service binding (agent_id + project_name OR connection_string).
-    :param session: Voice/VAD/noise/echo configuration.
-    :param reconnect_backoff_s: Optional reconnect backoff sequence.
+    Live Voice Agent using Azure Voice Live API with Azure AI Agent Service.
+    
+    This implementation follows the working pattern from the notebook that successfully
+    connects to Azure Voice Live API using simplified authentication and agent binding.
+    
+    Key features:
+    - Simplified authentication with token fallback to API key
+    - Direct agent binding via environment variables
+    - Real-time audio processing with proper session management
     """
 
     def __init__(
@@ -110,181 +84,281 @@ class LiveVoiceAgent:
         *,
         model: LvaModel,
         binding: LvaAgentBinding,
-        session: LvaSessionCfg,
-        reconnect_backoff_s: Optional[List[int]] = None,
+        session: Optional[LvaSessionCfg] = None,
     ) -> None:
+        """
+        Initialize Azure Live Voice Agent with simplified configuration.
+        
+        This follows the working pattern from the notebook that successfully authenticates
+        and connects to Azure Voice Live API.
+        
+        Args:
+            model: Model configuration (deployment_id)
+            binding: Agent binding configuration (agent_id, project_name)
+            session: Optional session configuration for voice/VAD settings
+        """
         self._model = model
         self._binding = binding
-        self._session = session
-        self._backoff = reconnect_backoff_s or [1, 2, 4, 8]
-
-        # Resolve baked + env overrides
-        self._api_version = os.getenv(ENV_API_VERSION, DEFAULT_API_VERSION)
-        endpoint = os.getenv(ENV_ENDPOINT, DEFAULT_ENDPOINT)
-        self._auth_mode: Literal["entra", "api_key"] = os.getenv(ENV_AUTH_MODE, DEFAULT_AUTH_MODE)  # type: ignore[assignment]
-        self._api_key_env = os.getenv(ENV_API_KEY_ENV, DEFAULT_API_KEY_ENV)
-        self._token_scope = os.getenv(ENV_TOKEN_SCOPE, DEFAULT_TOKEN_SCOPE)
-
-        if "<your-resource>" in endpoint:
-            logger.warning(
-                "AZURE_VOICE_LIVE_ENDPOINT not set; using DEFAULT_ENDPOINT placeholder. "
-                "Set AZURE_VOICE_LIVE_ENDPOINT in your environment."
-            )
-
-        azure_ws = endpoint.rstrip("/").replace("https://", "wss://")
-
-        # Acquire agent access token (required for Agent binding).
-        agent_access_token = self._get_agent_access_token()
-
-        # Build agent-bound WS URL
-        if self._binding.project_name:
-            q = (
-                f"api-version={self._api_version}"
-                f"&agent-project-name={self._binding.project_name}"
-                f"&agent-id={self._binding.agent_id}"
-                f"&agent-access-token={agent_access_token}"
-            )
-        else:
-            q = (
-                f"api-version={self._api_version}"
-                f"&agent-connection-string={self._binding.connection_string}"
-                f"&agent-id={self._binding.agent_id}"
-                f"&agent-access-token={agent_access_token}"
-            )
-        self._url = f"{azure_ws}/voice-live/realtime?{q}"
-
-        # Voice Live auth header (api-key only if selected)
-        headers: Dict[str, str] = {"x-ms-client-request-id": str(uuid.uuid4())}
-        if self._auth_mode == "api_key":
-            api_key = os.getenv(self._api_key_env, "")
-            if not api_key:
-                raise ValueError(f"{self._api_key_env} is not set.")
-            headers["api-key"] = api_key
-
-        self._ws = WebSocketTransport(self._url, headers)
-
-        # Local dev audio adapters (24 kHz / 20 ms)
+        self._session = session or LvaSessionCfg()
+        
+        # Get configuration from environment (matching your .env file)
+        self._endpoint = os.getenv("AZURE_VOICE_LIVE_ENDPOINT")
+        self._api_key = os.getenv("AZURE_VOICE_LIVE_API_KEY")
+        self._api_version = os.getenv("AZURE_VOICE_LIVE_API_VERSION", DEFAULT_API_VERSION)
+        
+        if not self._endpoint:
+            raise ValueError("AZURE_VOICE_LIVE_ENDPOINT environment variable is required")
+        
+        # Setup authentication - prefer token with API key fallback (matches notebook pattern)
+        self._auth_method = None
+        self._auth_headers = {"x-ms-client-request-id": str(uuid.uuid4())}
+        
+        # Try token-based authentication first
+        try:
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://ai.azure.com/.default")
+            self._auth_headers["Authorization"] = f"Bearer {token.token}"
+            self._auth_method = "token"
+            logger.info("Using token-based authentication")
+        except Exception as e:
+            logger.warning(f"Token authentication failed: {e}")
+            if self._api_key:
+                self._auth_headers["api-key"] = self._api_key
+                self._auth_method = "api_key"
+                logger.info("Using API key authentication")
+            else:
+                raise ValueError("Both token authentication failed and AZURE_VOICE_LIVE_API_KEY is not set")
+        
+        # Build WebSocket URL (matches working notebook pattern)
+        azure_ws_endpoint = self._endpoint.rstrip('/').replace("https://", "wss://")
+        
+        # Agent connection URL with project name and agent ID
+        self._url = (
+            f"{azure_ws_endpoint}/voice-live/realtime"
+            f"?api-version={self._api_version}"
+            f"&model={self._model.deployment_id}"
+            f"&agent-project-name={self._binding.project_name}"
+            f"&agent-id={self._binding.agent_id}"
+        )
+        
+        logger.info(f"Azure Live Voice Agent initialized")
+        logger.info(f"  - Endpoint: {self._endpoint}")
+        logger.info(f"  - Model: {self._model.deployment_id}")
+        logger.info(f"  - Authentication: {self._auth_method}")
+        logger.info(f"  - Agent ID: {self._binding.agent_id}")
+        logger.info(f"  - Project: {self._binding.project_name}")
+        
+        # Initialize WebSocket transport
+        self._ws = WebSocketTransport(self._url, self._auth_headers)
+        
+        # Audio I/O setup
         self._src = MicSource(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
         self._sink = SpeakerSink(sample_rate=DEFAULT_SAMPLE_RATE_HZ)
         self._frames = int(DEFAULT_SAMPLE_RATE_HZ * (DEFAULT_CHUNK_MS / 1000))
 
-    def _get_agent_access_token(self) -> str:
-        """
-        Acquire Agent Service access token via Entra (DefaultAzureCredential).
-
-        :return: Access token string.
-        :raises RuntimeError: If token acquisition fails.
-        """
-        try:
-            cred = DefaultAzureCredential()
-            token = cred.get_token(self._token_scope)
-            return token.token
-        except Exception as exc:
-            logger.exception("Agent access token acquisition failed.")
-            raise RuntimeError("Agent access token acquisition failed.") from exc
-
     def _session_update(self) -> Dict[str, Any]:
         """
-        Build session.update without instructions (Agent supplies behavior).
-
-        :return: Voice Live session.update payload.
+        Build session.update configuration for Azure Voice Live API.
+        
+        This matches the working pattern from the notebook with proper voice,
+        VAD, noise reduction, and echo cancellation settings.
+        
+        Returns:
+            Dict containing session.update payload
         """
         return {
             "type": "session.update",
             "session": {
+                # Turn detection (VAD) configuration
                 "turn_detection": {
-                    "type": self._session.vad_type,
+                    "type": "azure_semantic_vad",
                     "threshold": self._session.vad_threshold,
                     "prefix_padding_ms": self._session.vad_prefix_ms,
                     "silence_duration_ms": self._session.vad_silence_ms,
-                    "end_of_utterance_detection": {
-                        "model": self._session.vad_eou_model,
-                        "threshold": self._session.vad_eou_threshold,
-                        "timeout": self._session.vad_eou_timeout,
-                    },
                 },
-                "input_audio_noise_reduction": {"type": self._session.noise_reduction_type},
-                "input_audio_echo_cancellation": {"type": self._session.echo_cancellation_type},
+                
+                # Audio input configuration
+                "input_audio_format": "pcm16",
+                "input_audio_noise_reduction": {
+                    "type": "azure_deep_noise_suppression"
+                },
+                "input_audio_echo_cancellation": {
+                    "type": "server_echo_cancellation"
+                },
+                
+                # Audio output configuration  
+                "output_audio_format": "pcm16",
+                
+                # Voice configuration
                 "voice": {
                     "name": self._session.voice_name,
-                    "type": self._session.voice_type,
+                    "type": "azure-standard",
                     "temperature": self._session.voice_temperature,
                 },
             },
-            "event_id": "",
+            "event_id": str(uuid.uuid4())
         }
 
     def _handle_event(self, raw: str) -> None:
         """
-        Handle Voice Live events. Audio deltas are decoded and sent to the sink.
-
-        :param raw: Raw JSON event string from WebSocket.
+        Handle Voice Live events with simplified processing.
+        
+        This follows the working notebook pattern for event handling.
+        
+        Args:
+            raw: Raw JSON event string from WebSocket
         """
         try:
             evt = json.loads(raw)
         except Exception:
-            logger.exception("Event parse failed.")
+            logger.exception("Event parse failed")
             return
 
-        et = evt.get("type")
-        if et == "response.audio.delta":
+        event_type = evt.get("type", "")
+        
+        # Session events
+        if event_type == "session.created":
+            session_id = evt.get("session", {}).get("id", "")
+            logger.info(f"Session created: {session_id}")
+            
+        elif event_type == "session.updated":
+            logger.info("Session configuration updated")
+            
+        # Audio events
+        elif event_type == "response.audio.delta":
             try:
-                delta_b64 = evt.get("delta", "")
-                pcm = np.frombuffer(base64.b64decode(delta_b64), dtype=np.int16)
-                self._sink.write(pcm)
-            except Exception:
-                logger.exception("Audio delta handling failed.")
-        elif et == "input_audio_buffer.speech_started":
-            logger.debug("Barge-in detected.")
-            # Optionally: self._sink.stop() if you buffer TTS
-        elif et == "error":
-            err = evt.get("error", {})
-            logger.error("Voice Live error %s: %s", err.get("code"), err.get("message"))
+                delta = evt.get("delta", "")
+                if delta:
+                    audio_bytes = base64.b64decode(delta)
+                    self._sink.write(audio_bytes)
+            except Exception as e:
+                logger.warning(f"Audio delta processing failed: {e}")
+                
+        elif event_type == "conversation.item.input_audio_transcription.completed":
+            transcript = evt.get("transcript", "")
+            if transcript:
+                logger.info(f"User said: {transcript}")
+                
+        elif event_type == "response.audio_transcript.done":
+            transcript = evt.get("transcript", "")
+            if transcript:
+                logger.info(f"Agent said: {transcript}")
+                
+        # Error events
+        elif event_type == "error":
+            error_info = evt.get("error", {})
+            error_type = error_info.get("type", "unknown")
+            error_message = error_info.get("message", "Unknown error")
+            logger.error(f"Voice Live API error [{error_type}]: {error_message}")
+            
         else:
-            logger.info("Event: %s", et)
+            # Log other events for debugging
+            logger.debug(f"Received event: {event_type}")
+
+    def connect(self) -> None:
+        """
+        Connect to Azure Voice Live API WebSocket.
+        
+        This establishes the connection and sends the initial session configuration.
+        """
+        try:
+            self._ws.connect()
+            logger.info("Connected to Azure Voice Live API")
+            
+            # Send session configuration
+            session_config = self._session_update()
+            self._ws.send_dict(session_config)
+            logger.info("Session configuration sent")
+            
+        except Exception as e:
+            logger.error(f"Failed to connect: {e}")
+            raise
 
     def run(self) -> None:
         """
-        Connect to Voice Live WS, bind to Agent, send session.update,
-        and stream mic→model and model→speaker full-duplex.
+        Start the main audio streaming loop.
+        
+        This connects to the service, starts audio I/O, and handles real-time
+        bidirectional audio streaming with proper event processing.
         """
-        for delay in [0, 1, 2, 4, 8]:
-            try:
-                if delay:
-                    time.sleep(delay)
-                self._ws.connect()
-                break
-            except Exception:
-                logger.exception("WS connect failed (backing off %ss).", delay)
-        else:
-            raise ConnectionError("Unable to connect to Voice Live WS.")
-
-        self._ws.send_dict(self._session_update())
-
-        self._src.start()
-        self._sink.start()
-
         try:
-            while True:
-                pcm = self._src.read(self._frames)
-                if pcm is not None and len(pcm) > 0:
-                    self._ws.send_dict(
-                        {"type": "input_audio_buffer.append", "audio": pcm_to_base64(pcm), "event_id": ""}
-                    )
-                raw = self._ws.recv(timeout_s=0.01)
-                if raw:
-                    self._handle_event(raw)
-        except KeyboardInterrupt:
-            logger.info("Interrupted by user.")
-        except Exception:
-            logger.exception("Run loop failed.")
+            # Connect to the service
+            self.connect()
+            
+            # Start audio I/O
+            self._src.start()
+            self._sink.start()
+            
+            logger.info("Starting audio streaming loop")
+            
+            try:
+                while True:
+                    # Send microphone audio to the service
+                    pcm = self._src.read(self._frames)
+                    if pcm is not None and len(pcm) > 0:
+                        audio_message = {
+                            "type": "input_audio_buffer.append",
+                            "audio": pcm_to_base64(pcm),
+                            "event_id": str(uuid.uuid4())
+                        }
+                        self._ws.send_dict(audio_message)
+                    
+                    # Process incoming events (non-blocking)
+                    raw_event = self._ws.recv(timeout_s=0.01)
+                    if raw_event:
+                        self._handle_event(raw_event)
+                        
+            except KeyboardInterrupt:
+                logger.info("Interrupted by user")
+            except Exception as e:
+                logger.exception(f"Audio streaming loop failed: {e}")
+                raise
+                
         finally:
+            # Cleanup
             try:
                 self._src.stop()
-            except Exception:
-                logger.exception("Source stop failed.")
-            try:
                 self._sink.stop()
-            except Exception:
-                logger.exception("Sink stop failed.")
+                self._ws.close()
+                logger.info("Audio streaming stopped and connections closed")
+            except Exception as e:
+                logger.warning(f"Cleanup failed: {e}")
+
+    def send_text(self, text: str) -> None:
+        """
+        Send a text message to the agent.
+        
+        Args:
+            text: Text message to send
+        """
+        message = {
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}]
+            },
+            "event_id": str(uuid.uuid4())
+        }
+        self._ws.send_dict(message)
+        logger.info(f"Sent text message: {text}")
+
+    def close(self) -> None:
+        """Close the connection and cleanup resources."""
+        try:
+            self._src.stop()
+            self._sink.stop()
             self._ws.close()
+            logger.info("Azure Live Voice Agent connection closed")
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
+
+    @property
+    def url(self) -> str:
+        """Get the WebSocket URL for debugging."""
+        return self._url
+    
+    @property 
+    def auth_method(self) -> str:
+        """Get the authentication method used."""
+        return self._auth_method or "unknown"

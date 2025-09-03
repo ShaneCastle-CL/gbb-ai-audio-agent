@@ -5,28 +5,16 @@ agent:
   description: "Agent-bound, low-latency voice-to-voice over Azure Voice Live."
 
 model:
-  deployment_id: "gpt-4o"   # Voice Live–compatible model
+  deployment_id: "gpt-4o"   # Voice Live compatible model
 
-agent_service:
-  project_name: "<your-project-name>"          
-  # connection_string: "<hub-connection-string>"  
-  agent_id: "<your-agent-id>"
+azure_ai_foundry_agent_connected:
+  agent_id: "${AI_FOUNDRY_AGENT_ID}"          # From your .env file
+  project_name: "${AI_FOUNDRY_PROJECT_NAME}"   # From your .env file
 
 session:
   voice:
     name: "en-US-Ava:DragonHDLatestNeural"
-    type: "azure-standard"
     temperature: 0.8
-  turn_detection:
-    type: "azure_semantic_vad"
-    threshold: 0.30
-    prefix_padding_ms: 200
-    silence_duration_ms: 200
-    end_of_utterance_detection:
-      model: "semantic_detection_v1"
-      threshold: 0.01
-      timeout: 2
-  input_audio_noise_reduction:
-    type: "azure_deep_noise_suppression"
-  input_audio_echo_cancellation:
-    type: "server_echo_cancellation"
+  vad_threshold: 0.5
+  vad_prefix_ms: 300
+  vad_silence_ms: 1000
