@@ -28,7 +28,7 @@ samples_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(samples_dir))
 
 try:
-    from agents.tool_store import tool_registry as tool_store
+    from samples.hello_world.artagents.tool_store import tool_registry as tool_store
 
     logger.info(
         "✅ Using LOCAL tool registry from samples/hello_world/agents/tool_store"

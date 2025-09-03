@@ -13,7 +13,11 @@ from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
 from azure.identity import DefaultAzureCredential
+from dotenv import load_dotenv
 from utils.ml_logging import get_logger
+
+# Load environment variables from .env file
+load_dotenv()
 
 from .transport import WebSocketTransport
 from .audio_io import MicSource, SpeakerSink, pcm_to_base64
@@ -111,19 +115,24 @@ class AzureLiveVoiceAgent:
         
         # Setup authentication - prefer token with API key fallback (matches notebook pattern)
         self._auth_method = None
-        self._auth_headers = {"x-ms-client-request-id": str(uuid.uuid4())}
         
         # Try token-based authentication first
         try:
             credential = DefaultAzureCredential()
             token = credential.get_token("https://ai.azure.com/.default")
-            self._auth_headers["Authorization"] = f"Bearer {token.token}"
+            self._auth_headers = {
+                "Authorization": f"Bearer {token.token}",
+                "x-ms-client-request-id": str(uuid.uuid4())
+            }
             self._auth_method = "token"
             logger.info("Using token-based authentication")
         except Exception as e:
             logger.warning(f"Token authentication failed: {e}")
             if self._api_key:
-                self._auth_headers["api-key"] = self._api_key
+                self._auth_headers = {
+                    "api-key": self._api_key,
+                    "x-ms-client-request-id": str(uuid.uuid4())
+                }
                 self._auth_method = "api_key"
                 logger.info("Using API key authentication")
             else:
@@ -132,13 +141,21 @@ class AzureLiveVoiceAgent:
         # Build WebSocket URL (matches working notebook pattern)
         azure_ws_endpoint = self._endpoint.rstrip('/').replace("https://", "wss://")
         
-        # Agent connection URL with project name and agent ID
+        # Get additional authentication token for agent access
+        try:
+            agent_token = credential.get_token("https://ai.azure.com/.default")
+        except Exception as e:
+            logger.warning(f"Failed to get agent token: {e}")
+            # Fallback to the same voice token
+            agent_token = token
+        
+        # Agent connection URL with project name, agent ID, and agent access token
         self._url = (
             f"{azure_ws_endpoint}/voice-live/realtime"
             f"?api-version={self._api_version}"
-            f"&model={self._model.deployment_id}"
             f"&agent-project-name={self._binding.project_name}"
             f"&agent-id={self._binding.agent_id}"
+            f"&agent-access-token={agent_token.token}"
         )
         
         logger.info(f"Azure Live Voice Agent initialized")
