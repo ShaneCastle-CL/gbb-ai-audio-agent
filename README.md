@@ -110,11 +110,12 @@ Pick one of three ways to run the voice inference layer—the rest of the framew
 	- `frontend/` — Vite + React demo client
 	- `scripts/` — Helper launchers (backend, frontend, tunnel)
 - `src/` — Core libraries (ACS, Speech, AOAI, Redis, Cosmos, VAD, tools, prompts, etc.)
+- `samples/` — Hands-on tutorials and examples (hello_world, labs)
 - `infra/`
 	- `bicep/` — Azure Bicep modules
 	- `terraform/` — Terraform modules
 - `docs/` — Guides and references (architecture, getting started, troubleshooting)
-- `tests/` — Pytest suite
+- `tests/` — Pytest suite and load testing framework
 - `utils/` — Logging/telemetry helpers and images
 
 > [!NOTE]
