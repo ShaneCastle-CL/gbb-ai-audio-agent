@@ -15,7 +15,7 @@
       "name": "o3-mini",
       "version": "2025-01-31",
       "sku_name": "GlobalStandard",
-      "capacity": 3000
+      "capacity": 300
     },
     {
       "name": "gpt-4o",
