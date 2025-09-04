@@ -2,20 +2,20 @@
 
 # **ARTVoice Accelerator Framework**
 
-**TL;DR**: Ship real-time voice agents on Azure— single hyperscale platform, omnichannel (ACS telephony included), code‑first, and modular by default.
+> **TL;DR**: Build real-time voice agents on Azure—one hyperscale stack, omnichannel (ACS), code-first, modular, ops-friendly & extensible.
 
 <img src="utils/images/ARTAGENT.png" align="right" height="220" alt="ARTAgent Logo" />
 
 You own the agentic design; this repo handles the end-to-end voice plumbing. We keep a clean separation of concerns—telephony (ACS), app middleware, AI inference loop (STT → LLM → TTS), and orchestration—so you can swap parts without starting from zero. We know, shipping voice agents is more than “voice-to-voice.” You need predictable latency budgets, media handoffs, error paths, channel fan-out, barge-in, noise cancellation, and more. This framework gives you the e2e working spine so you can focus on what differentiates you— your tools, agentic design, and orchestration logic (multi-agent ready).
 
 <details closed>
-<summary><h4>The what and why of this accelerator</h4></summary>
+<summary><h3>The what and why behind this accelerator</h3></summary>
 
 ## **What you get**
 
 - **Omnichannel, including first-class telephony**. Azure Communication Services (ACS) integration for PSTN, SIP transfer, IVR/DTMF routing, and number provisioning—extendable for contact centers and custom IVR trees.
 
-- **Transport that scales**. FastAPI + WebSockets for true bidirectional streaming; runs locally and scales out in Kubernetes. We include simple classes to wire your UI WebSocket client or loop back into ACS—the plumbing is done.
+- **Transport that scales**. FastAPI + WebSockets for true bidirectional streaming; runs locally and scales out in Kubernetes. Leverages ACS bidirectional media streaming for low-latency ingest/playback (barge-in ready), with helper classes to wire your UI WebSocket client or loop back into ACS— the plumbing is done for you.
 
 - **Model freedom**. Use GPT-family or your provider of choice behind a slim adapter; swap models without touching the transport.
 
@@ -97,40 +97,43 @@ Pick one of three ways to run the voice inference layer—the rest of the framew
 ## **Getting started**
 
 > [!TIP]
-> Pick the path that fits your goal. Local is fastest for iteration; azd is fastest for a full Azure footprint.
-
-- Deploy to Azure in one command: see the section below “Deploy and Customize the Demo App… (azd)”
-- Deploy with Terraform + Makefile: see `docs/DeploymentGuide.md`
-- Run locally (recommended for dev): see Quickstart — Local Development → `docs/quickstart-local-development.md`
+> Not an Infra-as-Code person? Start by skimming docs/DeploymentGuide.md. You’ve got two easy deploy paths—azd (one-command) or Terraform + Makefile— but the guide also can help youto deploy the same template from the Azure Portal UI. Once your cloud resources are up, follow docs/quickstart-local-development.md for a step-by-step local run.
 
 ### **Understand the Repository map (high‑level)**
 
-- `apps/rtagent/`
-	- `backend/` — FastAPI + WebSockets voice pipeline
-	- `frontend/` — Vite + React demo client
-	- `scripts/` — Helper launchers (backend, frontend, tunnel)
-- `src/` — Core libraries (ACS, Speech, AOAI, Redis, Cosmos, VAD, tools, prompts, etc.)
-- `samples/` — Hands-on tutorials and examples (hello_world, labs)
-- `infra/`
-	- `bicep/` — Azure Bicep modules
-	- `terraform/` — Terraform modules
-- `docs/` — Guides and references (architecture, getting started, troubleshooting)
-- `tests/` — Pytest suite and load testing framework
-- `utils/` — Logging/telemetry helpers and images
+```
+📁 apps/rtagent/           # Main application
+  ├── 🔧 backend/          # FastAPI + WebSockets voice pipeline
+  ├── 🌐 frontend/         # Vite + React demo client
+  └── 📜 scripts/          # Helper launchers (backend, frontend, tunnel)
+
+📁 src/                    # Core libraries (ACS, Speech, AOAI, Redis, Cosmos, VAD, tools, prompts)
+
+📁 samples/                # Hands-on tutorials and examples (hello_world, labs)
+
+📁 infra/                  # Infrastructure as Code
+  ├── 🔷 bicep/            # Azure Bicep modules
+  └── 🏗️ terraform/        # Terraform modules
+
+📁 docs/                   # Guides and references (architecture, getting started, troubleshooting)
+
+📁 tests/                  # Pytest suite and load testing framework
+
+📁 utils/                  # Logging/telemetry helpers and images
+```
 
 > [!NOTE]
 > Need a deeper map (up to 5 levels) and exact local run steps? See [`docs/repo-structure.md`](docs/repo-structure.md).
 
 ### **Deploy and Customize the Demo App Using the ARTAgent Framework**
 
+Already have infra deployed? You can skip azd and run locally using the Quickstart — see `docs/quickstart-local-development.md`.
+
 > [!IMPORTANT]
 > Prerequisites for azd deployment:
 > - Azure Developer CLI installed and logged in (`azd auth login`)
 > - Active subscription selected in Azure CLI (`az account show`)
-> - Repo contains `azure.yaml` (root) and infra under `infra/` (this repo does)
 > - Sufficient permissions to create resource groups and resources
->
-> Already have infra? You can skip azd and run locally using the Quickstart — see `docs/quickstart-local-development.md`.
 
 Provision the complete Azure stack—including **App Gateway**, **Container Apps**, **Cosmos DB**, **Redis Cache**, **Azure OpenAI**, **Speech Services**, **Key Vault**, **Application Insights**, **Log Analytics**, **Azure Communication Services**, **Event Grid**, and **Storage Account**—with a single command:
 
