@@ -4,10 +4,28 @@ This directory contains GitHub Actions workflows for automated deployment of you
 
 ## 🎯 Available Workflows
 
+### ⭐ Deploy to Azure (RECOMMENDED)
+**File:** [`azure-deploy.yml`](./azure-deploy.yml)
+
+**New simplified workflow for standard deployments** - This is the recommended workflow for most users.
+
+**Features:**
+- ✅ **Automatic Deployment**: Deploys on push to `main` branch
+- ✅ **Manual Trigger**: Deploy to any environment on-demand
+- ✅ **Simple Configuration**: Minimal setup required
+- ✅ **Clear Output**: Deployment summary with URLs
+- ✅ **Production Ready**: OIDC authentication and security best practices
+
+**Documentation:** See [GitHub Actions Deployment Guide](../../docs/GitHubActionsDeployment.md)
+
+**Best for:** Standard CI/CD workflows, automatic deployments, getting started
+
+---
+
 ### 🏗️ Azure Developer CLI Deployment
 **File:** [`deploy-azd.yml`](./deploy-azd.yml)
 
-The main deployment workflow that handles both infrastructure and application deployment using Azure Developer CLI with Terraform backend.
+Advanced reusable workflow with more control options.
 
 **Features:**
 - ✅ **Unified Deployment**: Infrastructure and application in one workflow

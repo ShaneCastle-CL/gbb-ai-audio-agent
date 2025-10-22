@@ -1,0 +1,277 @@
+name: 🚀 Deploy to Azure
+
+# This workflow deploys the application to Azure using Azure Developer CLI (azd)
+# It supports both automatic deployment on push to main and manual deployment via workflow_dispatch
+
+on:
+  # Automatic deployment on push to main
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'apps/**'
+      - 'infra/terraform/**'
+      - 'azure.yaml'
+      - 'requirements.txt'
+      - '.github/workflows/azure-deploy.yml'
+  
+  # Manual deployment trigger
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+# Permissions needed for OIDC authentication and deployment
+permissions:
+  id-token: write
+  contents: read
+
+# Only run one deployment at a time
+concurrency:
+  group: azure-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-latest
+    
+    # Use GitHub environment for deployment
+    environment: ${{ inputs.environment || 'dev' }}
+    
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_ENV_NAME: ${{ inputs.environment || 'dev' }}
+      # Remote state configuration from repository variables
+      RS_RESOURCE_GROUP: ${{ vars.RS_RESOURCE_GROUP }}
+      RS_STORAGE_ACCOUNT: ${{ vars.RS_STORAGE_ACCOUNT }}
+      RS_CONTAINER_NAME: ${{ vars.RS_CONTAINER_NAME }}
+    
+    steps:
+      # --------------------------------------------------
+      # Setup Steps
+      # --------------------------------------------------
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🔐 Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: ⚙️ Setup Azure Developer CLI
+        uses: Azure/setup-azd@v2
+      
+      - name: 🔧 Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+      
+      # --------------------------------------------------
+      # Authentication
+      # --------------------------------------------------
+      - name: 🔐 Login to Azure Developer CLI
+        run: |
+          azd auth login \
+            --client-id "${{ env.AZURE_CLIENT_ID }}" \
+            --federated-credential-provider "github" \
+            --tenant-id "${{ env.AZURE_TENANT_ID }}"
+        shell: bash
+      
+      # --------------------------------------------------
+      # Configuration
+      # --------------------------------------------------
+      - name: ⚙️ Configure azd environment
+        run: |
+          echo "🔧 Setting up azd environment: ${{ env.AZURE_ENV_NAME }}"
+          
+          # Create or select environment
+          if ! azd env list --output json | jq -e ".[] | select(.name==\"${{ env.AZURE_ENV_NAME }}\")" > /dev/null 2>&1; then
+            echo "Creating new environment: ${{ env.AZURE_ENV_NAME }}"
+            azd env new "${{ env.AZURE_ENV_NAME }}" --no-prompt
+          else
+            echo "Using existing environment: ${{ env.AZURE_ENV_NAME }}"
+            azd env select "${{ env.AZURE_ENV_NAME }}"
+          fi
+          
+          # Set remote state configuration
+          azd env set RS_RESOURCE_GROUP "${{ env.RS_RESOURCE_GROUP }}"
+          azd env set RS_STORAGE_ACCOUNT "${{ env.RS_STORAGE_ACCOUNT }}"
+          azd env set RS_CONTAINER_NAME "${{ env.RS_CONTAINER_NAME }}"
+          
+          echo "✅ Environment configured successfully"
+      
+      - name: ⚙️ Setup Terraform parameters
+        run: |
+          echo "🔧 Configuring Terraform parameters..."
+          
+          TFVARS_FILE="infra/terraform/params/main.tfvars.${{ env.AZURE_ENV_NAME }}.json"
+          
+          if [ ! -f "$TFVARS_FILE" ]; then
+            echo "❌ Error: Terraform parameters file not found: $TFVARS_FILE"
+            exit 1
+          fi
+          
+          # Read base parameters and add dynamic values
+          BASE_PARAMS=$(cat "$TFVARS_FILE")
+          
+          FINAL_PARAMS=$(echo "$BASE_PARAMS" | jq \
+            --arg env "${{ env.AZURE_ENV_NAME }}" \
+            --arg principal_type "ServicePrincipal" \
+            --arg deployed_by "${{ github.actor }}" \
+            '. + {
+              environment_name: $env,
+              principal_type: $principal_type,
+              deployed_by: $deployed_by
+            }')
+          
+          echo "$FINAL_PARAMS" > infra/terraform/main.tfvars.json
+          echo "✅ Terraform parameters configured"
+      
+      - name: 🔧 Configure Terraform backend
+        run: |
+          echo "🔧 Configuring Terraform remote state backend..."
+          
+          cat > infra/terraform/backend.tf << EOF
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ env.RS_RESOURCE_GROUP }}"
+              storage_account_name = "${{ env.RS_STORAGE_ACCOUNT }}"
+              container_name       = "${{ env.RS_CONTAINER_NAME }}"
+              key                  = "${{ env.AZURE_ENV_NAME }}.tfstate"
+              use_azuread_auth     = true
+            }
+          }
+          EOF
+          
+          echo "✅ Backend configured"
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+      
+      # --------------------------------------------------
+      # Deployment
+      # --------------------------------------------------
+      - name: 🚀 Deploy to Azure with azd
+        run: |
+          echo "🚀 Starting deployment to Azure..."
+          echo "Environment: ${{ env.AZURE_ENV_NAME }}"
+          echo "Region: $(azd env get-values | grep AZURE_LOCATION || echo 'default')"
+          
+          # Run azd up to provision infrastructure and deploy application
+          azd up --no-prompt
+          
+          echo "✅ Deployment completed successfully"
+        env:
+          ARM_CLIENT_ID: ${{ env.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ env.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          ARM_USE_OIDC: "true"
+          AZD_SKIP_INTERACTIVE: "true"
+          CI: "true"
+      
+      # --------------------------------------------------
+      # Post-Deployment
+      # --------------------------------------------------
+      - name: 📊 Extract deployment information
+        id: deployment-info
+        run: |
+          echo "🔍 Extracting deployment information..."
+          
+          # Get environment values
+          if azd env get-values > /tmp/azd-values.env 2>/dev/null; then
+            source /tmp/azd-values.env
+            
+            echo "resource_group=${AZURE_RESOURCE_GROUP:-unknown}" >> $GITHUB_OUTPUT
+            echo "container_registry=${AZURE_CONTAINER_REGISTRY_ENDPOINT:-unknown}" >> $GITHUB_OUTPUT
+            
+            # Get service endpoints
+            FRONTEND_URL=$(azd show --output json 2>/dev/null | jq -r '.services."rtaudio-client".endpoint // empty' || echo "")
+            BACKEND_URL=$(azd show --output json 2>/dev/null | jq -r '.services."rtaudio-server".endpoint // empty' || echo "")
+            
+            echo "frontend_url=${FRONTEND_URL}" >> $GITHUB_OUTPUT
+            echo "backend_url=${BACKEND_URL}" >> $GITHUB_OUTPUT
+            
+            echo "✅ Deployment information extracted"
+          else
+            echo "⚠️ Could not extract deployment information"
+            echo "resource_group=unknown" >> $GITHUB_OUTPUT
+            echo "container_registry=unknown" >> $GITHUB_OUTPUT
+            echo "frontend_url=" >> $GITHUB_OUTPUT
+            echo "backend_url=" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: 📋 Show deployment status
+        run: |
+          echo "📊 Deployment Status:"
+          azd show --output table || echo "⚠️ Could not show deployment status"
+          
+          echo ""
+          echo "🏷️ Deployment Information:"
+          echo "Environment: ${{ env.AZURE_ENV_NAME }}"
+          echo "Resource Group: ${{ steps.deployment-info.outputs.resource_group }}"
+          echo "Container Registry: ${{ steps.deployment-info.outputs.container_registry }}"
+          echo "Frontend URL: ${{ steps.deployment-info.outputs.frontend_url }}"
+          echo "Backend URL: ${{ steps.deployment-info.outputs.backend_url }}"
+      
+      # --------------------------------------------------
+      # Cleanup
+      # --------------------------------------------------
+      - name: 🚪 Logout from Azure
+        if: always()
+        run: |
+          az logout || true
+      
+      # --------------------------------------------------
+      # Summary
+      # --------------------------------------------------
+      - name: 📝 Generate deployment summary
+        if: always()
+        run: |
+          echo "## 🚀 Azure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ env.AZURE_ENV_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Resource Group | \`${{ steps.deployment-info.outputs.resource_group }}\` |" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ steps.deployment-info.outputs.frontend_url }}" ]; then
+            echo "| Frontend URL | [${{ steps.deployment-info.outputs.frontend_url }}](${{ steps.deployment-info.outputs.frontend_url }}) |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -n "${{ steps.deployment-info.outputs.backend_url }}" ]; then
+            echo "| Backend URL | [${{ steps.deployment-info.outputs.backend_url }}](${{ steps.deployment-info.outputs.backend_url }}) |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### ✅ Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Your application has been successfully deployed to Azure." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "#### 🎯 Next Steps:" >> $GITHUB_STEP_SUMMARY
+            echo "- 🌐 Visit the frontend URL to test your application" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔍 Monitor your application in the [Azure Portal](https://portal.azure.com)" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 Check application logs with \`azd monitor\`" >> $GITHUB_STEP_SUMMARY
+            echo "- 📞 Configure phone numbers in Azure Communication Services if needed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the workflow logs for more details." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -138,6 +138,20 @@ azd up   # ~15 min for complete infra and code deployment
 
 For a detailed deployment walkthrough, see [`docs/DeploymentGuide.md`](docs/DeploymentGuide.md).
 
+### **CI/CD with GitHub Actions**
+
+Automate your deployments using GitHub Actions! The repository includes a production-ready workflow that:
+- 🚀 Automatically deploys on push to `main` branch
+- 🔘 Supports manual deployment to dev, staging, or production
+- 🔐 Uses secure OIDC authentication (no secrets required)
+- 📊 Provides clear deployment summaries with URLs
+
+**Quick Setup:**
+1. Configure [Azure authentication secrets](docs/GitHubActionsDeployment.md#prerequisites) in your GitHub repository
+2. Push to `main` for automatic deployment, or trigger manually from the Actions tab
+
+For complete setup instructions and configuration details, see [`docs/GitHubActionsDeployment.md`](docs/GitHubActionsDeployment.md).
+
 ## **Contributing**
 PRs & issues welcome—see `CONTRIBUTING.md` before pushing.
 
